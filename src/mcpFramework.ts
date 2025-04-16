@@ -21,7 +21,7 @@ import {
 } from "npm:@google/generative-ai@0.21.0";
 import { makeCache } from "./cacher.ts";
 import { z, ZodSchema } from "npm:zod@3.24.2";
-import { zodToJsonSchema } from "npm:zod-to-json-schema";
+import { zodToJsonSchema } from "npm:zod-to-json-schema@3.24.5";
 import { accessGeminiToken } from "./gemini.ts";
 
 // deno-lint-ignore no-explicit-any
