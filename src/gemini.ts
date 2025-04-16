@@ -11,7 +11,7 @@ import { appendTypingInstruction, ModelOpts } from "./utils.ts";
 import { makeCache } from "./cacher.ts";
 import { zodToGeminiParameters } from "./mcpFramework.ts";
 import { extractJson, replaceSystem, structuredMsgs } from "./openai.ts";
-import { context } from "https://deno.land/x/context_inject@0.0.3/src/index.ts";
+import { context } from "npm:context-inject@0.0.3";
 
 const token = context((): string => {
     throw new Error("no gemini token injected");
