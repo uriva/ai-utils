@@ -20,7 +20,7 @@ import {
     type ModelParams,
 } from "npm:@google/generative-ai@0.21.0";
 import { makeCache } from "./cacher.ts";
-import { z, ZodSchema } from "npm:zod";
+import { z, ZodSchema } from "npm:zod@3.24.2";
 import { zodToJsonSchema } from "npm:zod-to-json-schema";
 import { accessGeminiToken } from "./gemini.ts";
 

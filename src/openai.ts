@@ -5,7 +5,7 @@ import type {
     ChatCompletionCreateParamsNonStreaming,
     ChatCompletionMessageParam,
 } from "npm:openai@4.71.1/resources/index.mjs";
-import z, { type ZodSchema } from "npm:zod";
+import z, { type ZodSchema } from "npm:zod@3.24.2";
 import { aiRefusesToAdhereTyping, ModelOpts } from "./utils.ts";
 
 import { context } from "https://deno.land/x/context_inject@0.0.3/src/index.ts";

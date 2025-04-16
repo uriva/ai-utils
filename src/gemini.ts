@@ -6,7 +6,7 @@ import {
     type ModelParams,
 } from "npm:@google/generative-ai@0.21.0";
 import type { ChatCompletionMessageParam } from "npm:openai@4.71.1/resources/index.mjs";
-import type { z, ZodSchema } from "npm:zod";
+import type { z, ZodSchema } from "npm:zod@3.24.2";
 import { appendTypingInstruction, ModelOpts } from "./utils.ts";
 import { makeCache } from "./cacher.ts";
 import { zodToGeminiParameters } from "./mcpFramework.ts";

@@ -1,5 +1,5 @@
 import Ts from "npm:typescript";
-import { z } from "npm:zod";
+import { z } from "npm:zod@3.24.2";
 
 function zodToTsType(
     schema: z.ZodTypeAny,
