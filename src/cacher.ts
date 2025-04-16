@@ -1,5 +1,5 @@
 import { context } from "https://deno.land/x/context_inject@0.0.3/src/index.ts";
-import { cache } from "npm:rmmbr";
+import { cache } from "npm:rmmbr@0.0.21";
 
 const injection = context((): string => {
     throw new Error("rmmbr token not injected");
