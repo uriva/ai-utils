@@ -11,7 +11,8 @@ const injection: {
     throw new Error("rmmbr token not injected");
 });
 
-export const injectRmmbrToken = (x: string) => injection.inject(() => x);
+export const injectRmmbrToken = (x: string): <F extends Func>(f: F) => F =>
+    injection.inject(() => x);
 
 export const makeCache = (cacheId: string) =>
     cache({

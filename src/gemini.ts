@@ -24,7 +24,8 @@ const token: {
 });
 
 export const accessGeminiToken = token.access;
-export const injectGeminiToken = (x: string) => token.inject(() => x);
+export const injectGeminiToken = (x: string): <F extends Func>(f: F) => F =>
+    token.inject(() => x);
 
 const openAiToGeminiMessage = pipe(
     map((
