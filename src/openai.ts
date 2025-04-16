@@ -1,5 +1,5 @@
 import { map, pipe, prop } from "npm:gamla@122.0.0";
-import { zodResponseFormat } from "npm:openai/helpers/zod";
+import { zodResponseFormat } from "npm:openai/helpers/zod@4.71.1";
 import { OpenAI } from "npm:openai@4.71.1";
 import type {
     ChatCompletionCreateParamsNonStreaming,
