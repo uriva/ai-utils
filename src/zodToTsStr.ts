@@ -1,4 +1,4 @@
-import Ts from "npm:typescript";
+import Ts from "npm:typescript@5.8.3";
 import { z } from "npm:zod@3.24.2";
 
 function zodToTsType(
