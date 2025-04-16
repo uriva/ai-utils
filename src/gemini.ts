@@ -13,7 +13,13 @@ import { zodToGeminiParameters } from "./mcpFramework.ts";
 import { extractJson, replaceSystem, structuredMsgs } from "./openai.ts";
 import { context } from "npm:context-inject@0.0.3";
 
-const token = context((): string => {
+// deno-lint-ignore no-explicit-any
+type Func = (...xs: any[]) => any;
+
+const token: {
+    inject: (fn: () => string) => <F extends Func>(f: F) => F;
+    access: () => string;
+} = context((): string => {
     throw new Error("no gemini token injected");
 });
 
