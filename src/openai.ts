@@ -1,6 +1,6 @@
 import { map, pipe, prop } from "npm:gamla@122.0.0";
-import { zodResponseFormat } from "npm:openai@4.71.1/helpers/zod";
 import { OpenAI } from "npm:openai@4.71.1";
+import { zodResponseFormat } from "npm:openai@4.71.1/helpers/zod";
 import type {
     ChatCompletionCreateParamsNonStreaming,
     ChatCompletionMessageParam,
@@ -16,14 +16,6 @@ const tokenInjection = context((): string => {
 });
 
 export const injectOpenAiToken = tokenInjection.inject;
-
-const cachedCall = makeCache(
-    "openAiTypedCompletion",
-)((opts: ChatCompletionCreateParamsNonStreaming) =>
-    new OpenAI({ apiKey: tokenInjection.access() }).beta.chat.completions.parse(
-        opts,
-    )
-);
 
 export const replaceSystem =
     (replacement: string) =>
@@ -95,6 +87,12 @@ export const openAiGenJsonFromConvo = async <T extends ZodSchema>(
     messages: ChatCompletionMessageParam[],
     zodType: T,
 ): Promise<z.infer<T>> => {
+    const cachedCall = makeCache(
+        "openAiTypedCompletion",
+    )((opts: ChatCompletionCreateParamsNonStreaming) =>
+        new OpenAI({ apiKey: tokenInjection.access() }).beta.chat.completions
+            .parse(opts)
+    );
     const { choices } = await cachedCall({
         model: thinking
             ? (mini ? "o3-mini" : "o1")

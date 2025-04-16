@@ -24,7 +24,7 @@ const token: {
 });
 
 export const accessGeminiToken = token.access;
-export const injectGeminiToken = token.inject;
+export const injectGeminiToken = (x: string) => token.inject(() => x);
 
 const openAiToGeminiMessage = pipe(
     map((
@@ -41,13 +41,6 @@ const openAiToGeminiMessage = pipe(
     remove(({ parts }: Content) => empty(parts)),
 );
 
-const cachedCall = makeCache(
-    "geminiCompletionResponseText",
-)((modelParams: ModelParams, req: GenerateContentRequest) =>
-    new GoogleGenerativeAI(token.access()).getGenerativeModel(modelParams)
-        .generateContent(req).then((x) => x.response.text())
-);
-
 export const geminiGenJsonFromConvo: <T extends ZodSchema>(
     { thinking, mini }: ModelOpts,
     messages: ChatCompletionMessageParam[],
@@ -60,6 +53,14 @@ export const geminiGenJsonFromConvo: <T extends ZodSchema>(
         messages: ChatCompletionMessageParam[],
         zodType: T,
     ): Promise<z.infer<T>> => {
+        const cachedCall = makeCache(
+            "geminiCompletionResponseText",
+        )((modelParams: ModelParams, req: GenerateContentRequest) =>
+            new GoogleGenerativeAI(token.access()).getGenerativeModel(
+                modelParams,
+            )
+                .generateContent(req).then((x) => x.response.text())
+        );
         if (!thinking) {
             return (JSON.parse(
                 await cachedCall(
