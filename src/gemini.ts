@@ -42,7 +42,11 @@ const cachedCall = makeCache(
         .generateContent(req).then((x) => x.response.text())
 );
 
-export const geminiGenJsonFromConvo = retry(
+export const geminiGenJsonFromConvo: <T extends ZodSchema>(
+    { thinking, mini }: ModelOpts,
+    messages: ChatCompletionMessageParam[],
+    zodType: T,
+) => Promise<z.infer<T>> = retry(
     10000,
     2,
     async <T extends ZodSchema>(
@@ -90,7 +94,7 @@ export const geminiGenJsonFromConvo = retry(
 
 export const geminiAiGenJson =
     <T extends ZodSchema>(opts: ModelOpts, systemMsg: string, zodType: T) =>
-    (userMsg: string) =>
+    (userMsg: string): Promise<z.TypeOf<T>> =>
         geminiGenJsonFromConvo(
             opts,
             structuredMsgs(systemMsg, userMsg),
