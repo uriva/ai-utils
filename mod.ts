@@ -1,14 +1,17 @@
 export { injectRmmbrToken } from "./src/cacher.ts";
 export {
     deepSeekGenJsonFromConvo,
-    injectDeepSeekToken
+    injectDeepSeekToken,
 } from "./src/deepseek.ts";
-export { geminiGenJson, injectGeminiToken } from "./src/gemini.ts";
+export {
+    geminiGenJson,
+    geminiGenJsonFromConvo,
+    injectGeminiToken,
+} from "./src/gemini.ts";
 export {
     injectOpenAiToken,
     openAiGenJson,
     openAiGenJsonFromConvo,
-    openAiMatching
+    openAiMatching,
 } from "./src/openai.ts";
 export { catchAiRefusesToAdhereToTyping, type ModelOpts } from "./src/utils.ts";
-
