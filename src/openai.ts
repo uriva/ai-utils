@@ -15,7 +15,8 @@ const tokenInjection: TokenInjection = context((): string => {
     throw new Error("no openai token injected");
 });
 
-export const injectOpenAiToken = tokenInjection.inject;
+export const injectOpenAiToken = (token: string) =>
+    tokenInjection.inject(() => token);
 
 export const replaceSystem =
     (replacement: string) =>
