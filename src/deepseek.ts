@@ -1,12 +1,11 @@
 import { context } from "npm:context-inject@0.0.3";
-import { coerce } from "npm:gamla@122.0.0";
+import { coerce, pipe } from "npm:gamla@122.0.0";
 import { OpenAI } from "npm:openai@4.71.1";
 import type {
     ChatCompletionCreateParamsNonStreaming,
     ChatCompletionMessageParam,
 } from "npm:openai@4.71.1/resources/index.mjs";
-import type z from "npm:zod@3.24.3";
-import type { ZodSchema } from "npm:zod@3.24.3";
+import z, { type ZodSchema } from "npm:zod@3.24.2";
 import { makeCache } from "./cacher.ts";
 import { extractJson } from "./openai.ts";
 import {
@@ -62,8 +61,7 @@ export const deepSeekGenJsonFromConvo = async <T extends ZodSchema>(
         new OpenAI({
             apiKey: tokenInjection.access(),
             baseURL: "https://api.deepseek.com/",
-        })
-            .beta.chat.completions.parse(opts)
+        }).beta.chat.completions.parse(opts)
     );
     const { choices } = await deepSeekCachedCall({
         model: thinking ? "deepseek-reasoner" : "deepseek-chat",
