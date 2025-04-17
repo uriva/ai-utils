@@ -67,11 +67,11 @@ export const deepSeekGenJsonFromConvo = async <T extends ZodSchema>(
     );
     const { choices } = await deepSeekCachedCall({
         model: thinking ? "deepseek-reasoner" : "deepseek-chat",
-        messages: appendTypingInstruction(zodType, "system")(
-            combineConsecutiveSystemMessages(
-                makeSureLastMessageIsUser(messages),
-            ),
-        ),
+        messages: pipe(
+            makeSureLastMessageIsUser,
+            combineConsecutiveSystemMessages,
+            appendTypingInstruction(zodType, "system"),
+        )(messages),
     });
     return extractJson(deepSeekGenJsonFromConvo)(zodType)(
         coerce(choices[0].message.content),
