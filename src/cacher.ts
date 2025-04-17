@@ -1,17 +1,12 @@
 import { context } from "npm:context-inject@0.0.3";
 import { cache } from "npm:rmmbr@0.0.21";
+import { FnToSameFn, TokenInjection } from "./utils.ts";
 
-// deno-lint-ignore no-explicit-any
-type Func = (...xs: any[]) => any;
-
-const injection: {
-    inject: (fn: () => string) => <F extends Func>(f: F) => F;
-    access: () => string;
-} = context((): string => {
+const injection: TokenInjection = context((): string => {
     throw new Error("rmmbr token not injected");
 });
 
-export const injectRmmbrToken = (x: string): <F extends Func>(f: F) => F =>
+export const injectRmmbrToken = (x: string): FnToSameFn =>
     injection.inject(() => x);
 
 export const makeCache = (cacheId: string) =>

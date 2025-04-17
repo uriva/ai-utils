@@ -6,12 +6,12 @@ import type {
     ChatCompletionMessageParam,
 } from "npm:openai@4.71.1/resources/index.mjs";
 import z, { type ZodSchema } from "npm:zod@3.24.2";
-import { aiRefusesToAdhereTyping, ModelOpts } from "./utils.ts";
+import { aiRefusesToAdhereTyping, ModelOpts, TokenInjection } from "./utils.ts";
 
 import { context } from "npm:context-inject@0.0.3";
 import { makeCache } from "./cacher.ts";
 
-const tokenInjection = context((): string => {
+const tokenInjection: TokenInjection = context((): string => {
     throw new Error("no openai token injected");
 });
 
@@ -123,9 +123,9 @@ export const structuredMsgs = (
     { role: "user", content: userMsg },
 ];
 
-export const aiGenJson =
+export const openAiGenJson =
     <T extends ZodSchema>(opts: ModelOpts, systemMsg: string, zodType: T) =>
-    (userMsg: string) =>
+    (userMsg: string): Promise<z.infer<T>> =>
         openAiGenJsonFromConvo(
             opts,
             structuredMsgs(systemMsg, userMsg),
@@ -160,7 +160,7 @@ const OutputZod = z.object({
 
 type Output = z.infer<typeof OutputZod>;
 
-export const matching = <X, Y>(
+export const openAiMatching = <X, Y>(
     opts: ModelOpts,
     reasoningNotes: string,
     xToStr: (y: X) => string,
@@ -169,7 +169,7 @@ export const matching = <X, Y>(
 (xs: X[], ys: Y[]): Promise<[X, Y, string][]> =>
     pipe(
         makePromptForMatching,
-        aiGenJson(opts, "", OutputZod),
+        openAiGenJson(opts, "", OutputZod),
         prop<Output>()("results"),
         map(([indA, indB, reasoning]: Output["results"][0]) =>
             [xs[indA], ys[indB], reasoning] satisfies [X, Y, string]
