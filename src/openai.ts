@@ -6,7 +6,12 @@ import type {
     ChatCompletionMessageParam,
 } from "npm:openai@4.71.1/resources/index.mjs";
 import z, { type ZodSchema } from "npm:zod@3.24.2";
-import { aiRefusesToAdhereTyping, ModelOpts, TokenInjection } from "./utils.ts";
+import {
+    aiRefusesToAdhereTyping,
+    FnToSameFn,
+    ModelOpts,
+    TokenInjection,
+} from "./utils.ts";
 
 import { context } from "npm:context-inject@0.0.3";
 import { makeCache } from "./cacher.ts";
@@ -15,7 +20,7 @@ const tokenInjection: TokenInjection = context((): string => {
     throw new Error("no openai token injected");
 });
 
-export const injectOpenAiToken = (token: string) =>
+export const injectOpenAiToken = (token: string): FnToSameFn =>
     tokenInjection.inject(() => token);
 
 export const replaceSystem =
