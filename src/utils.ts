@@ -1,7 +1,13 @@
-import { append, pipe, throwerCatcher } from "npm:gamla@122.0.0";
+import { ZodToTypescript } from "npm:@duplojs/zod-to-typescript@0.4.0";
+import {
+  append,
+  type EitherOutput,
+  type Func,
+  pipe,
+  throwerCatcher,
+} from "npm:gamla@124.0.0";
 import type { ChatCompletionMessageParam } from "npm:openai@4.71.1/resources/index.mjs";
 import { type ZodSchema } from "npm:zod@3.24.2";
-import { ZodToTypescript } from "npm:@duplojs/zod-to-typescript@0.4.0";
 
 export const appendTypingInstruction: <T extends ZodSchema>(
   zodType: T,
@@ -22,13 +28,13 @@ export const appendTypingInstruction: <T extends ZodSchema>(
 
 export type ModelOpts = { thinking: boolean; mini: boolean };
 
-export const {
-  thrower: aiRefusesToAdhereTyping,
-  catcher: catchAiRefusesToAdhereToTyping,
-} = throwerCatcher();
+const typeAdherenceError = throwerCatcher();
 
-// deno-lint-ignore no-explicit-any
-type Func = (...xs: any[]) => any;
+export const aiRefusesToAdhereTyping = typeAdherenceError.thrower;
+export const catchAiRefusesToAdhereToTyping: <G extends Func>(
+  fallback: G,
+) => <F extends Func>(f: F) => (...xs: Parameters<F>) => EitherOutput<F, G> =
+  typeAdherenceError.catcher;
 
 export type TokenInjection = {
   inject: (fn: () => string) => FnToSameFn;
