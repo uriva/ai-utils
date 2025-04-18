@@ -1,23 +1,24 @@
 export { injectRmmbrToken } from "./src/cacher.ts";
 export {
     deepSeekGenJsonFromConvo,
-    injectDeepSeekToken,
+    injectDeepSeekToken
 } from "./src/deepseek.ts";
 export {
     geminiGenJson,
     geminiGenJsonFromConvo,
-    injectGeminiToken,
+    injectGeminiToken
 } from "./src/gemini.ts";
+export {
+    injectAccessHistory,
+    injectReply,
+    makeBot, type BotSpec,
+    type HistoryEvent
+} from "./src/mcpFramework.ts";
 export {
     injectOpenAiToken,
     openAiGenJson,
     openAiGenJsonFromConvo,
-    openAiMatching,
+    openAiMatching
 } from "./src/openai.ts";
 export { catchAiRefusesToAdhereToTyping, type ModelOpts } from "./src/utils.ts";
-export {
-    type HistoryEvent,
-    injectAccessHistory,
-    injectReply,
-    makeBot,
-} from "./src/mcpFramework.ts";
+
