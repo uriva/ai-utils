@@ -23,6 +23,7 @@ import { makeCache } from "./cacher.ts";
 import { z, ZodSchema } from "npm:zod@3.24.2";
 import { zodToJsonSchema } from "npm:zod-to-json-schema@3.24.5";
 import { accessGeminiToken } from "./gemini.ts";
+import { SomethingInjection } from "./utils.ts";
 
 // deno-lint-ignore no-explicit-any
 const isRedundantAnyMember = (x: any) =>
@@ -180,17 +181,21 @@ export const makeBot = async (
     }
 };
 
-export const { access: getHistory, inject: injectAccessHistory } = context(
-    (): Promise<HistoryEvent[]> => {
+const historyInjection: SomethingInjection<() => Promise<HistoryEvent[]>> =
+    context((): Promise<HistoryEvent[]> => {
         throw new Error("History not injected");
-    },
-);
+    });
 
-export const { access: reply, inject: injectReply } = context(
-    (_text: string): Promise<void> => {
+export const getHistory = historyInjection.access;
+export const injectAccessHistory = historyInjection.inject;
+
+const replyInjection: SomethingInjection<(text: string) => Promise<void>> =
+    context((_text: string): Promise<void> => {
         throw new Error("Reply not injected");
-    },
-);
+    });
+
+export const reply = replyInjection.access;
+export const injectReply = replyInjection.inject;
 
 export type HistoryEvent = { text: string; from: string; time: number };
 

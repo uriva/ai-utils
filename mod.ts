@@ -15,3 +15,9 @@ export {
     openAiMatching,
 } from "./src/openai.ts";
 export { catchAiRefusesToAdhereToTyping, type ModelOpts } from "./src/utils.ts";
+export {
+    type HistoryEvent,
+    injectAccessHistory,
+    injectReply,
+    makeBot,
+} from "./src/mcpFramework.ts";
