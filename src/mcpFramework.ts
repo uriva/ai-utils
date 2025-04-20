@@ -185,7 +185,9 @@ export const makeBot = async (
     }
 };
 
-const agentSystemLog = context((_text: string) => {});
+const agentSystemLog: SomethingInjection<(text: string) => void> = context(
+    (_text: string) => {},
+);
 
 export const injectAgentSystemLog = agentSystemLog.inject;
 
