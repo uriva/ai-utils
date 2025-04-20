@@ -1,3 +1,13 @@
+import {
+    type Content,
+    FunctionCall,
+    FunctionDeclarationSchema,
+    FunctionResponsePart,
+    type GenerateContentRequest,
+    GenerateContentResult,
+    GoogleGenerativeAI,
+    type ModelParams,
+} from "npm:@google/generative-ai@0.21.0";
 import { context } from "npm:context-inject@0.0.3";
 import {
     coerce,
@@ -9,19 +19,9 @@ import {
     nonempty,
     pipe,
 } from "npm:gamla@122.0.0";
-import {
-    type Content,
-    FunctionCall,
-    FunctionDeclarationSchema,
-    FunctionResponsePart,
-    type GenerateContentRequest,
-    GenerateContentResult,
-    GoogleGenerativeAI,
-    type ModelParams,
-} from "npm:@google/generative-ai@0.21.0";
-import { makeCache } from "./cacher.ts";
-import { z, ZodSchema } from "npm:zod@3.24.2";
 import { zodToJsonSchema } from "npm:zod-to-json-schema@3.24.5";
+import { z, ZodSchema } from "npm:zod@3.24.2";
+import { makeCache } from "./cacher.ts";
 import { accessGeminiToken } from "./gemini.ts";
 import { SomethingInjection } from "./utils.ts";
 
@@ -171,15 +171,23 @@ export const makeBot = async (
         const calls = functionCalls ?? [];
         const results = await map(callToResult(actions))(calls);
         for (let i = 0; i < results.length; i++) {
-            thoughts.push({
-                role: "model",
-                parts: [{ functionCall: calls[i] }],
-            });
-            thoughts.push({ role: "user", parts: [results[i]] });
+            agentSystemLog.access(
+                `Agent called ${JSON.stringify(calls[i])} and got result ${
+                    JSON.stringify(results[i])
+                }`,
+            );
+            const call = { role: "model", parts: [{ functionCall: calls[i] }] };
+            const result = results[i];
+            thoughts.push(call);
+            thoughts.push({ role: "user", parts: [result] });
         }
         if (empty(functionCalls)) return;
     }
 };
+
+const agentSystemLog = context((_text: string) => {});
+
+export const injectAgentSystemLog = agentSystemLog.inject;
 
 const historyInjection: SomethingInjection<() => Promise<HistoryEvent[]>> =
     context((): Promise<HistoryEvent[]> => {

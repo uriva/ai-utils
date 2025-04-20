@@ -14,6 +14,7 @@ export {
     getHistory,
     type HistoryEvent,
     injectAccessHistory,
+    injectAgentSystemLog,
     injectReply,
     makeBot,
     type MessageDraft,
