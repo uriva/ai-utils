@@ -1,13 +1,13 @@
-import { ZodToTypescript } from "npm:@duplojs/zod-to-typescript@0.4.0";
+import { ZodToTypescript } from "@duplojs/zod-to-typescript";
 import {
   append,
   type EitherOutput,
   type Func,
   pipe,
   throwerCatcher,
-} from "npm:gamla@124.0.0";
-import type { ChatCompletionMessageParam } from "npm:openai@4.71.1/resources/index.mjs";
-import { type ZodSchema } from "npm:zod@3.24.2";
+} from "gamla";
+import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
+import { type ZodSchema } from "zod";
 
 export const appendTypingInstruction: <T extends ZodSchema>(
   zodType: T,
