@@ -1,0 +1,11 @@
+{
+  "imports": {
+    "gamla": "npm:gamla@124.0.0",
+    "openai": "npm:openai@4.98.0",
+    "context-inject": "npm:context-inject@0.0.3",
+    "zod": "npm:zod@3.24.2",
+    "@google/generative-ai": "npm:@google/generative-ai@0.21.0",
+    "rmmbr": "npm:rmmbr@0.0.21",
+    "@duplojs/zod-to-typescript": "npm:@duplojs/zod-to-typescript@0.4.0"
+  }
+}
