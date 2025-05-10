@@ -99,7 +99,7 @@ export const openAiGenJsonFromConvo = async <T extends ZodSchema>(
   const { choices } = await cachedCall({
     model: thinking
       ? (mini ? "o4-mini" : "o3")
-      : (mini ? "gpt-4o-mini" : "gpt-"),
+      : (mini ? "gpt-4.1-mini" : "gpt-4.1"),
     messages: messages,
     response_format: pipe(zodResponseFormat, cleanSchema)(
       zodType,

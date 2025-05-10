@@ -1,12 +1,13 @@
+import { coerce, pipe } from "gamla";
+import { assertEquals } from "jsr:@std/assert";
+import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
+import { waitAllWrites } from "rmmbr";
+import z from "zod";
 import {
   injectOpenAiToken,
   injectRmmbrToken,
   openAiGenJsonFromConvo,
 } from "./mod.ts";
-import z from "zod";
-import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
-import { assert, assertObjectMatch } from "jsr:@std/assert";
-import { coerce, pipe } from "gamla";
 
 Deno.test(
   "openAiGenJsonFromConvo returns valid result for hello schema",
@@ -19,20 +20,21 @@ Deno.test(
       { role: "system", content: "Say hello as JSON." },
       { role: "user", content: "hello" },
     ];
-    let result;
-    try {
-      result = await openAiGenJsonFromConvo(
-        { thinking: false, mini: true },
+    for (
+      const [thinking, mini] of [
+        [false, false],
+        [false, true],
+        [true, false],
+        [true, true],
+      ]
+    ) {
+      const result = await openAiGenJsonFromConvo(
+        { thinking, mini },
         messages,
         schema,
       );
-    } catch (_e) {
-      // If you expect a real API key, this will fail with test-token
-      result = null;
+      assertEquals(result, { hello: result.hello });
     }
-    assert(result == null || typeof result.hello === "string");
-    if (result) {
-      assertObjectMatch(result, { hello: result.hello });
-    }
+    await waitAllWrites();
   }),
 );
