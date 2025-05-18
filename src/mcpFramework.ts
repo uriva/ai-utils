@@ -1,13 +1,3 @@
-import {
-  type Content,
-  FunctionCall,
-  FunctionDeclarationSchema,
-  FunctionResponsePart,
-  type GenerateContentRequest,
-  GenerateContentResult,
-  GoogleGenerativeAI,
-  type ModelParams,
-} from "npm:@google/generative-ai@0.21.0";
 import { context } from "context-inject";
 import {
   coerce,
@@ -19,11 +9,21 @@ import {
   nonempty,
   pipe,
 } from "gamla";
+import {
+  type Content,
+  type FunctionCall,
+  type FunctionDeclarationSchema,
+  type FunctionResponsePart,
+  type GenerateContentRequest,
+  type GenerateContentResult,
+  GoogleGenerativeAI,
+  type ModelParams,
+} from "@google/generative-ai";
 import { zodToJsonSchema } from "npm:zod-to-json-schema@3.24.5";
-import { z, ZodSchema } from "zod";
+import type { z, ZodSchema } from "zod";
 import { makeCache } from "./cacher.ts";
 import { accessGeminiToken } from "./gemini.ts";
-import { SomethingInjection } from "./utils.ts";
+import type { SomethingInjection } from "./utils.ts";
 
 // deno-lint-ignore no-explicit-any
 const isRedundantAnyMember = (x: any) =>
@@ -171,9 +171,10 @@ export const makeBot = async (
     const results = await map(callToResult(actions))(calls);
     for (let i = 0; i < results.length; i++) {
       agentSystemLog.access(
-        `Agent called ${JSON.stringify(calls[i])} and got result ${
-          JSON.stringify(results[i])
-        }`,
+        [
+          `Agent called tool: ${JSON.stringify(calls[i])}`,
+          `Got result:\n${JSON.stringify(results[i], null, 2)}`,
+        ].join("\n\n"),
       );
       const call = { role: "model", parts: [{ functionCall: calls[i] }] };
       const result = results[i];
