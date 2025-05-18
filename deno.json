@@ -1,8 +1,8 @@
 {
   "name": "@uri/ai-utils",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "license": "MIT",
-  "exports": "./mod.ts"
+  "exports": "./mod.ts",
   "imports": {
     "gamla": "npm:gamla@124.0.0",
     "openai": "npm:openai@4.98.0",
