@@ -172,7 +172,7 @@ export const makeBot = async (
     for (let i = 0; i < results.length; i++) {
       agentSystemLog.access(
         [
-          `Agent called tool: ${JSON.stringify(calls[i])}`,
+          `Agent called tool:\n${JSON.stringify(calls[i], null, 2)}`,
           `Got result:\n${JSON.stringify(results[i], null, 2)}`,
         ].join("\n\n"),
       );
