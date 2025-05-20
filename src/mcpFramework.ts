@@ -2,12 +2,14 @@ import { context } from "context-inject";
 import {
   coerce,
   empty,
+  Func,
   init,
   last,
   logAfter,
   map,
   nonempty,
   pipe,
+  sideEffect,
 } from "gamla";
 import {
   type Content,
@@ -83,10 +85,15 @@ export type Action<T extends ZodSchema, O> = {
   handler: (params: z.infer<T>) => Promise<O>;
 };
 
+type GeminiOutput = {
+  text: string;
+  functionCalls: FunctionCall[];
+};
+
 const callGemini = (modelParams: ModelParams) =>
   makeCache("gemini response with function calls")((
     req: GenerateContentRequest,
-  ) =>
+  ): Promise<GeminiOutput> =>
     new GoogleGenerativeAI(accessGeminiToken())
       .getGenerativeModel(modelParams).generateContent(req).then((
         { response }: GenerateContentResult,
@@ -148,7 +155,10 @@ const callToResult =
     };
   };
 
-export const makeBot = async (
+const debugLogsAfter = <F extends Func>(f: F) =>
+  pipe(f, sideEffect(debugLogs.access<Awaited<ReturnType<F>>>));
+
+export const runBot = async (
   { actions, prompt, botNameInHistory }: BotSpec,
 ) => {
   let c = 0;
@@ -161,11 +171,9 @@ export const makeBot = async (
     c++;
     if (c > 5) throw new Error("Too many iterations");
     const { text, functionCalls } = await pipe(
-      geminiInput,
-      logAfter(callGemini({ model: "gemini-2.5-pro-preview-03-25" })),
+      debugLogsAfter(geminiInput),
+      debugLogsAfter(callGemini({ model: "gemini-2.5-pro-preview-03-25" })),
     )(prompt, actions, [...contents, ...thoughts]);
-    console.log("model replied", text);
-    console.log("model called", JSON.stringify(functionCalls, null, 2));
     if (text) await reply(text);
     const calls = functionCalls ?? [];
     const results = await map(callToResult(actions))(calls);
@@ -188,6 +196,12 @@ export const makeBot = async (
 const agentSystemLog: SomethingInjection<(text: string) => void> = context(
   (_text: string) => {},
 );
+
+const debugLogs: SomethingInjection<<T>(t: T) => void> = context(
+  <T>(_: T) => {},
+);
+
+export const injectedDebugLogs = debugLogs.inject;
 
 export const injectAgentSystemLog = agentSystemLog.inject;
 
