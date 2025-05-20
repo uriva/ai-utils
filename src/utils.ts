@@ -7,7 +7,7 @@ import {
   throwerCatcher,
 } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
-import { type ZodSchema } from "zod";
+import type { ZodSchema } from "zod";
 
 export const appendTypingInstruction: <T extends ZodSchema>(
   zodType: T,

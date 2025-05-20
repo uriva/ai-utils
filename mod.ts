@@ -15,9 +15,10 @@ export {
   type HistoryEvent,
   injectAccessHistory,
   injectAgentSystemLog,
+  injectedDebugLogs,
   injectReply,
-  makeBot,
   type MessageDraft,
+  runBot,
   systemUser,
 } from "./src/mcpFramework.ts";
 export {
