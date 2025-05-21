@@ -4,7 +4,6 @@ import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { waitAllWrites } from "rmmbr";
 import z from "zod";
 import {
-  geminiGenJson,
   geminiGenJsonFromConvo,
   injectAccessHistory,
   injectAgentSystemLog,
