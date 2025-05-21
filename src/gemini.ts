@@ -47,7 +47,7 @@ export const geminiGenJsonFromConvo: <T extends ZodSchema>(
   10000,
   2,
   async <T extends ZodSchema>(
-    { thinking, mini }: ModelOpts,
+    { mini }: ModelOpts,
     messages: ChatCompletionMessageParam[],
     zodType: T,
   ): Promise<z.infer<T>> => {
@@ -59,41 +59,27 @@ export const geminiGenJsonFromConvo: <T extends ZodSchema>(
       )
         .generateContent(req).then((x) => x.response.text())
     );
-    if (!thinking) {
-      return (JSON.parse(
-        await cachedCall(
-          {
-            model: mini
-              ? "gemini-2.5-pro-preview-03-25"
-              : "gemini-2.5-pro-preview-03-25",
-            generationConfig: {
-              responseMimeType: "application/json",
-              responseSchema: zodToGeminiParameters(zodType),
-            },
-          },
-          {
-            contents: pipe(
-              map(replaceSystem("assistant")),
-              openAiToGeminiMessage,
-            )(
-              messages,
-            ),
-          },
-        ),
-      )) as z.infer<T>;
-    }
-    return extractJson(geminiGenJsonFromConvo)(zodType)(
+    return (JSON.parse(
       await cachedCall(
-        { model: "gemini-2.5-pro-preview-03-25" },
+        {
+          model: mini
+            ? "gemini-2.5-flash-preview-05-20"
+            : "gemini-2.5-pro-preview-05-06",
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: zodToGeminiParameters(zodType),
+          },
+        },
         {
           contents: pipe(
             map(replaceSystem("assistant")),
-            appendTypingInstruction(zodType, "assistant"),
             openAiToGeminiMessage,
-          )(messages),
+          )(
+            messages,
+          ),
         },
       ),
-    );
+    )) as z.infer<T>;
   },
 );
 
