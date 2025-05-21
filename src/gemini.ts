@@ -10,13 +10,8 @@ import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import type { z, ZodSchema } from "zod";
 import { makeCache } from "./cacher.ts";
 import { zodToGeminiParameters } from "./mcpFramework.ts";
-import { extractJson, replaceSystem, structuredMsgs } from "./openai.ts";
-import {
-  appendTypingInstruction,
-  FnToSameFn,
-  ModelOpts,
-  TokenInjection,
-} from "./utils.ts";
+import { replaceSystem, structuredMsgs } from "./openai.ts";
+import type { FnToSameFn, ModelOpts, TokenInjection } from "./utils.ts";
 
 const tokenInjection: TokenInjection = context((): string => {
   throw new Error("no gemini token injected");
@@ -59,7 +54,7 @@ export const geminiGenJsonFromConvo: <T extends ZodSchema>(
       )
         .generateContent(req).then((x) => x.response.text())
     );
-    return (JSON.parse(
+    return JSON.parse(
       await cachedCall(
         {
           model: mini
@@ -74,12 +69,10 @@ export const geminiGenJsonFromConvo: <T extends ZodSchema>(
           contents: pipe(
             map(replaceSystem("assistant")),
             openAiToGeminiMessage,
-          )(
-            messages,
-          ),
+          )(messages),
         },
       ),
-    )) as z.infer<T>;
+    );
   },
 );
 
