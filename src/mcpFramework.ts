@@ -1,16 +1,3 @@
-import { context } from "context-inject";
-import {
-  coerce,
-  empty,
-  Func,
-  init,
-  last,
-  logAfter,
-  map,
-  nonempty,
-  pipe,
-  sideEffect,
-} from "gamla";
 import {
   type Content,
   type FunctionCall,
@@ -21,6 +8,18 @@ import {
   GoogleGenerativeAI,
   type ModelParams,
 } from "@google/generative-ai";
+import { context } from "context-inject";
+import {
+  coerce,
+  empty,
+  type Func,
+  init,
+  last,
+  map,
+  nonempty,
+  pipe,
+  sideEffect,
+} from "gamla";
 import { zodToJsonSchema } from "npm:zod-to-json-schema@3.24.5";
 import type { z, ZodSchema } from "zod";
 import { makeCache } from "./cacher.ts";

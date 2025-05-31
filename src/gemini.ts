@@ -5,7 +5,7 @@ import {
   type ModelParams,
 } from "@google/generative-ai";
 import { context } from "context-inject";
-import { coerce, empty, map, pipe, remove, retry } from "gamla";
+import { coerce, empty, map, pipe, remove } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import type { z, ZodSchema } from "zod";
 import { makeCache } from "./cacher.ts";
@@ -22,14 +22,11 @@ export const injectGeminiToken = (token: string): FnToSameFn =>
   tokenInjection.inject(() => token);
 
 const openAiToGeminiMessage = pipe(
-  map((
-    { role, content }: ChatCompletionMessageParam,
-  ): Content => ({
+  map(({ role, content }: ChatCompletionMessageParam): Content => ({
     role: role === "user" ? role : "model",
     parts: [{
       text: typeof content === "string" ? content : coerce(content?.toString()),
-    }]
-      .filter((x) => x.text),
+    }].filter((x) => x.text),
   })),
   remove(({ parts }: Content) => empty(parts)),
 );
@@ -38,43 +35,38 @@ export const geminiGenJsonFromConvo: <T extends ZodSchema>(
   { thinking, mini }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
-) => Promise<z.infer<T>> = retry(
-  10000,
-  2,
-  async <T extends ZodSchema>(
-    { mini }: ModelOpts,
-    messages: ChatCompletionMessageParam[],
-    zodType: T,
-  ): Promise<z.infer<T>> => {
-    const cachedCall = makeCache(
-      "geminiCompletionResponseText",
-    )((modelParams: ModelParams, req: GenerateContentRequest) =>
-      new GoogleGenerativeAI(tokenInjection.access()).getGenerativeModel(
-        modelParams,
-      )
-        .generateContent(req).then((x) => x.response.text())
-    );
-    return JSON.parse(
-      await cachedCall(
-        {
-          model: mini
-            ? "gemini-2.5-flash-preview-05-20"
-            : "gemini-2.5-pro-preview-05-06",
-          generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: zodToGeminiParameters(zodType),
-          },
+) => Promise<z.infer<T>> = async <T extends ZodSchema>(
+  { mini }: ModelOpts,
+  messages: ChatCompletionMessageParam[],
+  zodType: T,
+): Promise<z.infer<T>> => {
+  const cachedCall = makeCache(
+    "geminiCompletionResponseText",
+  )((modelParams: ModelParams, req: GenerateContentRequest) =>
+    new GoogleGenerativeAI(tokenInjection.access()).getGenerativeModel(
+      modelParams,
+    ).generateContent(req).then((x) => x.response.text())
+  );
+  return JSON.parse(
+    await cachedCall(
+      {
+        model: mini
+          ? "gemini-2.5-flash-preview-05-20"
+          : "gemini-2.5-pro-preview-05-06",
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: zodToGeminiParameters(zodType),
         },
-        {
-          contents: pipe(
-            map(replaceSystem("assistant")),
-            openAiToGeminiMessage,
-          )(messages),
-        },
-      ),
-    );
-  },
-);
+      },
+      {
+        contents: pipe(
+          map(replaceSystem("assistant")),
+          openAiToGeminiMessage,
+        )(messages),
+      },
+    ),
+  );
+};
 
 export const geminiGenJson =
   <T extends ZodSchema>(opts: ModelOpts, systemMsg: string, zodType: T) =>
