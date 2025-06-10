@@ -5,14 +5,15 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionMessageParam,
 } from "openai/resources/index.mjs";
-import z, { type ZodSchema } from "zod";
+import type z from "zod";
+import type { ZodSchema } from "zod";
 import { makeCache } from "./cacher.ts";
 import { extractJson } from "./openai.ts";
 import {
   appendTypingInstruction,
-  FnToSameFn,
-  ModelOpts,
-  TokenInjection,
+  type FnToSameFn,
+  type ModelOpts,
+  type TokenInjection,
 } from "./utils.ts";
 
 const tokenInjection: TokenInjection = context((): string => {

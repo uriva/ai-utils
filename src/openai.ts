@@ -10,9 +10,9 @@ import z, { type ZodSchema } from "zod";
 import { makeCache } from "./cacher.ts";
 import {
   aiRefusesToAdhereTyping,
-  FnToSameFn,
-  ModelOpts,
-  TokenInjection,
+  type FnToSameFn,
+  type ModelOpts,
+  type TokenInjection,
 } from "./utils.ts";
 
 const tokenInjection: TokenInjection = context((): string => {
@@ -100,7 +100,7 @@ export const openAiGenJsonFromConvo = async <T extends ZodSchema>(
     model: thinking
       ? (mini ? "o4-mini" : "o3")
       : (mini ? "gpt-4.1-mini" : "gpt-4.1"),
-    messages: messages,
+    messages,
     response_format: pipe(zodResponseFormat, cleanSchema)(
       zodType,
       "event-bot-response",
