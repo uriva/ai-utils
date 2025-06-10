@@ -5,14 +5,15 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionMessageParam,
 } from "openai/resources/index.mjs";
-import z, { type ZodSchema } from "zod";
+import type z from "zod/v4";
+import type { ZodType } from "zod/v4";
 import { makeCache } from "./cacher.ts";
 import { extractJson } from "./openai.ts";
 import {
   appendTypingInstruction,
-  FnToSameFn,
-  ModelOpts,
-  TokenInjection,
+  type FnToSameFn,
+  type ModelOpts,
+  type TokenInjection,
 } from "./utils.ts";
 
 const tokenInjection: TokenInjection = context((): string => {
@@ -49,7 +50,7 @@ const makeSureLastMessageIsUser = (
   return [...messages, { role: "user", content: "" }];
 };
 
-export const deepSeekGenJsonFromConvo = async <T extends ZodSchema>(
+export const deepSeekGenJsonFromConvo = async <T extends ZodType>(
   { thinking }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
@@ -60,7 +61,7 @@ export const deepSeekGenJsonFromConvo = async <T extends ZodSchema>(
     new OpenAI({
       apiKey: tokenInjection.access(),
       baseURL: "https://api.deepseek.com/",
-    }).beta.chat.completions.parse(opts)
+    }).chat.completions.parse(opts)
   );
   const { choices } = await deepSeekCachedCall({
     model: thinking ? "deepseek-reasoner" : "deepseek-chat",
@@ -70,7 +71,7 @@ export const deepSeekGenJsonFromConvo = async <T extends ZodSchema>(
       appendTypingInstruction(zodType, "system"),
     )(messages),
   });
-  return extractJson(deepSeekGenJsonFromConvo)(zodType)(
+  return extractJson<T>(deepSeekGenJsonFromConvo)(zodType)(
     coerce(choices[0].message.content),
   );
 };

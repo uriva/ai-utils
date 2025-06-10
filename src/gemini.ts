@@ -7,7 +7,7 @@ import {
 import { context } from "context-inject";
 import { coerce, empty, map, pipe, remove } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
-import type { z, ZodSchema } from "zod";
+import type { z, ZodSchema } from "zod/v4";
 import { makeCache } from "./cacher.ts";
 import { zodToGeminiParameters } from "./mcpFramework.ts";
 import { replaceSystem, structuredMsgs } from "./openai.ts";
@@ -51,7 +51,7 @@ export const geminiGenJsonFromConvo: <T extends ZodSchema>(
     await cachedCall(
       {
         model: mini
-          ? "gemini-2.5-flash-preview-05-20"
+          ? "gemini-2.5-flash"
           : "gemini-2.5-pro-preview-05-06",
         generationConfig: {
           responseMimeType: "application/json",

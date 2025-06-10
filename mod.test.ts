@@ -2,7 +2,7 @@ import { pipe } from "gamla";
 import { assert, assertEquals } from "jsr:@std/assert";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { waitAllWrites } from "rmmbr";
-import z from "zod";
+import { z } from "zod/v4";
 import {
   geminiGenJsonFromConvo,
   injectAccessHistory,

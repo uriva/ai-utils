@@ -1,4 +1,3 @@
-import { ZodToTypescript } from "@duplojs/zod-to-typescript";
 import {
   append,
   type EitherOutput,
@@ -7,20 +6,20 @@ import {
   throwerCatcher,
 } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
-import type { ZodSchema } from "zod";
+import { toJSONSchema, type ZodType } from "zod/v4";
 
-export const appendTypingInstruction: <T extends ZodSchema>(
+export const appendTypingInstruction: <T extends ZodType>(
   zodType: T,
   role: "system" | "user" | "assistant",
 ) => (arr: ChatCompletionMessageParam[]) => ChatCompletionMessageParam[] = pipe(
-  <T extends ZodSchema>(
+  <T extends ZodType>(
     zodType: T,
     role: "system" | "user" | "assistant",
   ) => ({
     role,
     content:
       `The output should be a valid json, as short as possible, no redundant whitespace, adhering to this typing: ${
-        ZodToTypescript.convert(zodType, { name: "Schema" })
+        JSON.stringify(toJSONSchema(zodType))
       }`,
   }),
   append<ChatCompletionMessageParam>,
