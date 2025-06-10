@@ -6,13 +6,14 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionMessageParam,
 } from "openai/resources/index.mjs";
-import z, { type ZodSchema } from "zod";
+import type {} from "zod/v4";
+import z, { type ZodType } from "zod/v4";
 import { makeCache } from "./cacher.ts";
 import {
   aiRefusesToAdhereTyping,
-  FnToSameFn,
-  ModelOpts,
-  TokenInjection,
+  type FnToSameFn,
+  type ModelOpts,
+  type TokenInjection,
 } from "./utils.ts";
 
 const tokenInjection: TokenInjection = context((): string => {
@@ -36,14 +37,14 @@ const extractLastMarkdownJsonBlock = (text: string): string | null => {
   return matches.length > 0 ? matches[matches.length - 1][1].trim() : null;
 };
 
-type StructuredInference = <T extends ZodSchema>(
+type StructuredInference = <T extends ZodType>(
   opts: ModelOpts,
   msgs: ChatCompletionMessageParam[],
   zodType: T,
 ) => Promise<z.infer<T>>;
 
 export const extractJson =
-  <T extends ZodSchema>(genMethod: StructuredInference) =>
+  <T extends ZodType>(genMethod: StructuredInference) =>
   (typing: T) =>
   async (text: string): Promise<z.infer<T>> => {
     const jsonText = extractLastMarkdownJsonBlock(text) ?? text;
@@ -85,7 +86,10 @@ const cleanSchema = (
   return schema;
 };
 
-export const openAiGenJsonFromConvo = async <T extends ZodSchema>(
+export const openAiGenJsonFromConvo = async <
+  // deno-lint-ignore no-explicit-any
+  T extends ZodType<any, any, any>,
+>(
   { mini, thinking }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
@@ -93,19 +97,16 @@ export const openAiGenJsonFromConvo = async <T extends ZodSchema>(
   const cachedCall = makeCache(
     "openAiTypedCompletion",
   )((opts: ChatCompletionCreateParamsNonStreaming) =>
-    new OpenAI({ apiKey: tokenInjection.access() }).beta.chat.completions
+    new OpenAI({ apiKey: tokenInjection.access() }).chat.completions
       .parse(opts)
   );
   const { choices } = await cachedCall({
     model: thinking
       ? (mini ? "o4-mini" : "o3")
       : (mini ? "gpt-4.1-mini" : "gpt-4.1"),
-    messages: messages,
-    response_format: pipe(zodResponseFormat, cleanSchema)(
-      zodType,
-      "event-bot-response",
-      {},
-    ),
+    messages,
+    // @ts-expect-error not sure why this is not working
+    response_format: zodResponseFormat(zodType, "event-bot-response"),
   });
   if (!choices[0].message.content) {
     aiRefusesToAdhereTyping();
@@ -125,7 +126,7 @@ export const structuredMsgs = (
 ];
 
 export const openAiGenJson =
-  <T extends ZodSchema>(opts: ModelOpts, systemMsg: string, zodType: T) =>
+  <T extends ZodType>(opts: ModelOpts, systemMsg: string, zodType: T) =>
   (userMsg: string): Promise<z.infer<T>> =>
     openAiGenJsonFromConvo(
       opts,

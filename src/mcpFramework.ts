@@ -21,7 +21,7 @@ import {
   sideEffect,
 } from "gamla";
 import { zodToJsonSchema } from "npm:zod-to-json-schema@3.24.5";
-import type { z, ZodSchema } from "zod";
+import type { z, ZodType } from "zod/v4";
 import { makeCache } from "./cacher.ts";
 import { accessGeminiToken } from "./gemini.ts";
 import type { SomethingInjection } from "./utils.ts";
@@ -77,7 +77,7 @@ export const zodToGeminiParameters = (zodObj: any) => {
 
 export const systemUser = "system";
 
-export type Action<T extends ZodSchema, O> = {
+export type Action<T extends ZodType, O> = {
   description: string;
   name: string;
   parameters: T;
@@ -138,7 +138,7 @@ const geminiInput = (
 const callToResult =
   // deno-lint-ignore no-explicit-any
   (actions: Action<any, any>[]) =>
-  async <T extends ZodSchema, O>(
+  async <T extends ZodType, O>(
     { name, args }: FunctionCall,
   ): Promise<FunctionResponsePart> => {
     const { handler, parameters }: Action<T, O> = coerce(
@@ -148,7 +148,7 @@ const callToResult =
       functionResponse: {
         name,
         response: {
-          result: await handler(parameters.parse(args) as T),
+          result: await handler(parameters.parse(args)),
         },
       },
     };
