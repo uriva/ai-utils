@@ -14,9 +14,7 @@ export {
   injectAccessHistory,
   injectedDebugLogs,
   injectOutputEvent,
-  injectReply,
-  type MessageDraft,
-  outputEvent as getHistory,
+  outputEvent,
   runBot,
   systemUser,
 } from "./src/geminiAgent.ts";
