@@ -11,7 +11,6 @@ import {
   injectGeminiToken,
   injectOpenAiToken,
   injectOutputEvent,
-  injectReply,
   injectRmmbrToken,
   openAiGenJsonFromConvo,
   runBot,
@@ -58,7 +57,6 @@ Deno.test(
 Deno.test(
   "runBot calls the tool and replies with its output",
   injectSecrets(async () => {
-    let replyText = "";
     const mockHistory: Content[] = [{
       role: "user",
       parts: [{ text: "please use the tool" }],
@@ -70,10 +68,6 @@ Deno.test(
         return Promise.resolve();
       }),
       injectAccessHistory(() => Promise.resolve(mockHistory)),
-      injectReply((text: string) => {
-        replyText = text;
-        return Promise.resolve();
-      }),
       injectedDebugLogs(() => {}),
     );
     const toolResult = "43212e8e-4c29-4a3c-aba2-723e668b5537";
@@ -87,6 +81,10 @@ Deno.test(
       }],
       prompt: `Always use ${toolName} tool to answer the user.`,
     });
-    assert(replyText.includes(toolResult));
+    assert(
+      mockHistory.some((event) =>
+        event.parts.some((part) => part.text?.includes(toolResult))
+      ),
+    );
   }),
 );

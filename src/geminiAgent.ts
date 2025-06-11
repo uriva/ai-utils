@@ -147,7 +147,7 @@ export const runBot = async ({ actions, prompt }: BotSpec) => {
       debugLogsAfter(geminiInput),
       debugLogsAfter(callGemini({ model: "gemini-2.5-pro-preview-03-25" })),
     )(prompt, actions, await getHistory());
-    if (text) await reply(text);
+    if (text) await outputEvent({ role: "model", parts: [{ text }] });
     const calls = functionCalls ?? [];
     const results = await map(callToResult(actions))(calls);
     for (let i = 0; i < results.length; i++) {
@@ -180,13 +180,3 @@ const historyInjection: SomethingInjection<() => Promise<Content[]>> = context(
 
 export const getHistory = historyInjection.access;
 export const injectAccessHistory = historyInjection.inject;
-
-const replyInjection: SomethingInjection<(text: string) => Promise<void>> =
-  context((_text: string): Promise<void> => {
-    throw new Error("Reply not injected");
-  });
-
-export const reply = replyInjection.access;
-export const injectReply = replyInjection.inject;
-
-export type MessageDraft = { from: string; text: string };
