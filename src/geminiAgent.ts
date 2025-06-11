@@ -13,7 +13,7 @@ import { coerce, empty, type Func, map, pipe, sideEffect } from "gamla";
 import { zodToJsonSchema } from "npm:zod-to-json-schema@3.24.5";
 import type { z, ZodSchema } from "zod";
 import { makeCache } from "./cacher.ts";
-import { accessGeminiToken } from "./gemini.ts";
+import { accessGeminiToken, geminiProVersion } from "./gemini.ts";
 import type { SomethingInjection } from "./utils.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -145,7 +145,7 @@ export const runBot = async ({ actions, prompt }: BotSpec) => {
     if (c > 5) throw new Error("Too many iterations");
     const { text, functionCalls } = await pipe(
       debugLogsAfter(geminiInput),
-      debugLogsAfter(callGemini({ model: "gemini-2.5-pro-preview-03-25" })),
+      debugLogsAfter(callGemini({ model: geminiProVersion })),
     )(prompt, actions, await getHistory());
     if (text) await outputEvent({ role: "model", parts: [{ text }] });
     const calls = functionCalls ?? [];
