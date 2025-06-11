@@ -11,13 +11,12 @@ export {
 export {
   type Action,
   type BotSpec,
-  getHistory,
-  type HistoryEvent,
   injectAccessHistory,
-  injectAgentSystemLog,
   injectedDebugLogs,
+  injectOutputEvent,
   injectReply,
   type MessageDraft,
+  outputEvent as getHistory,
   runBot,
   systemUser,
 } from "./src/geminiAgent.ts";
