@@ -9,7 +9,7 @@ import { coerce, empty, map, pipe, remove } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import type { z, ZodSchema } from "zod";
 import { makeCache } from "./cacher.ts";
-import { zodToGeminiParameters } from "./mcpFramework.ts";
+import { zodToGeminiParameters } from "./geminiAgent.ts";
 import { replaceSystem, structuredMsgs } from "./openai.ts";
 import type { FnToSameFn, ModelOpts, TokenInjection } from "./utils.ts";
 

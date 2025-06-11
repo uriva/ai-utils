@@ -20,7 +20,7 @@ export {
   type MessageDraft,
   runBot,
   systemUser,
-} from "./src/mcpFramework.ts";
+} from "./src/geminiAgent.ts";
 export {
   injectOpenAiToken,
   openAiGenJson,
