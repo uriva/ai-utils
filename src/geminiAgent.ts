@@ -10,8 +10,7 @@ import {
 } from "@google/generative-ai";
 import { context } from "context-inject";
 import { coerce, empty, type Func, map, pipe, sideEffect } from "gamla";
-import { zodToJsonSchema } from "npm:zod-to-json-schema@3.24.5";
-import type { z, ZodType } from "zod/v4";
+import { z, type ZodType } from "zod/v4";
 import { makeCache } from "./cacher.ts";
 import { accessGeminiToken, geminiProVersion } from "./gemini.ts";
 import type { SomethingInjection } from "./utils.ts";
@@ -59,7 +58,7 @@ const removeAdditionalProperties = <T>(obj: Record<string, any>) => {
 
 // deno-lint-ignore no-explicit-any
 export const zodToGeminiParameters = (zodObj: any) => {
-  const jsonSchema = removeAdditionalProperties(zodToJsonSchema(zodObj));
+  const jsonSchema = removeAdditionalProperties(z.toJSONSchema(zodObj));
   // deno-lint-ignore no-unused-vars
   const { $schema, ...rest } = jsonSchema;
   return rest as FunctionDeclarationSchema;
