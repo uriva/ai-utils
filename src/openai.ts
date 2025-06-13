@@ -1,12 +1,10 @@
 import { context } from "context-inject";
 import { map, pipe, prop } from "gamla";
 import { OpenAI } from "openai";
-import { zodResponseFormat } from "openai/helpers/zod";
 import type {
   ChatCompletionCreateParamsNonStreaming,
   ChatCompletionMessageParam,
 } from "openai/resources/index.mjs";
-import type {} from "zod/v4";
 import z, { type ZodType } from "zod/v4";
 import { makeCache } from "./cacher.ts";
 import {
@@ -59,33 +57,6 @@ export const extractJson =
     }
   };
 
-// https://github.com/openai/openai-node/issues/1365
-const cleanSchema = (
-  schema: ReturnType<typeof zodResponseFormat>,
-): ReturnType<typeof zodResponseFormat> => {
-  if (Array.isArray(schema)) {
-    // @ts-expect-error ignore
-    return schema
-      .map(cleanSchema)
-      .filter((item) => JSON.stringify(item) !== JSON.stringify({ not: {} }));
-  }
-
-  if (typeof schema === "object" && schema !== null) {
-    return Object.fromEntries(
-      Object.entries(schema)
-        .map((
-          [key, value],
-        ) => [
-          key,
-          key === "anyOf" ? cleanSchema(value) : cleanSchema(value),
-        ])
-        .filter(([, value]) => value !== undefined),
-    );
-  }
-
-  return schema;
-};
-
 export const openAiGenJsonFromConvo = async <
   // deno-lint-ignore no-explicit-any
   T extends ZodType<any, any, any>,
@@ -105,8 +76,14 @@ export const openAiGenJsonFromConvo = async <
       ? (mini ? "o4-mini" : "o3")
       : (mini ? "gpt-4.1-mini" : "gpt-4.1"),
     messages,
-    // @ts-expect-error not sure why this is not working
-    response_format: zodResponseFormat(zodType, "event-bot-response"),
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "structured-response",
+        strict: true,
+        schema: z.toJSONSchema(zodType),
+      },
+    },
   });
   if (!choices[0].message.content) {
     aiRefusesToAdhereTyping();

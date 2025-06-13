@@ -33,10 +33,7 @@ Deno.test(
       { role: "user", content: "hello" },
     ];
     for (
-      const service of [
-        openAiGenJsonFromConvo,
-        geminiGenJsonFromConvo,
-      ]
+      const service of [openAiGenJsonFromConvo, geminiGenJsonFromConvo]
     ) {
       for (
         const [thinking, mini] of [
@@ -47,6 +44,7 @@ Deno.test(
         ]
       ) {
         const result = await service({ thinking, mini }, messages, schema);
+        console.log(result);
         assertEquals(result, { hello: result.hello });
       }
     }
