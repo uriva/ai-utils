@@ -1,29 +1,4 @@
-import {
-  append,
-  type EitherOutput,
-  type Func,
-  pipe,
-  throwerCatcher,
-} from "gamla";
-import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
-import { toJSONSchema, type ZodType } from "zod/v4";
-
-export const appendTypingInstruction: <T extends ZodType>(
-  zodType: T,
-  role: "system" | "user" | "assistant",
-) => (arr: ChatCompletionMessageParam[]) => ChatCompletionMessageParam[] = pipe(
-  <T extends ZodType>(
-    zodType: T,
-    role: "system" | "user" | "assistant",
-  ) => ({
-    role,
-    content:
-      `The output should be a valid json, as short as possible, no redundant whitespace, adhering to this typing: ${
-        JSON.stringify(toJSONSchema(zodType))
-      }`,
-  }),
-  append<ChatCompletionMessageParam>,
-);
+import { type EitherOutput, type Func, throwerCatcher } from "gamla";
 
 export type ModelOpts = { thinking: boolean; mini: boolean };
 

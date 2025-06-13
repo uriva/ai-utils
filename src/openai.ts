@@ -21,14 +21,6 @@ const tokenInjection: TokenInjection = context((): string => {
 export const injectOpenAiToken = (token: string): FnToSameFn =>
   tokenInjection.inject(() => token);
 
-export const replaceSystem =
-  (replacement: string) =>
-  (message: ChatCompletionMessageParam): ChatCompletionMessageParam => ({
-    ...message,
-    // @ts-expect-error not sure why this is not working
-    role: message.role === "system" ? replacement : message.role,
-  });
-
 const extractLastMarkdownJsonBlock = (text: string): string | null => {
   const regex = /```json([\s\S]*?)```/g;
   const matches = [...text.matchAll(regex)];
