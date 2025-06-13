@@ -10,7 +10,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import type { z, ZodType } from "zod/v4";
 import { makeCache } from "./cacher.ts";
 import { zodToGeminiParameters } from "./geminiAgent.ts";
-import { replaceSystem, structuredMsgs } from "./openai.ts";
+import { structuredMsgs } from "./openai.ts";
 import type { FnToSameFn, ModelOpts, TokenInjection } from "./utils.ts";
 
 const tokenInjection: TokenInjection = context((): string => {
@@ -58,12 +58,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
           responseSchema: zodToGeminiParameters(zodType),
         },
       },
-      {
-        contents: pipe(
-          map(replaceSystem("assistant")),
-          openAiToGeminiMessage,
-        )(messages),
-      },
+      { contents: pipe(openAiToGeminiMessage)(messages) },
     ),
   );
 };

@@ -1,5 +1,5 @@
 import { context } from "context-inject";
-import { coerce, pipe } from "gamla";
+import { append, coerce, pipe } from "gamla";
 import { OpenAI } from "openai";
 import type {
   ChatCompletionCreateParamsNonStreaming,
@@ -7,14 +7,27 @@ import type {
 } from "openai/resources/index.mjs";
 import type z from "zod/v4";
 import type { ZodType } from "zod/v4";
+import { toJSONSchema } from "zod/v4";
 import { makeCache } from "./cacher.ts";
 import { extractJson } from "./openai.ts";
-import {
-  appendTypingInstruction,
-  type FnToSameFn,
-  type ModelOpts,
-  type TokenInjection,
-} from "./utils.ts";
+import type { FnToSameFn, ModelOpts, TokenInjection } from "./utils.ts";
+
+const appendTypingInstruction: <T extends ZodType>(
+  zodType: T,
+  role: ChatCompletionMessageParam["role"],
+) => (arr: ChatCompletionMessageParam[]) => ChatCompletionMessageParam[] = pipe(
+  <T extends ZodType>(
+    zodType: T,
+    role: ChatCompletionMessageParam["role"],
+  ) => ({
+    role,
+    content:
+      `The output should be a valid json, as short as possible, no redundant whitespace, adhering to this typing: ${
+        JSON.stringify(toJSONSchema(zodType))
+      }`,
+  }),
+  append<ChatCompletionMessageParam>,
+);
 
 const tokenInjection: TokenInjection = context((): string => {
   throw new Error("deepseek token not injected");
