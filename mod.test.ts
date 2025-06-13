@@ -2,22 +2,21 @@ import type { Content } from "@google/generative-ai";
 import { pipe } from "gamla";
 import { assert, assertEquals } from "jsr:@std/assert";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
-import { waitAllWrites } from "rmmbr";
 import { z } from "zod/v4";
 import {
   geminiGenJsonFromConvo,
   injectAccessHistory,
+  injectCacher,
   injectedDebugLogs,
   injectGeminiToken,
   injectOpenAiToken,
   injectOutputEvent,
-  injectRmmbrToken,
   openAiGenJsonFromConvo,
   runBot,
 } from "./mod.ts";
 
 const injectSecrets = pipe(
-  injectRmmbrToken(Deno.env.get("RMMBR_TOKEN") ?? ""),
+  injectCacher(() => (f) => f),
   injectOpenAiToken(
     Deno.env.get("OPENAI_API_KEY") ?? "",
   ),
@@ -48,7 +47,6 @@ Deno.test(
         assertEquals(result, { hello: result.hello });
       }
     }
-    await waitAllWrites();
   }),
 );
 
@@ -77,7 +75,7 @@ Deno.test(
         parameters: z.object({}),
         handler: () => Promise.resolve(toolResult),
       }],
-      prompt: `Always use ${toolName} tool to answer the user.`,
+      prompt: `Always use ${toolName} tool to answer the user. Include in your answer the unique string you got.`,
     });
     assert(
       mockHistory.some((event) =>

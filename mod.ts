@@ -1,4 +1,4 @@
-export { injectRmmbrToken } from "./src/cacher.ts";
+export { injectCacher } from "./src/cacher.ts";
 export {
   deepSeekGenJsonFromConvo,
   injectDeepSeekToken,
