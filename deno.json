@@ -9,6 +9,6 @@
     "context-inject": "npm:context-inject@0.0.3",
     "zod": "npm:zod@3.25.57",
     "@google/generative-ai": "npm:@google/generative-ai@0.21.0",
-    "rmmbr": "npm:rmmbr@0.0.21"
+    "rmmbr": "npm:rmmbr@0.0.26"
   }
 }
