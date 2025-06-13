@@ -115,6 +115,16 @@ const geminiInput = (
   contents,
 });
 
+// deno-lint-ignore no-explicit-any
+const parseWithCatch = <T extends ZodType>(parameters: T, args: any) => {
+  try {
+    return parameters.parse(args);
+  } catch (error) {
+    console.error("Error parsing function call arguments:", error);
+    return null;
+  }
+};
+
 const callToResult =
   // deno-lint-ignore no-explicit-any
   (actions: Action<any, any>[]) =>
@@ -124,11 +134,14 @@ const callToResult =
     const { handler, parameters }: Action<T, O> = coerce(
       actions.find(({ name: n }) => n === name),
     );
+    const parsedArgs = parseWithCatch(parameters, args);
     return {
       functionResponse: {
         name,
         response: {
-          result: await handler(parameters.parse(args)),
+          result: parsedArgs
+            ? await handler(parsedArgs)
+            : `Invalid arguments for function`,
         },
       },
     };
