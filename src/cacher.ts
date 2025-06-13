@@ -1,18 +1,12 @@
 import { context } from "context-inject";
-import { cache } from "rmmbr";
-import { FnToSameFn, TokenInjection } from "./utils.ts";
+import type { Func } from "gamla";
 
-const injection: TokenInjection = context((): string => {
-  throw new Error("rmmbr token not injected");
-});
+const injection = context(
+  (_cacheId: string) => <F extends Func>(_f: F): Func => {
+    throw new Error("cacher not injected");
+  },
+);
 
-export const injectRmmbrToken = (x: string): FnToSameFn =>
-  injection.inject(() => x);
+export const injectCacher = injection.inject;
 
-export const makeCache = (cacheId: string) =>
-  cache({
-    cacheId,
-    ttl: 60 * 60 * 24 * 14,
-    url: "https://rmmbr.net",
-    token: injection.access(),
-  });
+export const makeCache = injection.access;
