@@ -9,21 +9,11 @@ import {
   type ModelParams,
 } from "@google/generative-ai";
 import { context } from "context-inject";
-import {
-  coerce,
-  empty,
-  type Func,
-  init,
-  last,
-  map,
-  nonempty,
-  pipe,
-  sideEffect,
-} from "gamla";
+import { coerce, empty, type Func, map, pipe, sideEffect } from "gamla";
 import { zodToJsonSchema } from "npm:zod-to-json-schema@3.24.5";
 import type { z, ZodType } from "zod/v4";
 import { makeCache } from "./cacher.ts";
-import { accessGeminiToken } from "./gemini.ts";
+import { accessGeminiToken, geminiProVersion } from "./gemini.ts";
 import type { SomethingInjection } from "./utils.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -106,16 +96,7 @@ export type BotSpec = {
   // deno-lint-ignore no-explicit-any
   actions: Action<any, any>[];
   prompt: string;
-  botNameInHistory: string;
 };
-
-const combineConsecutiveModelMessages = (acc: Content[], curr: Content) =>
-  nonempty(acc) && last(acc).role === curr.role
-    ? [...init(acc), {
-      ...last(acc),
-      parts: [...last(acc).parts, ...curr.parts],
-    }]
-    : [...acc, curr];
 
 // deno-lint-ignore no-explicit-any
 const actionToTool = ({ name, description, parameters }: Action<any, any>) => ({
@@ -157,44 +138,25 @@ const callToResult =
 const debugLogsAfter = <F extends Func>(f: F) =>
   pipe(f, sideEffect(debugLogs.access<Awaited<ReturnType<F>>>));
 
-export const runBot = async (
-  { actions, prompt, botNameInHistory }: BotSpec,
-) => {
+export const runBot = async ({ actions, prompt }: BotSpec) => {
   let c = 0;
-  const contents = (await getHistory()).map(({ from, text }) => ({
-    role: from !== botNameInHistory && from !== systemUser ? "user" : "model",
-    parts: [{ text }],
-  })).reduce(combineConsecutiveModelMessages, []);
-  const thoughts: Content[] = [];
   while (true) {
     c++;
     if (c > 5) throw new Error("Too many iterations");
     const { text, functionCalls } = await pipe(
       debugLogsAfter(geminiInput),
-      debugLogsAfter(callGemini({ model: "gemini-2.5-pro-preview-03-25" })),
-    )(prompt, actions, [...contents, ...thoughts]);
-    if (text) await reply(text);
+      debugLogsAfter(callGemini({ model: geminiProVersion })),
+    )(prompt, actions, await getHistory());
+    if (text) await outputEvent({ role: "model", parts: [{ text }] });
     const calls = functionCalls ?? [];
     const results = await map(callToResult(actions))(calls);
     for (let i = 0; i < results.length; i++) {
-      agentSystemLog.access(
-        [
-          `Agent called tool:\n${JSON.stringify(calls[i], null, 2)}`,
-          `Got result:\n${JSON.stringify(results[i], null, 2)}`,
-        ].join("\n\n"),
-      );
-      const call = { role: "model", parts: [{ functionCall: calls[i] }] };
-      const result = results[i];
-      thoughts.push(call);
-      thoughts.push({ role: "user", parts: [result] });
+      await outputEvent({ role: "model", parts: [{ functionCall: calls[i] }] });
+      await outputEvent({ role: "user", parts: [results[i]] });
     }
     if (empty(functionCalls)) return;
   }
 };
-
-const agentSystemLog: SomethingInjection<(text: string) => void> = context(
-  (_text: string) => {},
-);
 
 const debugLogs: SomethingInjection<<T>(t: T) => void> = context(
   <T>(_: T) => {},
@@ -202,24 +164,19 @@ const debugLogs: SomethingInjection<<T>(t: T) => void> = context(
 
 export const injectedDebugLogs = debugLogs.inject;
 
-export const injectAgentSystemLog = agentSystemLog.inject;
-
-const historyInjection: SomethingInjection<() => Promise<HistoryEvent[]>> =
-  context((): Promise<HistoryEvent[]> => {
-    throw new Error("History not injected");
+const modelOutput: SomethingInjection<(event: Content) => Promise<void>> =
+  context((_event: Content): Promise<void> => {
+    throw new Error("output function not injected");
   });
+
+export const outputEvent = modelOutput.access;
+export const injectOutputEvent = modelOutput.inject;
+
+const historyInjection: SomethingInjection<() => Promise<Content[]>> = context(
+  (): Promise<Content[]> => {
+    throw new Error("History not injected");
+  },
+);
 
 export const getHistory = historyInjection.access;
 export const injectAccessHistory = historyInjection.inject;
-
-const replyInjection: SomethingInjection<(text: string) => Promise<void>> =
-  context((_text: string): Promise<void> => {
-    throw new Error("Reply not injected");
-  });
-
-export const reply = replyInjection.access;
-export const injectReply = replyInjection.inject;
-
-export type HistoryEvent = { text: string; from: string; time: number };
-
-export type MessageDraft = { from: string; text: string };

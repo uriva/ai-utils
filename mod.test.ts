@@ -1,3 +1,4 @@
+import type { Content } from "@google/generative-ai";
 import { pipe } from "gamla";
 import { assert, assertEquals } from "jsr:@std/assert";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
@@ -6,11 +7,10 @@ import { z } from "zod/v4";
 import {
   geminiGenJsonFromConvo,
   injectAccessHistory,
-  injectAgentSystemLog,
   injectedDebugLogs,
   injectGeminiToken,
   injectOpenAiToken,
-  injectReply,
+  injectOutputEvent,
   injectRmmbrToken,
   openAiGenJsonFromConvo,
   runBot,
@@ -57,18 +57,18 @@ Deno.test(
 Deno.test(
   "runBot calls the tool and replies with its output",
   injectSecrets(async () => {
-    let replyText = "";
-    const mockHistory = [
-      { text: "please use the tool", from: "user", time: Date.now() },
-    ];
+    const mockHistory: Content[] = [{
+      role: "user",
+      parts: [{ text: "please use the tool" }],
+    }];
     const deps = pipe(
-      injectAccessHistory(() => Promise.resolve(mockHistory)),
-      injectReply((text: string) => {
-        replyText = text;
+      injectOutputEvent((event: Content) => {
+        console.log("Output event:", event);
+        mockHistory.push(event);
         return Promise.resolve();
       }),
+      injectAccessHistory(() => Promise.resolve(mockHistory)),
       injectedDebugLogs(() => {}),
-      injectAgentSystemLog(() => {}),
     );
     const toolResult = "43212e8e-4c29-4a3c-aba2-723e668b5537";
     const toolName = "doSomethingUnique";
@@ -80,8 +80,11 @@ Deno.test(
         handler: () => Promise.resolve(toolResult),
       }],
       prompt: `Always use ${toolName} tool to answer the user.`,
-      botNameInHistory: "bot",
     });
-    assert(replyText.includes(toolResult));
+    assert(
+      mockHistory.some((event) =>
+        event.parts.some((part) => part.text?.includes(toolResult))
+      ),
+    );
   }),
 );

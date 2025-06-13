@@ -11,16 +11,13 @@ export {
 export {
   type Action,
   type BotSpec,
-  getHistory,
-  type HistoryEvent,
   injectAccessHistory,
-  injectAgentSystemLog,
   injectedDebugLogs,
-  injectReply,
-  type MessageDraft,
+  injectOutputEvent,
+  outputEvent,
   runBot,
   systemUser,
-} from "./src/mcpFramework.ts";
+} from "./src/geminiAgent.ts";
 export {
   injectOpenAiToken,
   openAiGenJson,

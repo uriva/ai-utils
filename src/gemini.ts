@@ -9,7 +9,7 @@ import { coerce, empty, map, pipe, remove } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import type { z, ZodSchema } from "zod/v4";
 import { makeCache } from "./cacher.ts";
-import { zodToGeminiParameters } from "./mcpFramework.ts";
+import { zodToGeminiParameters } from "./geminiAgent.ts";
 import { replaceSystem, structuredMsgs } from "./openai.ts";
 import type { FnToSameFn, ModelOpts, TokenInjection } from "./utils.ts";
 
@@ -31,6 +31,8 @@ const openAiToGeminiMessage = pipe(
   remove(({ parts }: Content) => empty(parts)),
 );
 
+export const geminiProVersion = "gemini-2.5-pro-preview-06-05";
+
 export const geminiGenJsonFromConvo: <T extends ZodSchema>(
   { thinking, mini }: ModelOpts,
   messages: ChatCompletionMessageParam[],
@@ -50,9 +52,7 @@ export const geminiGenJsonFromConvo: <T extends ZodSchema>(
   return JSON.parse(
     await cachedCall(
       {
-        model: mini
-          ? "gemini-2.5-flash"
-          : "gemini-2.5-pro-preview-05-06",
+        model: mini ? "gemini-2.5-flash-preview-05-20" : geminiProVersion,
         generationConfig: {
           responseMimeType: "application/json",
           responseSchema: zodToGeminiParameters(zodType),
