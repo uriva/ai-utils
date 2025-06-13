@@ -7,7 +7,7 @@ import {
 import { context } from "context-inject";
 import { coerce, empty, map, pipe, remove } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
-import type { z, ZodSchema } from "zod/v4";
+import type { z, ZodType } from "zod/v4";
 import { makeCache } from "./cacher.ts";
 import { zodToGeminiParameters } from "./geminiAgent.ts";
 import { replaceSystem, structuredMsgs } from "./openai.ts";
@@ -33,11 +33,11 @@ const openAiToGeminiMessage = pipe(
 
 export const geminiProVersion = "gemini-2.5-pro-preview-06-05";
 
-export const geminiGenJsonFromConvo: <T extends ZodSchema>(
+export const geminiGenJsonFromConvo: <T extends ZodType>(
   { thinking, mini }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
-) => Promise<z.infer<T>> = async <T extends ZodSchema>(
+) => Promise<z.infer<T>> = async <T extends ZodType>(
   { mini }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
@@ -69,7 +69,7 @@ export const geminiGenJsonFromConvo: <T extends ZodSchema>(
 };
 
 export const geminiGenJson =
-  <T extends ZodSchema>(opts: ModelOpts, systemMsg: string, zodType: T) =>
+  <T extends ZodType>(opts: ModelOpts, systemMsg: string, zodType: T) =>
   (userMsg: string): Promise<z.TypeOf<T>> =>
     geminiGenJsonFromConvo(
       opts,
