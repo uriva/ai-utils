@@ -8,6 +8,7 @@ import {
   GoogleGenerativeAI,
   type ModelParams,
 } from "@google/generative-ai";
+
 import { context } from "context-inject";
 import { coerce, empty, type Func, map, pipe, sideEffect } from "gamla";
 import { z, type ZodType } from "zod/v4";
@@ -155,10 +156,17 @@ export const runBot = async ({ actions, prompt }: BotSpec) => {
   while (true) {
     c++;
     if (c > 5) throw new Error("Too many iterations");
+    const history = await getHistory();
+    if (empty(history)) {
+      history.push({
+        role: "user",
+        parts: [{ text: "<conversation started>" }],
+      });
+    }
     const { text, functionCalls } = await pipe(
       debugLogsAfter(geminiInput),
       debugLogsAfter(callGemini({ model: geminiProVersion })),
-    )(prompt, actions, await getHistory());
+    )(prompt, actions, history);
     if (text) await outputEvent({ role: "model", parts: [{ text }] });
     const calls = functionCalls ?? [];
     const results = await map(callToResult(actions))(calls);
