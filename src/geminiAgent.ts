@@ -96,6 +96,7 @@ export type BotSpec = {
   // deno-lint-ignore no-explicit-any
   actions: Action<any, any>[];
   prompt: string;
+  maxIterations: number;
 };
 
 // deno-lint-ignore no-explicit-any
@@ -151,14 +152,24 @@ const callToResult =
 const debugLogsAfter = <F extends Func>(f: F) =>
   pipe(f, sideEffect(debugLogs.access<Awaited<ReturnType<F>>>));
 
-export const runBot = async ({ actions, prompt }: BotSpec) => {
+export const functionCallTurn = (functionCall: FunctionCall) => ({
+  role: "model",
+  parts: [{ functionCall }],
+});
+
+export const functionResultTurn = (result: FunctionResponsePart): Content => ({
+  role: "user",
+  parts: [result],
+});
+
+export const runBot = async ({ actions, prompt, maxIterations }: BotSpec) => {
   let c = 0;
   while (true) {
     c++;
-    if (c > 5) throw new Error("Too many iterations");
+    if (c > maxIterations) throw new Error("Too many iterations");
     const history = await getHistory();
-    if (empty(history)) {
-      history.push({
+    if (empty(history) || history[0].parts[0].functionCall) {
+      history.unshift({
         role: "user",
         parts: [{ text: "<conversation started>" }],
       });
@@ -171,8 +182,8 @@ export const runBot = async ({ actions, prompt }: BotSpec) => {
     const calls = functionCalls ?? [];
     const results = await map(callToResult(actions))(calls);
     for (let i = 0; i < results.length; i++) {
-      await outputEvent({ role: "model", parts: [{ functionCall: calls[i] }] });
-      await outputEvent({ role: "user", parts: [results[i]] });
+      await outputEvent(functionCallTurn(calls[i]));
+      await outputEvent(functionResultTurn(results[i]));
     }
     if (empty(functionCalls)) return;
   }

@@ -14,6 +14,7 @@ import {
   openAiGenJsonFromConvo,
   runBot,
 } from "./mod.ts";
+import { functionCallTurn, functionResultTurn } from "./src/geminiAgent.ts";
 
 const injectSecrets = pipe(
   injectCacher(() => (f) => f),
@@ -53,13 +54,21 @@ Deno.test(
 const agentDeps = (mutableHistory: Content[]) =>
   pipe(
     injectOutputEvent((event: Content) => {
-      console.log("Output event:", event);
       mutableHistory.push(event);
       return Promise.resolve();
     }),
     injectAccessHistory(() => Promise.resolve(mutableHistory)),
     injectedDebugLogs(() => {}),
   );
+
+const toolResult = "43212e8e-4c29-4a3c-aba2-723e668b5537";
+
+const someTool = {
+  name: "doSomethingUnique",
+  description: "Returns a unique string so we know the tool was called.",
+  parameters: z.object({}),
+  handler: () => Promise.resolve(toolResult),
+};
 
 Deno.test(
   "runBot calls the tool and replies with its output",
@@ -68,17 +77,11 @@ Deno.test(
       role: "user",
       parts: [{ text: "please use the tool" }],
     }];
-    const toolResult = "43212e8e-4c29-4a3c-aba2-723e668b5537";
-    const toolName = "doSomethingUnique";
     await agentDeps(mockHistory)(runBot)({
-      actions: [{
-        name: toolName,
-        description: "Returns a unique string so we know the tool was called.",
-        parameters: z.object({}),
-        handler: () => Promise.resolve(toolResult),
-      }],
+      maxIterations: 5,
+      actions: [someTool],
       prompt:
-        `Always use ${toolName} tool to answer the user. Include in your answer the unique string you got.`,
+        `Always use ${someTool.name} tool to answer the user. Include in your answer the unique string you got.`,
     });
     assert(
       mockHistory.some((event) =>
@@ -91,10 +94,31 @@ Deno.test(
 Deno.test(
   "agent can start an empty conversation",
   injectSecrets(async () => {
-    const mockHistory: Content[] = [];
-    await agentDeps(mockHistory)(runBot)({
+    await agentDeps([])(runBot)({
       actions: [],
       prompt: `You are the neighborhood friendly spiderman.`,
+      maxIterations: 5,
+    });
+  }),
+);
+
+Deno.test(
+  "conversation can start with a tool call",
+  injectSecrets(async () => {
+    await agentDeps([
+      functionCallTurn({ name: someTool.name, args: {} }),
+      functionResultTurn({
+        functionResponse: {
+          name: someTool.name,
+          response: { result: toolResult },
+        },
+      }),
+    ])(
+      runBot,
+    )({
+      actions: [someTool],
+      prompt: `You are the neighborhood friendly spiderman.`,
+      maxIterations: 5,
     });
   }),
 );
