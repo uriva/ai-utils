@@ -1,3 +1,4 @@
+export { z } from "zod/v4";
 export { injectCacher } from "./src/cacher.ts";
 export {
   deepSeekGenJsonFromConvo,
