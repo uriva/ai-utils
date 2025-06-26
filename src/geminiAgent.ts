@@ -14,7 +14,7 @@ import { coerce, empty, type Func, map, pipe, sideEffect } from "gamla";
 import { z, type ZodType } from "zod/v4";
 import { makeCache } from "./cacher.ts";
 import { accessGeminiToken, geminiProVersion } from "./gemini.ts";
-import type { SomethingInjection } from "./utils.ts";
+import type { FnToSameFn, SomethingInjection } from "./utils.ts";
 
 // deno-lint-ignore no-explicit-any
 const isRedundantAnyMember = (x: any) =>
@@ -211,3 +211,12 @@ const historyInjection: SomethingInjection<() => Promise<Content[]>> = context(
 
 export const getHistory = historyInjection.access;
 export const injectAccessHistory = historyInjection.inject;
+
+export const injectInMemoryHistory = (inMemoryHistory: Content[]): FnToSameFn =>
+  pipe(
+    injectAccessHistory(() => Promise.resolve(inMemoryHistory)),
+    injectOutputEvent((event) => {
+      inMemoryHistory.push(event);
+      return Promise.resolve();
+    }),
+  );

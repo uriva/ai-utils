@@ -5,16 +5,18 @@ import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z } from "zod/v4";
 import {
   geminiGenJsonFromConvo,
-  injectAccessHistory,
   injectCacher,
   injectedDebugLogs,
   injectGeminiToken,
   injectOpenAiToken,
-  injectOutputEvent,
   openAiGenJsonFromConvo,
   runBot,
 } from "./mod.ts";
-import { functionCallTurn, functionResultTurn } from "./src/geminiAgent.ts";
+import {
+  functionCallTurn,
+  functionResultTurn,
+  injectInMemoryHistory,
+} from "./src/geminiAgent.ts";
 
 const injectSecrets = pipe(
   injectCacher(() => (f) => f),
@@ -52,14 +54,7 @@ Deno.test(
 );
 
 const agentDeps = (mutableHistory: Content[]) =>
-  pipe(
-    injectOutputEvent((event: Content) => {
-      mutableHistory.push(event);
-      return Promise.resolve();
-    }),
-    injectAccessHistory(() => Promise.resolve(mutableHistory)),
-    injectedDebugLogs(() => {}),
-  );
+  pipe(injectInMemoryHistory(mutableHistory), injectedDebugLogs(() => {}));
 
 const toolResult = "43212e8e-4c29-4a3c-aba2-723e668b5537";
 
