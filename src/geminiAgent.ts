@@ -3,7 +3,6 @@ import {
   type FunctionCall,
   type FunctionDeclaration,
   type FunctionResponse,
-  GenerateContentConfig,
   type GenerateContentParameters,
   type GenerateContentResponse,
   GoogleGenAI,
