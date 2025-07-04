@@ -3,11 +3,11 @@ import type { Func } from "gamla";
 
 const injection: {
   inject: (
-    fn: (_cacheId: string) => <F extends Func>(_f: F) => Func,
+    fn: (_cacheId: string) => <F extends Func>(_f: F) => F,
   ) => <F_1 extends Func>(f: F_1) => F_1;
-  access: (_cacheId: string) => <F extends Func>(_f: F) => Func;
+  access: (_cacheId: string) => <F extends Func>(_f: F) => F;
 } = context(
-  (_cacheId: string) => <F extends Func>(_f: F): Func => {
+  (_cacheId: string) => <F extends Func>(_f: F): F => {
     throw new Error("cacher not injected");
   },
 );

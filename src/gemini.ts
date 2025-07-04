@@ -1,9 +1,8 @@
 import {
   type Content,
-  type GenerateContentRequest,
-  GoogleGenerativeAI,
-  type ModelParams,
-} from "@google/generative-ai";
+  type GenerateContentParameters,
+  GoogleGenAI,
+} from "@google/genai";
 import { context } from "context-inject";
 import { coerce, empty, map, pipe, remove } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
@@ -28,7 +27,7 @@ const openAiToGeminiMessage = pipe(
       text: typeof content === "string" ? content : coerce(content?.toString()),
     }].filter((x) => x.text),
   })),
-  remove(({ parts }: Content) => empty(parts)),
+  remove(({ parts }: Content) => empty(parts ?? [])),
 );
 
 export const geminiProVersion = "gemini-2.5-pro-preview-06-05";
@@ -42,24 +41,21 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
   messages: ChatCompletionMessageParam[],
   zodType: T,
 ): Promise<z.infer<T>> => {
-  const cachedCall = makeCache(
-    "geminiCompletionResponseText",
-  )((modelParams: ModelParams, req: GenerateContentRequest) =>
-    new GoogleGenerativeAI(tokenInjection.access()).getGenerativeModel(
-      modelParams,
-    ).generateContent(req).then((x) => x.response.text())
+  const cacher = makeCache("geminiCompletionResponseText-v2");
+  const cachedCall = cacher((req: GenerateContentParameters) =>
+    new GoogleGenAI({ apiKey: tokenInjection.access() }).models.generateContent(
+      req,
+    ).then(({ text }) => text ?? "{}")
   );
   return JSON.parse(
-    await cachedCall(
-      {
-        model: mini ? "gemini-2.5-flash-preview-05-20" : geminiProVersion,
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: zodToGeminiParameters(zodType),
-        },
+    await cachedCall({
+      model: mini ? "gemini-2.5-flash-preview-05-20" : geminiProVersion,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: zodToGeminiParameters(zodType),
       },
-      { contents: pipe(openAiToGeminiMessage)(messages) },
-    ),
+      contents: pipe(openAiToGeminiMessage)(messages),
+    }),
   );
 };
 

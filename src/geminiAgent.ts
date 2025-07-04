@@ -1,13 +1,13 @@
 import {
   type Content,
   type FunctionCall,
-  type FunctionDeclarationSchema,
-  type FunctionResponsePart,
-  type GenerateContentRequest,
-  type GenerateContentResult,
-  GoogleGenerativeAI,
-  type ModelParams,
-} from "@google/generative-ai";
+  type FunctionDeclaration,
+  type FunctionResponse,
+  type GenerateContentParameters,
+  type GenerateContentResponse,
+  GoogleGenAI,
+  type Part,
+} from "@google/genai";
 
 import { context } from "context-inject";
 import { coerce, empty, type Func, map, pipe, sideEffect } from "gamla";
@@ -62,7 +62,7 @@ export const zodToGeminiParameters = (zodObj: any) => {
   const jsonSchema = removeAdditionalProperties(z.toJSONSchema(zodObj));
   // deno-lint-ignore no-unused-vars
   const { $schema, ...rest } = jsonSchema;
-  return rest as FunctionDeclarationSchema;
+  return rest as FunctionDeclaration;
 };
 
 export const systemUser = "system";
@@ -79,18 +79,15 @@ type GeminiOutput = {
   functionCalls: FunctionCall[];
 };
 
-const callGemini = (modelParams: ModelParams) =>
-  makeCache("gemini response with function calls")((
-    req: GenerateContentRequest,
-  ): Promise<GeminiOutput> =>
-    new GoogleGenerativeAI(accessGeminiToken())
-      .getGenerativeModel(modelParams).generateContent(req).then((
-        { response }: GenerateContentResult,
-      ) => ({
-        text: response.text(),
-        functionCalls: response.functionCalls() ?? [],
-      }))
-  );
+const callGemini = (model: string) => ((
+  req: Omit<GenerateContentParameters, "model">,
+): Promise<GeminiOutput> =>
+  new GoogleGenAI({ apiKey: accessGeminiToken() }).models.generateContent({
+    model,
+    ...req,
+  }).then((
+    { text, functionCalls }: GenerateContentResponse,
+  ) => ({ text: text ?? "", functionCalls: functionCalls ?? [] })));
 
 export type BotSpec = {
   // deno-lint-ignore no-explicit-any
@@ -111,7 +108,7 @@ const geminiInput = (
   // deno-lint-ignore no-explicit-any
   actions: Action<any, any>[],
   contents: Content[],
-): GenerateContentRequest => ({
+) => ({
   systemInstruction,
   tools: [{ functionDeclarations: actions.map(actionToTool) }],
   contents,
@@ -132,7 +129,7 @@ const callToResult =
   (actions: Action<any, any>[]) =>
   async <T extends ZodType, O>(
     { name, args }: FunctionCall,
-  ): Promise<FunctionResponsePart> => {
+  ): Promise<Part> => {
     const { handler, parameters }: Action<T, O> = coerce(
       actions.find(({ name: n }) => n === name),
     );
@@ -157,18 +154,21 @@ export const functionCallTurn = (functionCall: FunctionCall) => ({
   parts: [{ functionCall }],
 });
 
-export const functionResultTurn = (result: FunctionResponsePart): Content => ({
+export const functionResultTurn = (
+  functionResponse: FunctionResponse,
+): Content => ({
   role: "user",
-  parts: [result],
+  parts: [{ functionResponse }],
 });
 
 export const runBot = async ({ actions, prompt, maxIterations }: BotSpec) => {
+  const cacher = makeCache("gemini response with function calls v2");
   let c = 0;
   while (true) {
     c++;
     if (c > maxIterations) throw new Error("Too many iterations");
     const history = await getHistory();
-    if (empty(history) || history[0].parts[0].functionCall) {
+    if (empty(history) || (history[0].parts ?? [])[0].functionCall) {
       history.unshift({
         role: "user",
         parts: [{ text: "<conversation started>" }],
@@ -176,14 +176,16 @@ export const runBot = async ({ actions, prompt, maxIterations }: BotSpec) => {
     }
     const { text, functionCalls } = await pipe(
       debugLogsAfter(geminiInput),
-      debugLogsAfter(callGemini({ model: geminiProVersion })),
+      debugLogsAfter(cacher(callGemini)(geminiProVersion)),
     )(prompt, actions, history);
     if (text) await outputEvent({ role: "model", parts: [{ text }] });
     const calls = functionCalls ?? [];
     const results = await map(callToResult(actions))(calls);
     for (let i = 0; i < results.length; i++) {
       await outputEvent(functionCallTurn(calls[i]));
-      await outputEvent(functionResultTurn(results[i]));
+      await outputEvent(
+        functionResultTurn(coerce(results[i].functionResponse)),
+      );
     }
     if (empty(functionCalls)) return;
   }
