@@ -1,4 +1,4 @@
-import type { Content } from "@google/generative-ai";
+import type { Content } from "@google/genai";
 import { pipe } from "gamla";
 import { assert, assertEquals } from "jsr:@std/assert";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
@@ -80,7 +80,7 @@ Deno.test(
     });
     assert(
       mockHistory.some((event) =>
-        event.parts.some((part) => part.text?.includes(toolResult))
+        (event.parts ?? []).some((part) => part.text?.includes(toolResult))
       ),
     );
   }),
@@ -103,10 +103,8 @@ Deno.test(
     await agentDeps([
       functionCallTurn({ name: someTool.name, args: {} }),
       functionResultTurn({
-        functionResponse: {
-          name: someTool.name,
-          response: { result: toolResult },
-        },
+        name: someTool.name,
+        response: { result: toolResult },
       }),
     ])(
       runBot,

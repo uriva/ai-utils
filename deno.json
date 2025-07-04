@@ -1,13 +1,13 @@
 {
   "name": "@uri/ai-utils",
-  "version": "0.1.30",
+  "version": "0.1.31",
   "license": "MIT",
   "exports": "./mod.ts",
   "imports": {
+    "@google/genai": "npm:@google/genai@1.8.0",
+    "context-inject": "npm:context-inject@0.0.3",
     "gamla": "npm:gamla@124.0.0",
     "openai": "npm:openai@5.2.0",
-    "context-inject": "npm:context-inject@0.0.3",
-    "zod": "npm:zod@3.25.57",
-    "@google/generative-ai": "npm:@google/generative-ai@0.21.0"
+    "zod": "npm:zod@3.25.57"
   }
 }
