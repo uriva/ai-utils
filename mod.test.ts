@@ -70,13 +70,15 @@ Deno.test(
   injectSecrets(async () => {
     const mockHistory: Content[] = [{
       role: "user",
-      parts: [{ text: "please use the tool" }],
+      parts: [{
+        text:
+          `Please call the doSomethingUnique tool now and only reply with its output.`,
+      }],
     }];
     await agentDeps(mockHistory)(runBot)({
       maxIterations: 5,
       actions: [someTool],
-      prompt:
-        `Always use ${someTool.name} tool to answer the user. Include in your answer the unique string you got.`,
+      prompt: `You are an AI assistant.`,
     });
     assert(
       mockHistory.some((event) =>
