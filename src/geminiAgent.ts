@@ -3,6 +3,7 @@ import {
   type FunctionCall,
   type FunctionDeclaration,
   type FunctionResponse,
+  GenerateContentConfig,
   type GenerateContentParameters,
   type GenerateContentResponse,
   GoogleGenAI,
@@ -108,9 +109,17 @@ const geminiInput = (
   // deno-lint-ignore no-explicit-any
   actions: Action<any, any>[],
   contents: Content[],
-) => ({
-  systemInstruction,
-  tools: [{ functionDeclarations: actions.map(actionToTool) }],
+): Omit<GenerateContentParameters, "model"> => ({
+  config: {
+    systemInstruction,
+    tools: [{ functionDeclarations: actions.map(actionToTool) }],
+    // Only set allowedFunctionNames if mode is ANY. Since mode is not set, omit allowedFunctionNames.
+    toolConfig: {
+      functionCallingConfig: {
+        // allowedFunctionNames: actions.map((a) => a.name),
+      },
+    },
+  },
   contents,
 });
 
