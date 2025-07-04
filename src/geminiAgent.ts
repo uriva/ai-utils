@@ -184,7 +184,7 @@ export const runBot = async ({ actions, prompt, maxIterations }: BotSpec) => {
     }
     const { text, functionCalls } = await pipe(
       debugLogsAfter(geminiInput),
-      debugLogsAfter(cacher(callGemini)(geminiProVersion)),
+      debugLogsAfter(cacher(callGemini(geminiProVersion))),
     )(prompt, actions, history);
     if (text) await outputEvent({ role: "model", parts: [{ text }] });
     const calls = functionCalls ?? [];
