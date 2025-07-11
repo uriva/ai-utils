@@ -12,13 +12,19 @@ export {
 export {
   type Action,
   type BotSpec,
+  type HistoryEvent,
   injectAccessHistory,
   injectedDebugLogs,
   injectInMemoryHistory,
   injectOutputEvent,
   outputEvent,
+  overrideIdGenerator,
+  overrideTime,
+  participantUtteranceTurn,
   runBot,
   systemUser,
+  toolResultTurn,
+  toolUseTurn,
 } from "./src/geminiAgent.ts";
 export {
   injectOpenAiToken,

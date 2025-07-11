@@ -1,4 +1,3 @@
-import type { Content } from "@google/genai";
 import { pipe } from "gamla";
 import { assert, assertEquals } from "jsr:@std/assert";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
@@ -13,9 +12,11 @@ import {
   runBot,
 } from "./mod.ts";
 import {
-  functionCallTurn,
-  functionResultTurn,
+  HistoryEvent,
   injectInMemoryHistory,
+  participantUtteranceTurn,
+  toolResultTurn,
+  toolUseTurn,
 } from "./src/geminiAgent.ts";
 
 const injectSecrets = pipe(
@@ -53,7 +54,7 @@ Deno.test(
   }),
 );
 
-const agentDeps = (mutableHistory: Content[]) =>
+const agentDeps = (mutableHistory: HistoryEvent[]) =>
   pipe(injectInMemoryHistory(mutableHistory), injectedDebugLogs(() => {}));
 
 const toolResult = "43212e8e-4c29-4a3c-aba2-723e668b5537";
@@ -68,23 +69,19 @@ const someTool = {
 Deno.test(
   "runBot calls the tool and replies with its output",
   injectSecrets(async () => {
-    const mockHistory: Content[] = [{
-      role: "user",
-      parts: [{
-        text:
-          `Please call the doSomethingUnique tool now and only reply with its output.`,
-      }],
-    }];
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text:
+        `Please call the doSomethingUnique tool now and only reply with its output.`,
+    })];
     await agentDeps(mockHistory)(runBot)({
       maxIterations: 5,
       actions: [someTool],
       prompt: `You are an AI assistant.`,
     });
-    assert(
-      mockHistory.some((event) =>
-        (event.parts ?? []).some((part) => part.text?.includes(toolResult))
-      ),
-    );
+    assert(mockHistory.some((event) => (event.type === "own_utterance" &&
+      event.text?.includes(toolResult))
+    ));
   }),
 );
 
@@ -103,8 +100,8 @@ Deno.test(
   "conversation can start with a tool call",
   injectSecrets(async () => {
     await agentDeps([
-      functionCallTurn({ name: someTool.name, args: {} }),
-      functionResultTurn({
+      toolUseTurn({ name: someTool.name, args: {} }),
+      toolResultTurn({
         name: someTool.name,
         response: { result: toolResult },
       }),
