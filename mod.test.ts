@@ -12,7 +12,7 @@ import {
   runBot,
 } from "./mod.ts";
 import {
-  HistoryEvent,
+  type HistoryEvent,
   injectInMemoryHistory,
   participantUtteranceTurn,
   toolResultTurn,
