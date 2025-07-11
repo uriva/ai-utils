@@ -212,8 +212,12 @@ export type HistoryEvent =
   | ToolUse<unknown>
   | ToolResult<unknown>;
 
-const idGeneration = context((): MessageId => crypto.randomUUID());
-const timestampGeneration = context((): number => Date.now());
+const idGeneration: SomethingInjection<() => string> = context((): MessageId =>
+  crypto.randomUUID()
+);
+const timestampGeneration: SomethingInjection<() => number> = context(
+  (): number => Date.now(),
+);
 
 export const overrideTime = timestampGeneration.inject;
 export const overrideIdGenerator = idGeneration.inject;
