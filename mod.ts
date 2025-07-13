@@ -14,7 +14,7 @@ export {
   type BotSpec,
   type HistoryEvent,
   injectAccessHistory,
-  injectedDebugLogs,
+  injectDebugger,
   injectInMemoryHistory,
   injectOutputEvent,
   outputEvent,

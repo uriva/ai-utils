@@ -290,7 +290,7 @@ const historyEventToContent = (events: HistoryEvent[]) => {
     }
     if (e.type === "tool_result") {
       return {
-        role: "model",
+        role: "user",
         parts: [{
           functionResponse: {
             name: e.name,
@@ -330,10 +330,6 @@ export const runBot = async ({ actions, prompt, maxIterations }: BotSpec) => {
         parts: [{ text: "<conversation started>" }],
       });
     }
-    const last = history[history.length - 1];
-    if (!last || last.role !== "user") {
-      history.push({ role: "user", parts: [{ text: "." }] });
-    }
     const { text, functionCalls } = await pipe(
       debugLogsAfter(geminiInput),
       debugLogsAfter(cacher(callGemini(geminiProVersion))),
@@ -355,7 +351,7 @@ const debugLogs: SomethingInjection<<T>(t: T) => void> = context(
   <T>(_: T) => {},
 );
 
-export const injectedDebugLogs = debugLogs.inject;
+export const injectDebugger = debugLogs.inject;
 
 const modelOutput: SomethingInjection<(event: HistoryEvent) => Promise<void>> =
   context((_event: HistoryEvent): Promise<void> => {
