@@ -330,6 +330,10 @@ export const runBot = async ({ actions, prompt, maxIterations }: BotSpec) => {
         parts: [{ text: "<conversation started>" }],
       });
     }
+    const last = history[history.length - 1];
+    if (!last || last.role !== "user") {
+      history.push({ role: "user", parts: [{ text: "." }] });
+    }
     const { text, functionCalls } = await pipe(
       debugLogsAfter(geminiInput),
       debugLogsAfter(cacher(callGemini(geminiProVersion))),
