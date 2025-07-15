@@ -143,9 +143,9 @@ const parseWithCatch = <T extends ZodType>(parameters: T, args: any) => {
 const callToResult =
   // deno-lint-ignore no-explicit-any
   (actions: Action<any, any>[]) =>
-  async <T extends ZodType, O>(
-    { name, args }: FunctionCall,
-  ): Promise<Part> => {
+  async <T extends ZodType, O>(fc: FunctionCall): Promise<Part> => {
+    await outputEvent(toolUseTurn(fc));
+    const { name, args } = fc;
     const action: Action<T, O> | undefined = actions.find(({ name: n }) =>
       n === name
     );
@@ -347,7 +347,6 @@ export const runBot = async ({ actions, prompt, maxIterations }: BotSpec) => {
     const calls = functionCalls ?? [];
     const results = await map(callToResult(actions))(calls);
     for (let i = 0; i < results.length; i++) {
-      await outputEvent(toolUseTurn(calls[i]));
       await outputEvent(
         toolResultTurn(coerce(results[i].functionResponse)),
       );
