@@ -146,9 +146,18 @@ const callToResult =
   async <T extends ZodType, O>(
     { name, args }: FunctionCall,
   ): Promise<Part> => {
-    const { handler, parameters }: Action<T, O> = coerce(
-      actions.find(({ name: n }) => n === name),
+    const action: Action<T, O> | undefined = actions.find(({ name: n }) =>
+      n === name
     );
+    if (!action) {
+      return {
+        functionResponse: {
+          name,
+          response: { result: `Function ${name} not found` },
+        },
+      };
+    }
+    const { handler, parameters } = action;
     const parsedArgs = parseWithCatch(parameters, args);
     return {
       functionResponse: {
