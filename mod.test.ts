@@ -5,7 +5,7 @@ import { z } from "zod/v4";
 import {
   geminiGenJsonFromConvo,
   injectCacher,
-  injectedDebugLogs,
+  injectDebugger,
   injectGeminiToken,
   injectOpenAiToken,
   openAiGenJsonFromConvo,
@@ -55,7 +55,7 @@ Deno.test(
 );
 
 const agentDeps = (mutableHistory: HistoryEvent[]) =>
-  pipe(injectInMemoryHistory(mutableHistory), injectedDebugLogs(() => {}));
+  pipe(injectInMemoryHistory(mutableHistory), injectDebugger(() => {}));
 
 const toolResult = "43212e8e-4c29-4a3c-aba2-723e668b5537";
 
