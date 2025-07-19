@@ -12,10 +12,11 @@ import {
 import { context } from "context-inject";
 import {
   coerce,
+  each,
   empty,
   type Func,
   groupBy,
-  map,
+  last,
   pipe,
   sideEffect,
 } from "gamla";
@@ -75,7 +76,7 @@ export const zodToGeminiParameters = (zodObj: any) => {
 
 export const systemUser = "system";
 
-export type Action<T extends ZodType, O> = {
+export type Tool<T extends ZodType, O> = {
   description: string;
   name: string;
   parameters: T;
@@ -97,15 +98,17 @@ const callGemini = (model: string) => ((
     { text, functionCalls }: GenerateContentResponse,
   ) => ({ text: text ?? "", functionCalls: functionCalls ?? [] })));
 
-export type BotSpec = {
+export type AgentSpec = {
   // deno-lint-ignore no-explicit-any
-  actions: Action<any, any>[];
+  tools: Tool<any, any>[];
   prompt: string;
   maxIterations: number;
+  // deno-lint-ignore no-explicit-any
+  onMaxIterationsReached: () => any;
 };
 
 // deno-lint-ignore no-explicit-any
-const actionToTool = ({ name, description, parameters }: Action<any, any>) => ({
+const actionToTool = ({ name, description, parameters }: Tool<any, any>) => ({
   name,
   description,
   parameters: zodToGeminiParameters(parameters),
@@ -114,7 +117,7 @@ const actionToTool = ({ name, description, parameters }: Action<any, any>) => ({
 const geminiInput = (
   systemInstruction: string,
   // deno-lint-ignore no-explicit-any
-  actions: Action<any, any>[],
+  actions: Tool<any, any>[],
   contents: Content[],
 ): Omit<GenerateContentParameters, "model"> => ({
   config: {
@@ -142,11 +145,11 @@ const parseWithCatch = <T extends ZodType>(parameters: T, args: any) => {
 
 const callToResult =
   // deno-lint-ignore no-explicit-any
-  (actions: Action<any, any>[]) =>
+  (actions: Tool<any, any>[]) =>
   async <T extends ZodType, O>(fc: FunctionCall): Promise<Part> => {
     await outputEvent(toolUseTurn(fc));
     const { name, args } = fc;
-    const action: Action<T, O> | undefined = actions.find(({ name: n }) =>
+    const action: Tool<T, O> | undefined = actions.find(({ name: n }) =>
       n === name
     );
     if (!action) {
@@ -174,44 +177,52 @@ const callToResult =
 const debugLogsAfter = <F extends Func>(f: F) =>
   pipe(f, sideEffect(debugLogs.access<Awaited<ReturnType<F>>>));
 
-type SharedFields = { id: MessageId; timestamp: number };
+type SharedFields = { id: MessageId; timestamp: number; isOwn: boolean };
 
 type MessageId = string;
 
-type ParticipantUtterance = {
+export type ParticipantUtterance = {
   type: "participant_utterance";
+  isOwn: false;
   name: string;
   text: string;
 } & SharedFields;
 
-type OwnText = {
+export type OwnText = {
+  isOwn: true;
   type: "own_utterance";
   text: string;
 } & SharedFields;
 
-type ParticipantReaction = {
+export type ParticipantReaction = {
   type: "participant_reaction";
   reaction: string;
+  isOwn: false;
   onMessage: MessageId;
 } & SharedFields;
 
-type OwnReaction = {
+export type OwnReaction = {
   type: "own_reaction";
+  isOwn: true;
   reaction: string;
   onMessage: MessageId;
 } & SharedFields;
 
-type ToolUse<T> = {
+export type ToolUse<T> = {
   type: "tool_call";
+  isOwn: true;
   name: string;
   parameters: T;
 } & SharedFields;
 
-type ToolResult<T> = {
+export type ToolResult<T> = {
   type: "tool_result";
+  isOwn: true;
   name: string;
   result: T;
 } & SharedFields;
+
+export type DoNothing = { type: "do_nothing" } & SharedFields;
 
 export type HistoryEvent =
   | ParticipantUtterance
@@ -219,7 +230,8 @@ export type HistoryEvent =
   | OwnReaction
   | ParticipantReaction
   | ToolUse<unknown>
-  | ToolResult<unknown>;
+  | ToolResult<unknown>
+  | DoNothing;
 
 const idGeneration: SomethingInjection<() => string> = context((): MessageId =>
   crypto.randomUUID()
@@ -241,6 +253,7 @@ export const toolUseTurn = (
 ): HistoryEvent => ({
   type: "tool_call",
   ...sharedFields(),
+  isOwn: true,
   timestamp: timestampGeneration.access(),
   name: coerce(name),
   parameters: args,
@@ -250,13 +263,15 @@ export const participantUtteranceTurn = (
   { name, text }: { name: string; text: string },
 ): HistoryEvent => ({
   type: "participant_utterance",
+  isOwn: false,
   name: coerce(name),
   text,
   ...sharedFields(),
 });
 
-const ownTextTurn = (text: string): HistoryEvent => ({
+export const ownUtteranceTurn = (text: string): HistoryEvent => ({
   type: "own_utterance",
+  isOwn: true,
   text,
   ...sharedFields(),
 });
@@ -266,8 +281,15 @@ export const toolResultTurn = (
 ): HistoryEvent => ({
   ...sharedFields(),
   type: "tool_result",
+  isOwn: true,
   name: coerce(name),
   result: response,
+});
+
+const doNothingEvent = (): HistoryEvent => ({
+  type: "do_nothing",
+  isOwn: true,
+  ...sharedFields(),
 });
 
 const indexById = (events: HistoryEvent[]) => {
@@ -319,18 +341,26 @@ const historyEventToContent = (events: HistoryEvent[]) => {
         parts: [{ text: `reacted: ${e.reaction} to: ${text.slice(0, 100)}` }],
       };
     }
+    if (e.type === "do_nothing") {
+      return { role: "model", parts: [{ text: "" }] };
+    }
     throw new Error(
       `Unknown history event type: ${JSON.stringify(e, null, 2)}`,
     );
   };
 };
 
-export const runBot = async ({ actions, prompt, maxIterations }: BotSpec) => {
+export const runAgent = async (
+  { tools, prompt, maxIterations, onMaxIterationsReached }: AgentSpec,
+) => {
   const cacher = makeCache("gemini response with function calls v2");
   let c = 0;
   while (true) {
     c++;
-    if (c > maxIterations) throw new Error("Too many iterations");
+    if (c > maxIterations) {
+      onMaxIterationsReached();
+      return;
+    }
     const historyOuter = await getHistory();
     const history = historyOuter.map(historyEventToContent(historyOuter));
     if (empty(history) || (history[0].parts ?? [])[0].functionCall) {
@@ -342,16 +372,18 @@ export const runBot = async ({ actions, prompt, maxIterations }: BotSpec) => {
     const { text, functionCalls } = await pipe(
       debugLogsAfter(geminiInput),
       debugLogsAfter(cacher(callGemini(geminiProVersion))),
-    )(prompt, actions, history);
-    if (text) await outputEvent(ownTextTurn(text));
-    const calls = functionCalls ?? [];
-    const results = await map(callToResult(actions))(calls);
-    for (let i = 0; i < results.length; i++) {
-      await outputEvent(
-        toolResultTurn(coerce(results[i].functionResponse)),
-      );
-    }
-    if (empty(functionCalls)) return;
+    )(prompt, tools, history);
+    if (text) await outputEvent(ownUtteranceTurn(text));
+    await each(
+      pipe(
+        callToResult(tools),
+        ({ functionResponse }: Part) =>
+          outputEvent(toolResultTurn(coerce(functionResponse))),
+      ),
+    )(functionCalls);
+    if (empty(functionCalls) && !text) outputEvent(doNothingEvent());
+    const newHistory = await getHistory();
+    if (empty(functionCalls) && last(newHistory).isOwn) return;
   }
 };
 
