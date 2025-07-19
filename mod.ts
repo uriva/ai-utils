@@ -9,23 +9,7 @@ export {
   geminiGenJsonFromConvo,
   injectGeminiToken,
 } from "./src/gemini.ts";
-export {
-  type Action,
-  type BotSpec,
-  type HistoryEvent,
-  injectAccessHistory,
-  injectDebugger,
-  injectInMemoryHistory,
-  injectOutputEvent,
-  outputEvent,
-  overrideIdGenerator,
-  overrideTime,
-  participantUtteranceTurn,
-  runBot,
-  systemUser,
-  toolResultTurn,
-  toolUseTurn,
-} from "./src/geminiAgent.ts";
+export * from "./src/geminiAgent.ts";
 export {
   injectOpenAiToken,
   openAiGenJson,
