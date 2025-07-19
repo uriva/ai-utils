@@ -66,12 +66,11 @@ const removeAdditionalProperties = <T>(obj: Record<string, any>) => {
   return obj;
 };
 
-// deno-lint-ignore no-explicit-any
-export const zodToGeminiParameters = (zodObj: any) => {
+export const zodToGeminiParameters = (zodObj: ZodType): FunctionDeclaration => {
   const jsonSchema = removeAdditionalProperties(z.toJSONSchema(zodObj));
   // deno-lint-ignore no-unused-vars
   const { $schema, ...rest } = jsonSchema;
-  return rest as FunctionDeclaration;
+  return rest;
 };
 
 export const systemUser = "system";
