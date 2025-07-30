@@ -23,7 +23,7 @@ import {
 import { z, type ZodType } from "zod/v4";
 import { makeCache } from "./cacher.ts";
 import { accessGeminiToken, geminiProVersion } from "./gemini.ts";
-import type { FnToSameFn, SomethingInjection } from "./utils.ts";
+import type { SomethingInjection } from "./utils.ts";
 
 // deno-lint-ignore no-explicit-any
 const isRedundantAnyMember = (x: any) =>
@@ -407,4 +407,3 @@ const historyInjection: SomethingInjection<() => Promise<HistoryEvent[]>> =
 
 export const getHistory = historyInjection.access;
 export const injectAccessHistory = historyInjection.inject;
-
