@@ -13,11 +13,13 @@ import {
 } from "./mod.ts";
 import {
   type HistoryEvent,
-  injectInMemoryHistory,
+  injectAccessHistory,
+  injectOutputEvent,
   participantUtteranceTurn,
   toolResultTurn,
   toolUseTurn,
 } from "./src/geminiAgent.ts";
+import type { FnToSameFn } from "./src/utils.ts";
 
 const injectSecrets = pipe(
   injectCacher(() => (f) => f),
@@ -53,6 +55,17 @@ Deno.test(
     }
   }),
 );
+
+const injectInMemoryHistory = (
+  inMemoryHistory: HistoryEvent[],
+): FnToSameFn =>
+  pipe(
+    injectAccessHistory(() => Promise.resolve(inMemoryHistory)),
+    injectOutputEvent((event) => {
+      inMemoryHistory.push(event);
+      return Promise.resolve();
+    }),
+  );
 
 const agentDeps = (mutableHistory: HistoryEvent[]) =>
   pipe(injectInMemoryHistory(mutableHistory), injectDebugger(() => {}));

@@ -408,13 +408,3 @@ const historyInjection: SomethingInjection<() => Promise<HistoryEvent[]>> =
 export const getHistory = historyInjection.access;
 export const injectAccessHistory = historyInjection.inject;
 
-export const injectInMemoryHistory = (
-  inMemoryHistory: HistoryEvent[],
-): FnToSameFn =>
-  pipe(
-    injectAccessHistory(() => Promise.resolve(inMemoryHistory)),
-    injectOutputEvent((event) => {
-      inMemoryHistory.push(event);
-      return Promise.resolve();
-    }),
-  );
