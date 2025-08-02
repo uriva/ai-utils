@@ -131,13 +131,16 @@ const geminiInput = (
   contents,
 });
 
-// deno-lint-ignore no-explicit-any
-const parseWithCatch = <T extends ZodType>(parameters: T, args: any) => {
+const parseWithCatch = <T extends ZodType>(
+  parameters: T,
+  // deno-lint-ignore no-explicit-any
+  args: any,
+): { ok: false; error: Error } | { ok: true; result: z.infer<T> } => {
   try {
-    return parameters.parse(args);
+    return { ok: true, result: parameters.parse(args) };
   } catch (error) {
     console.error("Error parsing function call arguments:", error);
-    return null;
+    return { ok: false, error: error as Error };
   }
 };
 
@@ -156,9 +159,11 @@ const callToResult =
     );
     if (!action) return toFunctionResponse(`Function ${name} not found`);
     const { handler, parameters } = action;
-    const parsedArgs = parseWithCatch(parameters, args);
+    const parseResult = parseWithCatch(parameters, args);
     return toFunctionResponse(
-      parsedArgs ? await handler(parsedArgs) : `Invalid arguments for function`,
+      parseResult.ok
+        ? await handler(parseResult.result)
+        : `Invalid arguments: ${JSON.stringify(parseResult.error)}`,
     );
   };
 
