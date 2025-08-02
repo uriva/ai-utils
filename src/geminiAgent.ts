@@ -141,6 +141,10 @@ const parseWithCatch = <T extends ZodType>(parameters: T, args: any) => {
   }
 };
 
+const toFunctionResponse = (result: string) => ({
+  functionResponse: { name, response: { result } },
+});
+
 const callToResult =
   // deno-lint-ignore no-explicit-any
   (actions: Tool<any>[]) =>
@@ -150,26 +154,12 @@ const callToResult =
     const action: Tool<T> | undefined = actions.find(({ name: n }) =>
       n === name
     );
-    if (!action) {
-      return {
-        functionResponse: {
-          name,
-          response: { result: `Function ${name} not found` },
-        },
-      };
-    }
+    if (!action) return toFunctionResponse(`Function ${name} not found`);
     const { handler, parameters } = action;
     const parsedArgs = parseWithCatch(parameters, args);
-    return {
-      functionResponse: {
-        name,
-        response: {
-          result: parsedArgs
-            ? await handler(parsedArgs)
-            : `Invalid arguments for function`,
-        },
-      },
-    };
+    return toFunctionResponse(
+      parsedArgs ? await handler(parsedArgs) : `Invalid arguments for function`,
+    );
   };
 
 const debugLogsAfter = <F extends Func>(f: F) =>
