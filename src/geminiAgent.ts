@@ -75,11 +75,11 @@ export const zodToGeminiParameters = (zodObj: ZodType): FunctionDeclaration => {
 
 export const systemUser = "system";
 
-export type Tool<T extends ZodType, O> = {
+export type Tool<T extends ZodType> = {
   description: string;
   name: string;
   parameters: T;
-  handler: (params: z.infer<T>) => Promise<O>;
+  handler: (params: z.infer<T>) => Promise<string>;
 };
 
 type GeminiOutput = {
@@ -99,7 +99,7 @@ const callGemini = (model: string) => ((
 
 export type AgentSpec = {
   // deno-lint-ignore no-explicit-any
-  tools: Tool<any, any>[];
+  tools: Tool<any>[];
   prompt: string;
   maxIterations: number;
   // deno-lint-ignore no-explicit-any
@@ -107,7 +107,7 @@ export type AgentSpec = {
 };
 
 // deno-lint-ignore no-explicit-any
-const actionToTool = ({ name, description, parameters }: Tool<any, any>) => ({
+const actionToTool = ({ name, description, parameters }: Tool<any>) => ({
   name,
   description,
   parameters: zodToGeminiParameters(parameters),
@@ -116,7 +116,7 @@ const actionToTool = ({ name, description, parameters }: Tool<any, any>) => ({
 const geminiInput = (
   systemInstruction: string,
   // deno-lint-ignore no-explicit-any
-  actions: Tool<any, any>[],
+  actions: Tool<any>[],
   contents: Content[],
 ): Omit<GenerateContentParameters, "model"> => ({
   config: {
@@ -144,11 +144,11 @@ const parseWithCatch = <T extends ZodType>(parameters: T, args: any) => {
 
 const callToResult =
   // deno-lint-ignore no-explicit-any
-  (actions: Tool<any, any>[]) =>
-  async <T extends ZodType, O>(fc: FunctionCall): Promise<Part> => {
+  (actions: Tool<any>[]) =>
+  async <T extends ZodType>(fc: FunctionCall): Promise<Part> => {
     await outputEvent(toolUseTurn(fc));
     const { name, args } = fc;
-    const action: Tool<T, O> | undefined = actions.find(({ name: n }) =>
+    const action: Tool<T> | undefined = actions.find(({ name: n }) =>
       n === name
     );
     if (!action) {
