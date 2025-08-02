@@ -144,7 +144,7 @@ const parseWithCatch = <T extends ZodType>(
   }
 };
 
-const toFunctionResponse = (result: string) => ({
+const toFunctionResponse = (name: string, result: string) => ({
   functionResponse: { name, response: { result } },
 });
 
@@ -157,10 +157,12 @@ const callToResult =
     const action: Tool<T> | undefined = actions.find(({ name: n }) =>
       n === name
     );
-    if (!action) return toFunctionResponse(`Function ${name} not found`);
+    if (!name) throw new Error("Function call name is missing");
+    if (!action) return toFunctionResponse(name, `Function ${name} not found`);
     const { handler, parameters } = action;
     const parseResult = parseWithCatch(parameters, args);
     return toFunctionResponse(
+      name,
       parseResult.ok
         ? await handler(parseResult.result)
         : `Invalid arguments: ${JSON.stringify(parseResult.error)}`,
