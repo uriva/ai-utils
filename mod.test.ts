@@ -116,10 +116,7 @@ Deno.test(
   injectSecrets(async () => {
     await agentDeps([
       toolUseTurn({ name: someTool.name, args: {} }),
-      toolResultTurn({
-        name: someTool.name,
-        response: { result: toolResult },
-      }),
+      toolResultTurn({ name: someTool.name, result: toolResult }),
     ])(
       runAgent,
     )({

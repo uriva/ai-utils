@@ -2,11 +2,9 @@ import {
   type Content,
   type FunctionCall,
   type FunctionDeclaration,
-  type FunctionResponse,
   type GenerateContentParameters,
   type GenerateContentResponse,
   GoogleGenAI,
-  type Part,
 } from "@google/genai";
 import { context } from "context-inject";
 import {
@@ -144,29 +142,27 @@ const parseWithCatch = <T extends ZodType>(
   }
 };
 
-const toFunctionResponse = (name: string, result: string) => ({
-  functionResponse: { name, response: { result } },
-});
-
 const callToResult =
   // deno-lint-ignore no-explicit-any
   (actions: Tool<any>[]) =>
-  async <T extends ZodType>(fc: FunctionCall): Promise<Part> => {
+  async <T extends ZodType>(
+    fc: FunctionCall,
+  ): Promise<{ name: string; result: string }> => {
     await outputEvent(toolUseTurn(fc));
     const { name, args } = fc;
     const action: Tool<T> | undefined = actions.find(({ name: n }) =>
       n === name
     );
     if (!name) throw new Error("Function call name is missing");
-    if (!action) return toFunctionResponse(name, `Function ${name} not found`);
+    if (!action) return { name, result: `Function ${name} not found` };
     const { handler, parameters } = action;
     const parseResult = parseWithCatch(parameters, args);
-    return toFunctionResponse(
+    return {
       name,
-      parseResult.ok
+      result: parseResult.ok
         ? await handler(parseResult.result)
         : `Invalid arguments: ${JSON.stringify(parseResult.error)}`,
-    );
+    };
   };
 
 const debugLogsAfter = <F extends Func>(f: F) =>
@@ -210,11 +206,11 @@ export type ToolUse<T> = {
   parameters: T;
 } & SharedFields;
 
-export type ToolResult<T> = {
+export type ToolResult = {
   type: "tool_result";
   isOwn: true;
   name: string;
-  result: T;
+  result: string;
 } & SharedFields;
 
 export type DoNothing = { type: "do_nothing" } & SharedFields;
@@ -225,7 +221,7 @@ export type HistoryEvent =
   | OwnReaction
   | ParticipantReaction
   | ToolUse<unknown>
-  | ToolResult<unknown>
+  | ToolResult
   | DoNothing;
 
 const idGeneration: SomethingInjection<() => string> = context((): MessageId =>
@@ -272,13 +268,13 @@ export const ownUtteranceTurn = (text: string): HistoryEvent => ({
 });
 
 export const toolResultTurn = (
-  { name, response }: FunctionResponse,
+  { name, result }: { name: string; result: string },
 ): HistoryEvent => ({
   ...sharedFields(),
   type: "tool_result",
   isOwn: true,
-  name: coerce(name),
-  result: response,
+  name,
+  result,
 });
 
 const doNothingEvent = (): HistoryEvent => ({
@@ -320,7 +316,7 @@ const historyEventToContent = (events: HistoryEvent[]) => {
         parts: [{
           functionResponse: {
             name: e.name,
-            response: e.result as Record<string, unknown>,
+            response: { result: e.result },
           },
         }],
       };
@@ -369,13 +365,9 @@ export const runAgent = async (
       debugLogsAfter(cacher(callGemini(geminiProVersion))),
     )(prompt, tools, history);
     if (text) await outputEvent(ownUtteranceTurn(text));
-    await each(
-      pipe(
-        callToResult(tools),
-        ({ functionResponse }: Part) =>
-          outputEvent(toolResultTurn(coerce(functionResponse))),
-      ),
-    )(functionCalls);
+    await each(pipe(callToResult(tools), toolResultTurn, outputEvent))(
+      functionCalls,
+    );
     if (empty(functionCalls) && !text) outputEvent(doNothingEvent());
     const newHistory = await getHistory();
     if (empty(functionCalls) && last(newHistory).isOwn) return;
