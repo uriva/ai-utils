@@ -394,11 +394,19 @@ export const runAgent = async (
   }
 };
 
-const makeDebugLogger = <T>() => context((_: T): void | Promise<void> => {});
+const makeDebugLogger = <Input>(): SomethingInjection<
+  (inp: Input) => void | Promise<void>
+> => context((_) => {});
 
-const debugHistory = makeDebugLogger<Content[]>();
-const debugModelOutput = makeDebugLogger<GenerateContentResponse>();
-const debugTimeElapsedMs = makeDebugLogger<number>();
+const debugHistory: SomethingInjection<
+  (inp: Content[]) => void | Promise<void>
+> = makeDebugLogger<Content[]>();
+const debugModelOutput: SomethingInjection<
+  (inp: GenerateContentResponse) => void | Promise<void>
+> = makeDebugLogger<GenerateContentResponse>();
+const debugTimeElapsedMs: SomethingInjection<
+  (inp: number) => void | Promise<void>
+> = makeDebugLogger<number>();
 
 export const injecTimerMs = debugTimeElapsedMs.inject;
 export const injectDebugHistory = debugHistory.inject;
