@@ -31,6 +31,7 @@ const openAiToGeminiMessage = pipe(
 );
 
 export const geminiProVersion = "gemini-2.5-pro-preview-06-05";
+export const geminiFlashVersion = "gemini-2.5-flash-preview-05-20";
 
 export const geminiGenJsonFromConvo: <T extends ZodType>(
   { thinking, mini }: ModelOpts,
@@ -49,7 +50,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
   );
   return JSON.parse(
     await cachedCall({
-      model: mini ? "gemini-2.5-flash-preview-05-20" : geminiProVersion,
+      model: mini ? geminiFlashVersion : geminiProVersion,
       config: {
         responseMimeType: "application/json",
         responseSchema: zodToGeminiParameters(zodType),

@@ -5,7 +5,6 @@ import { z } from "zod/v4";
 import {
   geminiGenJsonFromConvo,
   injectCacher,
-  injectDebugger,
   injectGeminiToken,
   injectOpenAiToken,
   openAiGenJsonFromConvo,
@@ -56,9 +55,7 @@ Deno.test(
   }),
 );
 
-const injectInMemoryHistory = (
-  inMemoryHistory: HistoryEvent[],
-): FnToSameFn =>
+const agentDeps = (inMemoryHistory: HistoryEvent[]): FnToSameFn =>
   pipe(
     injectAccessHistory(() => Promise.resolve(inMemoryHistory)),
     injectOutputEvent((event) => {
@@ -66,9 +63,6 @@ const injectInMemoryHistory = (
       return Promise.resolve();
     }),
   );
-
-const agentDeps = (mutableHistory: HistoryEvent[]) =>
-  pipe(injectInMemoryHistory(mutableHistory), injectDebugger(() => {}));
 
 const toolResult = "43212e8e-4c29-4a3c-aba2-723e668b5537";
 
