@@ -15,11 +15,17 @@ import {
   groupBy,
   last,
   pipe,
+  retry,
   sideEffect,
+  timeit,
 } from "gamla";
 import { z, type ZodType } from "zod/v4";
 import { makeCache } from "./cacher.ts";
-import { accessGeminiToken, geminiProVersion } from "./gemini.ts";
+import {
+  accessGeminiToken,
+  geminiFlashVersion,
+  geminiProVersion,
+} from "./gemini.ts";
 import type { SomethingInjection } from "./utils.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -101,6 +107,7 @@ export type AgentSpec = {
   maxIterations: number;
   // deno-lint-ignore no-explicit-any
   onMaxIterationsReached: () => any;
+  lightModel?: boolean;
 };
 
 // deno-lint-ignore no-explicit-any
@@ -165,8 +172,9 @@ const callToResult =
     };
   };
 
-const debugLogsAfter = <F extends Func>(f: F) =>
-  pipe(f, sideEffect(debugLogs.access<Awaited<ReturnType<F>>>));
+const runSideEffectAfter =
+  <F extends Func>(side: (x: Awaited<ReturnType<F>>) => void | Promise<void>) =>
+  (f: F) => pipe(f, sideEffect(side));
 
 type SharedFields = { id: MessageId; timestamp: number; isOwn: boolean };
 
@@ -342,7 +350,8 @@ const historyEventToContent = (events: HistoryEvent[]) => {
 };
 
 export const runAgent = async (
-  { tools, prompt, maxIterations, onMaxIterationsReached }: AgentSpec,
+  { tools, prompt, maxIterations, onMaxIterationsReached, lightModel }:
+    AgentSpec,
 ) => {
   const cacher = makeCache("gemini response with function calls v2");
   let c = 0;
@@ -361,9 +370,20 @@ export const runAgent = async (
       });
     }
     const { text, functionCalls } = await pipe(
-      debugLogsAfter(geminiInput),
-      debugLogsAfter(cacher(callGemini(geminiProVersion))),
-    )(prompt, tools, history);
+      geminiInput,
+      runSideEffectAfter(debugModelOutput.access)(
+        cacher(
+          // August 31st 2025, gemini returns frequent 500 errors.
+          retry(
+            1000,
+            1,
+            timeit(debugTimeElapsedMs.access, callGemini)(
+              lightModel ? geminiFlashVersion : geminiProVersion,
+            ),
+          ),
+        ),
+      ),
+    )(prompt, tools, sideEffect(debugHistory.access)(history));
     if (text) await outputEvent(ownUtteranceTurn(text));
     await each(pipe(callToResult(tools), toolResultTurn, outputEvent))(
       functionCalls,
@@ -374,11 +394,15 @@ export const runAgent = async (
   }
 };
 
-const debugLogs: SomethingInjection<<T>(t: T) => void> = context(
-  <T>(_: T) => {},
-);
+const makeDebugLogger = <T>() => context((_: T): void | Promise<void> => {});
 
-export const injectDebugger = debugLogs.inject;
+const debugHistory = makeDebugLogger<Content[]>();
+const debugModelOutput = makeDebugLogger<GenerateContentResponse>();
+const debugTimeElapsedMs = makeDebugLogger<number>();
+
+export const injecTimerMs = debugTimeElapsedMs.inject;
+export const injectDebugHistory = debugHistory.inject;
+export const injectDebugOutput = debugModelOutput.inject;
 
 const modelOutput: SomethingInjection<(event: HistoryEvent) => Promise<void>> =
   context((_event: HistoryEvent): Promise<void> => {
