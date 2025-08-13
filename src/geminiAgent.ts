@@ -408,7 +408,7 @@ const debugTimeElapsedMs: SomethingInjection<
   (inp: number) => void | Promise<void>
 > = makeDebugLogger<number>();
 
-export const injecTimerMs = debugTimeElapsedMs.inject;
+export const injectTimerMs = debugTimeElapsedMs.inject;
 export const injectDebugHistory = debugHistory.inject;
 export const injectDebugOutput = debugModelOutput.inject;
 
