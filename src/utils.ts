@@ -1,6 +1,6 @@
 import { type EitherOutput, type Func, throwerCatcher } from "gamla";
 
-export type ModelOpts = { thinking: boolean; mini: boolean };
+export type ModelOpts = { mini: boolean };
 
 const typeAdherenceError = throwerCatcher();
 

@@ -21,39 +21,9 @@ const tokenInjection: TokenInjection = context((): string => {
 export const injectOpenAiToken = (token: string): FnToSameFn =>
   tokenInjection.inject(() => token);
 
-const extractLastMarkdownJsonBlock = (text: string): string | null => {
-  const regex = /```json([\s\S]*?)```/g;
-  const matches = [...text.matchAll(regex)];
-  return matches.length > 0 ? matches[matches.length - 1][1].trim() : null;
-};
-
-type StructuredInference = <T extends ZodType>(
-  opts: ModelOpts,
-  msgs: ChatCompletionMessageParam[],
-  zodType: T,
-) => Promise<z.infer<T>>;
-
-export const extractJson =
-  <T extends ZodType>(genMethod: StructuredInference) =>
-  (typing: T) =>
-  async (text: string): Promise<z.infer<T>> => {
-    const jsonText = extractLastMarkdownJsonBlock(text) ?? text;
-    try {
-      return JSON.parse(jsonText) as z.infer<T>;
-    } catch (_) {
-      return await genMethod(
-        { thinking: false, mini: true },
-        structuredMsgs("Fix this json.", text),
-        typing,
-      );
-    }
-  };
-
-export const openAiGenJsonFromConvo = async <
-  // deno-lint-ignore no-explicit-any
-  T extends ZodType<any, any, any>,
->(
-  { mini, thinking }: ModelOpts,
+// deno-lint-ignore no-explicit-any
+export const openAiGenJsonFromConvo = async <T extends ZodType<any, any, any>>(
+  { mini }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
 ): Promise<z.infer<T>> => {
@@ -64,9 +34,7 @@ export const openAiGenJsonFromConvo = async <
       .parse(opts)
   );
   const { choices } = await cachedCall({
-    model: thinking
-      ? (mini ? "o4-mini" : "o3")
-      : (mini ? "gpt-4.1-mini" : "gpt-4.1"),
+    model: mini ? "gpt-5-mini" : "gpt-5",
     messages,
     response_format: {
       type: "json_schema",
@@ -81,9 +49,7 @@ export const openAiGenJsonFromConvo = async <
     aiRefusesToAdhereTyping();
     throw new Error("AI refused to return content");
   }
-  return (thinking ? extractJson(openAiGenJsonFromConvo)(zodType) : JSON.parse)(
-    choices[0].message.content,
-  );
+  return JSON.parse(choices[0].message.content);
 };
 
 export const structuredMsgs = (

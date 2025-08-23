@@ -34,7 +34,7 @@ export const geminiProVersion = "gemini-2.5-pro-preview-06-05";
 export const geminiFlashVersion = "gemini-2.5-flash-preview-05-20";
 
 export const geminiGenJsonFromConvo: <T extends ZodType>(
-  { thinking, mini }: ModelOpts,
+  { mini }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
 ) => Promise<z.infer<T>> = async <T extends ZodType>(

@@ -1,6 +1,6 @@
 {
   "name": "@uri/ai-utils",
-  "version": "0.1.46",
+  "version": "0.1.47",
   "license": "MIT",
   "exports": "./mod.ts",
   "imports": {
@@ -9,5 +9,8 @@
     "gamla": "npm:gamla@124.0.0",
     "openai": "npm:openai@5.2.0",
     "zod": "npm:zod@3.25.57"
+  },
+  "tasks": {
+    "test": "deno test --allow-env --allow-net --env=.env"
   }
 }
