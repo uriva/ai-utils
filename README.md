@@ -1,11 +1,10 @@
 # ai-utils
 
-A collection of utilities for working with AI APIs (OpenAI, Gemini, DeepSeek) in
-Deno.
+A collection of utilities for working with AI APIs (OpenAI, Gemini) in Deno.
 
 ## Features
 
-- Unified interface for calling OpenAI, Gemini, and DeepSeek models
+- Unified interface for different providers.
 - Schema-based JSON output using [zod](https://github.com/colinhacks/zod)
 - Dependency injection for API keys and caching
 - Utilities for matching, conversation history, and more
@@ -47,13 +46,8 @@ const messages = [
   { role: "user", content: "hello" },
 ];
 
-const result = await injectSecrets(
-  async () =>
-    await openAiGenJsonFromConvo(
-      { thinking: false, mini: false },
-      messages,
-      schema,
-    ),
+const result = await injectSecrets(async () =>
+  await openAiGenJsonFromConvo({ mini: false }, messages, schema)
 );
 console.log(result); // { hello: "..." }
 ```

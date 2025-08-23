@@ -1,4 +1,4 @@
-import { pipe, sleep } from "gamla";
+import { each, pipe, sleep } from "gamla";
 import { assert, assertEquals } from "jsr:@std/assert";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z } from "zod/v4";
@@ -36,22 +36,13 @@ Deno.test(
       { role: "system", content: "Say hello as JSON." },
       { role: "user", content: "hello" },
     ];
-    for (
-      const service of [openAiGenJsonFromConvo, geminiGenJsonFromConvo]
-    ) {
-      for (
-        const [thinking, mini] of [
-          [false, false],
-          [false, true],
-          [true, false],
-          [true, true],
-        ]
-      ) {
-        const result = await service({ thinking, mini }, messages, schema);
+    await each((service) =>
+      each(async (mini) => {
+        const result = await service({ mini }, messages, schema);
         console.log(result);
         assertEquals(result, { hello: result.hello });
-      }
-    }
+      })([true, false])
+    )([openAiGenJsonFromConvo, geminiGenJsonFromConvo]);
   }),
 );
 
