@@ -243,3 +243,38 @@ Deno.test(
     assert(true, "Agent should stop when max iterations reached");
   }),
 );
+
+Deno.test(
+  "agent repeats back order of four speakers",
+  injectSecrets(async () => {
+    const mockHistory = [
+      { name: "Alice", text: "Hi everyone" },
+      { name: "Bob", text: "Yo" },
+      { name: "Carol", text: "Howdy" },
+      { name: "Dave", text: "Hello" },
+      {
+        name: "Alice",
+        text:
+          "List the speakers in the order they first spoke. Reply ONLY with: Alice,Bob,Carol,Dave",
+      },
+    ].map(participantUtteranceTurn);
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 5,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt:
+        "You are an AI that strictly follows formatting instructions. When asked to list speakers, reply exactly as instructed without extra text.",
+    });
+
+    const answer = mockHistory.find((
+      e,
+    ): e is Extract<HistoryEvent, { type: "own_utterance" }> =>
+      e.type === "own_utterance" && "text" in e && typeof e.text === "string" &&
+      e.text.trim().startsWith("Alice")
+    );
+    assert(answer, "AI should respond with an own_utterance");
+    const normalized = answer.text.replace(/\s/g, "");
+    assertEquals(normalized, "Alice,Bob,Carol,Dave");
+  }),
+);
