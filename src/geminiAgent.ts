@@ -302,7 +302,7 @@ const historyEventToContent = (events: HistoryEvent[]) => {
   const eventById = indexById(events);
   return (e: HistoryEvent): Content => {
     if (e.type === "participant_utterance") {
-      return { role: "user", parts: [{ text: e.text }] };
+      return { role: "user", parts: [{ text: `${e.name}: ${e.text}` }] };
     }
     if (e.type === "own_utterance") {
       return { role: "model", parts: [{ text: e.text }] };
