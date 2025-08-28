@@ -204,12 +204,16 @@ type SharedFields = { id: MessageId; timestamp: number; isOwn: boolean };
 
 type MessageId = string;
 
-export type ParticipantUtterance = {
-  type: "participant_utterance";
-  isOwn: false;
-  name: string;
-  text: string;
-} & SharedFields;
+type ParticipantDetail = { name: string };
+
+export type ParticipantUtterance =
+  & {
+    type: "participant_utterance";
+    isOwn: false;
+    text: string;
+  }
+  & ParticipantDetail
+  & SharedFields;
 
 export type OwnUtterance = {
   isOwn: true;
@@ -218,12 +222,15 @@ export type OwnUtterance = {
   text: string;
 } & SharedFields;
 
-export type ParticipantReaction = {
-  type: "participant_reaction";
-  reaction: string;
-  isOwn: false;
-  onMessage: MessageId;
-} & SharedFields;
+export type ParticipantReaction =
+  & {
+    type: "participant_reaction";
+    reaction: string;
+    isOwn: false;
+    onMessage: MessageId;
+  }
+  & ParticipantDetail
+  & SharedFields;
 
 export type OwnReaction = {
   type: "own_reaction";
@@ -350,7 +357,7 @@ const historyEventToContent = (events: HistoryEvent[]) => {
         role: "model",
         parts: [{
           thoughtSignature: e.modelMetadata?.thoughtSignature,
-          text: e.text,
+          text: `You: ${e.text}`,
         }],
       };
     }
@@ -384,7 +391,7 @@ const historyEventToContent = (events: HistoryEvent[]) => {
         role: "model",
         parts: [{
           thoughtSignature: e.modelMetadata?.thoughtSignature,
-          text: `reacted: ${e.reaction} to: ${text.slice(0, 100)}`,
+          text: `You reacted ${e.reaction} to message: ${text.slice(0, 100)}`,
         }],
       };
     }
@@ -393,7 +400,11 @@ const historyEventToContent = (events: HistoryEvent[]) => {
       const text = typeof msg === "object" && "text" in msg ? msg.text : "";
       return {
         role: "user",
-        parts: [{ text: `reacted: ${e.reaction} to: ${text.slice(0, 100)}` }],
+        parts: [{
+          text: `${e.name} reacted ${e.reaction} to message: ${
+            text.slice(0, 100)
+          }`,
+        }],
       };
     }
     if (e.type === "do_nothing") {
