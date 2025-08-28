@@ -5,15 +5,17 @@ import {
   type GenerateContentParameters,
   type GenerateContentResponse,
   GoogleGenAI,
+  type Part,
 } from "@google/genai";
 import { context } from "context-inject";
 import {
   coerce,
   each,
   empty,
-  type Func,
+  filter,
   groupBy,
   last,
+  map,
   pipe,
   retry,
   sideEffect,
@@ -85,10 +87,17 @@ export type Tool<T extends ZodType> = {
   handler: (params: z.infer<T>) => Promise<string>;
 };
 
-type GeminiOutput = {
-  text: string;
-  functionCalls: FunctionCall[];
+type GeminiFunctiontoolPart = {
+  type: "function_call";
+  functionCall: FunctionCall;
+  thoughtSignature?: string;
 };
+
+type GeminiPartOfInterest =
+  | { type: "text"; text: string; thoughtSignature?: string }
+  | GeminiFunctiontoolPart;
+
+type GeminiOutput = GeminiPartOfInterest[];
 
 const callGemini = (model: string) => ((
   req: Omit<GenerateContentParameters, "model">,
@@ -96,9 +105,20 @@ const callGemini = (model: string) => ((
   new GoogleGenAI({ apiKey: accessGeminiToken() }).models.generateContent({
     model,
     ...req,
-  }).then((
-    { text, functionCalls }: GenerateContentResponse,
-  ) => ({ text: text ?? "", functionCalls: functionCalls ?? [] })));
+  })
+    .then((resp: GenerateContentResponse): GeminiOutput =>
+      (resp.candidates?.[0]?.content?.parts ?? [])
+        .flatMap((part: Part): GeminiOutput => {
+          const { text, functionCall, thoughtSignature } = part;
+          if (functionCall) {
+            return [{ type: "function_call", functionCall, thoughtSignature }];
+          }
+          if (typeof text === "string") {
+            return [{ type: "text", text, thoughtSignature }];
+          }
+          return [];
+        })
+    ));
 
 export type AgentSpec = {
   // deno-lint-ignore no-explicit-any
@@ -172,9 +192,13 @@ const callToResult =
     };
   };
 
-const runSideEffectAfter =
-  <F extends Func>(side: (x: Awaited<ReturnType<F>>) => void | Promise<void>) =>
-  (f: F) => pipe(f, sideEffect(side));
+const runSideEffectAfter = <T>(
+  side: (x: T) => void | Promise<void>,
+) =>
+// deno-lint-ignore no-explicit-any
+<F extends (...xs: any[]) => T | Promise<T>>(f: F) =>
+  // @ts-expect-error cannot infer correctness
+  pipe(f, sideEffect(side));
 
 type SharedFields = { id: MessageId; timestamp: number; isOwn: boolean };
 
@@ -187,8 +211,9 @@ export type ParticipantUtterance = {
   text: string;
 } & SharedFields;
 
-export type OwnText = {
+export type OwnUtterance = {
   isOwn: true;
+  modelMetadata?: ModelMetadata;
   type: "own_utterance";
   text: string;
 } & SharedFields;
@@ -203,6 +228,7 @@ export type ParticipantReaction = {
 export type OwnReaction = {
   type: "own_reaction";
   isOwn: true;
+  modelMetadata?: ModelMetadata;
   reaction: string;
   onMessage: MessageId;
 } & SharedFields;
@@ -211,6 +237,7 @@ export type ToolUse<T> = {
   type: "tool_call";
   isOwn: true;
   name: string;
+  modelMetadata?: ModelMetadata;
   parameters: T;
 } & SharedFields;
 
@@ -225,7 +252,7 @@ export type DoNothing = { type: "do_nothing" } & SharedFields;
 
 export type HistoryEvent =
   | ParticipantUtterance
-  | OwnText
+  | OwnUtterance
   | OwnReaction
   | ParticipantReaction
   | ToolUse<unknown>
@@ -247,8 +274,11 @@ const sharedFields = () => ({
   timestamp: timestampGeneration.access(),
 });
 
-export const toolUseTurn = (
+type ModelMetadata = { type: "gemini"; thoughtSignature: string };
+
+const toolUseTurnWithMetadata = (
   { name, args }: FunctionCall,
+  modelMetadata: ModelMetadata | undefined,
 ): HistoryEvent => ({
   type: "tool_call",
   ...sharedFields(),
@@ -256,7 +286,11 @@ export const toolUseTurn = (
   timestamp: timestampGeneration.access(),
   name: coerce(name),
   parameters: args,
+  modelMetadata,
 });
+
+export const toolUseTurn = ({ name, args }: FunctionCall): HistoryEvent =>
+  toolUseTurnWithMetadata({ name, args }, undefined);
 
 export const participantUtteranceTurn = (
   { name, text }: { name: string; text: string },
@@ -268,12 +302,19 @@ export const participantUtteranceTurn = (
   ...sharedFields(),
 });
 
-export const ownUtteranceTurn = (text: string): HistoryEvent => ({
+const ownUtteranceTurnWithMetadata = (
+  text: string,
+  modelMetadata: ModelMetadata | undefined,
+): HistoryEvent => ({
   type: "own_utterance",
   isOwn: true,
+  modelMetadata,
   text,
   ...sharedFields(),
 });
+
+export const ownUtteranceTurn = (text: string): HistoryEvent =>
+  ownUtteranceTurnWithMetadata(text, undefined);
 
 export const toolResultTurn = (
   { name, result }: { name: string; result: string },
@@ -305,12 +346,19 @@ const historyEventToContent = (events: HistoryEvent[]) => {
       return { role: "user", parts: [{ text: `${e.name}: ${e.text}` }] };
     }
     if (e.type === "own_utterance") {
-      return { role: "model", parts: [{ text: e.text }] };
+      return {
+        role: "model",
+        parts: [{
+          thoughtSignature: e.modelMetadata?.thoughtSignature,
+          text: e.text,
+        }],
+      };
     }
     if (e.type === "tool_call") {
       return {
         role: "model",
         parts: [{
+          thoughtSignature: e.modelMetadata?.thoughtSignature,
           functionCall: {
             name: e.name,
             args: e.parameters as Record<string, unknown>,
@@ -329,14 +377,22 @@ const historyEventToContent = (events: HistoryEvent[]) => {
         }],
       };
     }
-    if (e.type === "participant_reaction" || e.type === "own_reaction") {
+    if (e.type === "own_reaction") {
       const msg = eventById(e.onMessage);
-      const text = typeof msg === "object" && "text" in msg
-        ? (msg.text as string)
-        : "";
-      const role = e.type === "participant_reaction" ? "user" : "model";
+      const text = typeof msg === "object" && "text" in msg ? msg.text : "";
       return {
-        role,
+        role: "model",
+        parts: [{
+          thoughtSignature: e.modelMetadata?.thoughtSignature,
+          text: `reacted: ${e.reaction} to: ${text.slice(0, 100)}`,
+        }],
+      };
+    }
+    if (e.type === "participant_reaction") {
+      const msg = eventById(e.onMessage);
+      const text = typeof msg === "object" && "text" in msg ? msg.text : "";
+      return {
+        role: "user",
         parts: [{ text: `reacted: ${e.reaction} to: ${text.slice(0, 100)}` }],
       };
     }
@@ -353,7 +409,7 @@ export const runAgent = async (
   { tools, prompt, maxIterations, onMaxIterationsReached, lightModel }:
     AgentSpec,
 ) => {
-  const cacher = makeCache("gemini response with function calls v2");
+  const cacher = makeCache("gemini response with function calls v4");
   let c = 0;
   while (true) {
     c++;
@@ -369,7 +425,7 @@ export const runAgent = async (
         parts: [{ text: "<conversation started>" }],
       });
     }
-    const { text, functionCalls } = await pipe(
+    const parts = await pipe(
       geminiInput,
       runSideEffectAfter(debugModelOutput.access)(
         cacher(
@@ -384,13 +440,17 @@ export const runAgent = async (
         ),
       ),
     )(prompt, tools, sideEffect(debugHistory.access)(history));
-    if (text) await outputEvent(ownUtteranceTurn(text));
-    await each(pipe(callToResult(tools), toolResultTurn, outputEvent))(
-      functionCalls,
+    await handleInitialOutputEvent(parts);
+    await handleFunctionCalls(tools)(parts);
+    const sawFunction = parts.some(({ type }: GeminiPartOfInterest) =>
+      type === "function_call"
     );
-    if (empty(functionCalls) && !text) outputEvent(doNothingEvent());
+    if (
+      !sawFunction &&
+      !parts.some((p: GeminiPartOfInterest) => p.type === "text" && p.text)
+    ) outputEvent(doNothingEvent());
     const newHistory = await getHistory();
-    if (empty(functionCalls) && last(newHistory).isOwn) return;
+    if (!sawFunction && last(newHistory).isOwn) return;
   }
 };
 
@@ -402,8 +462,8 @@ const debugHistory: SomethingInjection<
   (inp: Content[]) => void | Promise<void>
 > = makeDebugLogger<Content[]>();
 const debugModelOutput: SomethingInjection<
-  (inp: GenerateContentResponse) => void | Promise<void>
-> = makeDebugLogger<GenerateContentResponse>();
+  (inp: GeminiOutput) => void | Promise<void>
+> = makeDebugLogger<GeminiOutput>();
 const debugTimeElapsedMs: SomethingInjection<
   (inp: number) => void | Promise<void>
 > = makeDebugLogger<number>();
@@ -427,3 +487,38 @@ const historyInjection: SomethingInjection<() => Promise<HistoryEvent[]>> =
 
 export const getHistory = historyInjection.access;
 export const injectAccessHistory = historyInjection.inject;
+
+const handleInitialOutputEvent = each(
+  pipe(
+    (p: GeminiPartOfInterest) => {
+      if (p.type === "text" && p.text) {
+        return p.thoughtSignature
+          ? ownUtteranceTurnWithMetadata(p.text, {
+            type: "gemini",
+            thoughtSignature: p.thoughtSignature,
+          })
+          : ownUtteranceTurn(p.text);
+      }
+      if (p.type === "function_call") {
+        return p.thoughtSignature
+          ? toolUseTurnWithMetadata(p.functionCall, {
+            type: "gemini",
+            thoughtSignature: p.thoughtSignature,
+          })
+          : toolUseTurn(p.functionCall);
+      }
+      throw new Error(`Unknown part type: ${JSON.stringify(p)}`);
+    },
+    outputEvent,
+  ),
+);
+
+// deno-lint-ignore no-explicit-any
+const handleFunctionCalls = (tools: Tool<any>[]) =>
+  pipe(
+    filter((p: GeminiPartOfInterest): p is GeminiFunctiontoolPart =>
+      p.type === "function_call"
+    ),
+    map(({ functionCall }: GeminiFunctiontoolPart) => functionCall),
+    each(pipe(callToResult(tools), toolResultTurn, outputEvent)),
+  );

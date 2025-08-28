@@ -92,9 +92,14 @@ Deno.test(
       tools: [someTool],
       prompt: `You are an AI assistant.`,
     });
-    assert(mockHistory.some((event) => (event.type === "own_utterance" &&
-      event.text?.includes(toolResult))
-    ));
+    assert(
+      mockHistory.some((event) => (event.type === "own_utterance" &&
+        event.text.includes(toolResult))
+      ),
+      `AI did not reply with tool output. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
   }),
 );
 
@@ -224,37 +229,29 @@ Deno.test(
       name: "user",
       text: `Please keep talking and calling tools continuously.`,
     })];
-
-    // Add a tool that ensures the agent will keep iterating
-    const continuousTool = {
-      name: "continueTalking",
-      description: "A tool that keeps the conversation going",
-      parameters: z.object({}),
-      handler: async () => {
-        // Add another user message to keep the conversation going
-        await sleep(5); // Small delay to satisfy async requirement
-        mockHistory.push(participantUtteranceTurn({
-          name: "user",
-          text: "Keep going, call the tool again!",
-        }));
-        return "continue";
-      },
-    };
-
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 3, // Very low limit to ensure we hit it
       onMaxIterationsReached: () => {
         callbackCalled = true;
       },
-      tools: [continuousTool],
+      tools: [{
+        name: "continueTalking",
+        description: "A tool that keeps the conversation going",
+        parameters: z.object({}),
+        handler: async () => {
+          // Add another user message to keep the conversation going
+          await sleep(5); // Small delay to satisfy async requirement
+          mockHistory.push(participantUtteranceTurn({
+            name: "user",
+            text: "Keep going, call the tool again!",
+          }));
+          return "continue";
+        },
+      }],
       prompt:
         `You are a chatty AI. Always call the continueTalking tool in every response and keep the conversation going.`,
     });
-
     assert(callbackCalled, "onMaxIterationsReached callback should be called");
-    // Verify the agent actually stopped (no infinite loop)
-    // If we reach this assertion, it means the function returned
-    assert(true, "Agent should stop when max iterations reached");
   }),
 );
 
