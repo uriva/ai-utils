@@ -363,7 +363,7 @@ export const runAgent = async (
     }
     const historyOuter = await getHistory();
     const history = historyOuter.map(historyEventToContent(historyOuter));
-    if (empty(history) || (history[0].parts ?? [])[0].functionCall) {
+    if (empty(history) || history[0].role !== "user") {
       history.unshift({
         role: "user",
         parts: [{ text: "<conversation started>" }],

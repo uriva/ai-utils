@@ -14,6 +14,7 @@ import {
   type HistoryEvent,
   injectAccessHistory,
   injectOutputEvent,
+  ownUtteranceTurn,
   participantUtteranceTurn,
   toolResultTurn,
   toolUseTurn,
@@ -43,6 +44,19 @@ Deno.test(
         assertEquals(result, { hello: result.hello });
       })([true, false])
     )([openAiGenJsonFromConvo, geminiGenJsonFromConvo]);
+  }),
+);
+
+Deno.test(
+  "agent can run run when history starts with only a model message",
+  injectSecrets(async () => {
+    await agentDeps([ownUtteranceTurn("Priming without user turn")])(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "You are a helper.",
+      lightModel: true,
+    });
   }),
 );
 
