@@ -357,7 +357,7 @@ const historyEventToContent = (events: HistoryEvent[]) => {
         role: "model",
         parts: [{
           thoughtSignature: e.modelMetadata?.thoughtSignature,
-          text: `You: ${e.text}`,
+          text: e.text,
         }],
       };
     }
