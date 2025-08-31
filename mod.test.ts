@@ -18,7 +18,7 @@ import {
   participantUtteranceTurn,
   toolResultTurn,
   toolUseTurn,
-} from "./src/geminiAgent.ts";
+} from "./src/agent.ts";
 import type { FnToSameFn } from "./src/utils.ts";
 
 const injectSecrets = pipe(
