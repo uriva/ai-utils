@@ -16,5 +16,5 @@ export {
 } from "./src/openai.ts";
 export { catchAiRefusesToAdhereToTyping, type ModelOpts } from "./src/utils.ts";
 export const runAgent = (spec: AgentSpec): Promise<void> =>
-  // @ts-ignore-error the caller has gemini metadata
+  // @ts-expect-error the caller has gemini metadata
   runAbstractAgent(spec, geminiAgentCaller(spec));
