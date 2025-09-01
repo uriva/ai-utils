@@ -27,8 +27,11 @@ import {
   geminiProVersion,
   zodToGeminiParameters,
 } from "./gemini.ts";
+import type { SomethingInjection } from "./utils.ts";
 
-const geminiError = context((_1: Error, _2: GenerateContentParameters) => {});
+const geminiError: SomethingInjection<
+  (_1: Error, _2: GenerateContentParameters) => void
+> = context((_1: Error, _2: GenerateContentParameters) => {});
 
 export const injectGeminiErrorLogger = geminiError.inject;
 
