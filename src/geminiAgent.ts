@@ -97,7 +97,13 @@ const historyEventToContent =
         }`,
       }]);
     }
-    if (e.type === "do_nothing") return wrapModelContent([{ text: "" }]);
+    if (e.type === "do_nothing") {
+      // Carry thoughtSignature if available (assume only one text part)
+      return wrapModelContent([{
+        text: "",
+        thoughtSignature: e.modelMetadata?.thoughtSignature,
+      }]);
+    }
     throw new Error(
       `Unknown history event type: ${JSON.stringify(e, null, 2)}`,
     );
@@ -185,7 +191,18 @@ export const geminiAgentCaller = ({ lightModel, prompt, tools }: AgentSpec) =>
     (geminiOutput: GeminiOutput): GeminiHistoryEvent[] => {
       const responseId = generateId();
       if (didNothing(geminiOutput)) {
-        return [doNothingEvent()];
+        const textPart = geminiOutput.find((p) =>
+          p.type === "text" && p.thoughtSignature
+        );
+        return [doNothingEvent(
+          textPart?.thoughtSignature
+            ? {
+              type: "gemini",
+              responseId,
+              thoughtSignature: textPart.thoughtSignature,
+            }
+            : undefined,
+        )];
       }
       return geminiOutput.map(geminiOutputPartToHistoryEvent(responseId));
     },

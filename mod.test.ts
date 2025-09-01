@@ -289,3 +289,21 @@ Deno.test(
     assertEquals(normalized, "Alice,Bob,Carol,Dave");
   }),
 );
+
+Deno.test(
+  "agent triggers do nothing event when model should say nothing",
+  injectSecrets(async () => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "Say nothing." }),
+    ];
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 2,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt:
+        "You are an AI assistant. If the user says 'Say nothing.', do not reply with any text.",
+      lightModel: true,
+    });
+    assertEquals(mockHistory[mockHistory.length - 1].type, "do_nothing");
+  }),
+);

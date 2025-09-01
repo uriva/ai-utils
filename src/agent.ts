@@ -76,7 +76,10 @@ export type ToolResult = {
   result: string;
 } & SharedFields;
 
-export type DoNothing = { type: "do_nothing" } & SharedFields;
+export type DoNothing<ModelMetadata> = {
+  type: "do_nothing";
+  modelMetadata?: ModelMetadata;
+} & SharedFields;
 
 export type HistoryEventWithMetadata<ModelMetadata> =
   | ParticipantUtterance
@@ -85,7 +88,7 @@ export type HistoryEventWithMetadata<ModelMetadata> =
   | ParticipantReaction
   | ToolUseWithMetadata<unknown, ModelMetadata>
   | ToolResult
-  | DoNothing;
+  | DoNothing<ModelMetadata>;
 
 export type HistoryEvent = HistoryEventWithMetadata<unknown>;
 
@@ -233,11 +236,14 @@ export const toolResultTurn = (
   result,
 });
 
-export const doNothingEvent = <Metadata>(): HistoryEventWithMetadata<
+export const doNothingEvent = <Metadata>(
+  modelMetadata?: Metadata,
+): HistoryEventWithMetadata<
   Metadata
 > => ({
   type: "do_nothing",
   isOwn: true,
+  modelMetadata,
   ...sharedFields(),
 });
 
