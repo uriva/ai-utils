@@ -43,7 +43,14 @@ const callGemini = (req: GenerateContentParameters): Promise<GeminiOutput> =>
           }
           return [];
         })
-    );
+    ).catch((err) => {
+      console.error(
+        "Gemini error for input",
+        JSON.stringify(req, null, 2),
+        JSON.stringify(err),
+      );
+      throw err;
+    });
 
 // deno-lint-ignore no-explicit-any
 const actionToTool = ({ name, description, parameters }: Tool<any>) => ({
