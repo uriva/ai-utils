@@ -1,13 +1,13 @@
 import { context } from "context-inject";
 import {
-    coerce,
-    each,
-    filter,
-    last,
-    map,
-    pipe,
-    sideEffect,
-    timeit,
+  coerce,
+  each,
+  filter,
+  last,
+  map,
+  pipe,
+  sideEffect,
+  timeit,
 } from "gamla";
 import type { z, ZodType } from "zod/v4";
 import type { SomethingInjection } from "./utils.ts";
@@ -160,7 +160,6 @@ const callToResult =
   async <T extends ZodType>(
     fc: FunctionCall,
   ): Promise<{ name: string; result: string }> => {
-    await outputEvent(toolUseTurn(fc));
     const { name, args } = fc;
     const action: Tool<T> | undefined = actions.find(({ name: n }) =>
       n === name
