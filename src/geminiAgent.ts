@@ -6,6 +6,7 @@ import {
   GoogleGenAI,
   type Part,
 } from "@google/genai";
+import { context } from "context-inject";
 import { coerce, empty, groupBy, map, pipe, retry } from "gamla";
 import {
   type AgentSpec,
@@ -27,6 +28,10 @@ import {
   zodToGeminiParameters,
 } from "./gemini.ts";
 
+const geminiError = context((_1: Error, _2: GenerateContentParameters) => {});
+
+export const injectGeminiErrorLogger = geminiError.inject;
+
 type GeminiOutput = GeminiPartOfInterest[];
 
 const callGemini = (req: GenerateContentParameters): Promise<GeminiOutput> =>
@@ -44,11 +49,7 @@ const callGemini = (req: GenerateContentParameters): Promise<GeminiOutput> =>
           return [];
         })
     ).catch((err) => {
-      console.error(
-        "Gemini error for input",
-        JSON.stringify(req, null, 2),
-        JSON.stringify(err),
-      );
+      geminiError.access(err, req);
       throw err;
     });
 
@@ -144,7 +145,7 @@ type GeminiFunctiontoolPart = {
   thoughtSignature?: string;
 };
 
-export type GeminiHistoryEvent = HistoryEventWithMetadata<{
+type GeminiHistoryEvent = HistoryEventWithMetadata<{
   type: "gemini";
   thoughtSignature: string;
   responseId: string;

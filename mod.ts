@@ -8,6 +8,7 @@ export {
   geminiGenJsonFromConvo,
   injectGeminiToken,
 } from "./src/gemini.ts";
+export { injectGeminiErrorLogger } from "./src/geminiAgent.ts";
 export {
   injectOpenAiToken,
   openAiGenJson,
