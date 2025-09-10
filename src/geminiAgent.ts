@@ -169,10 +169,11 @@ export const geminiAgentCaller = ({ lightModel, prompt, tools }: AgentSpec) =>
   pipe(
     (historyOuter: GeminiHistoryEvent[]) => {
       const eventById = indexById(historyOuter);
-      const grouped = Object.values(groupBy(getOriginalId)(historyOuter));
-      const history = grouped.map(
-        pipe(map(historyEventToContent(eventById)), combineContent),
-      );
+      const history = pipe(
+        groupBy(getOriginalId),
+        Object.values<GeminiHistoryEvent[]>,
+        map(pipe(map(historyEventToContent(eventById)), combineContent)),
+      )(historyOuter);
       if (empty(history) || history[0].role !== "user") {
         history.unshift({
           role: "user",
