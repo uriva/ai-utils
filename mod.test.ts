@@ -1,5 +1,5 @@
 import { each, pipe, sleep } from "gamla";
-import { assert, assertEquals } from "jsr:@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z } from "zod/v4";
 import {
