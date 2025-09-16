@@ -12,11 +12,17 @@ import {
 import type { z, ZodType } from "zod/v4";
 import type { SomethingInjection } from "./utils.ts";
 
+export type MediaAttachment =
+  | { kind: "inline"; mimeType: string; dataBase64: string }
+  | { kind: "file"; mimeType: string; fileUri: string };
+
+export type ToolReturn = { result: string; attachments?: MediaAttachment[] };
+
 export type Tool<T extends ZodType> = {
   description: string;
   name: string;
   parameters: T;
-  handler: (params: z.infer<T>) => Promise<string>;
+  handler: (params: z.infer<T>) => Promise<string | ToolReturn>;
 };
 
 type SharedFields = { id: MessageId; timestamp: number; isOwn: boolean };
@@ -30,6 +36,7 @@ export type ParticipantUtterance =
     type: "participant_utterance";
     isOwn: false;
     text: string;
+    attachments?: MediaAttachment[];
   }
   & ParticipantDetail
   & SharedFields;
@@ -74,6 +81,7 @@ export type ToolResult = {
   isOwn: true;
   name: string;
   result: string;
+  attachments?: MediaAttachment[];
 } & SharedFields;
 
 export type DoNothing<ModelMetadata> = {
@@ -156,10 +164,7 @@ const parseWithCatch = <T extends ZodType>(
 
 const callToResult =
   // deno-lint-ignore no-explicit-any
-  (actions: Tool<any>[]) =>
-  async <T extends ZodType>(
-    fc: FunctionCall,
-  ): Promise<{ name: string; result: string }> => {
+  (actions: Tool<any>[]) => async <T extends ZodType>(fc: FunctionCall) => {
     const { name, args } = fc;
     const action: Tool<T> | undefined = actions.find(({ name: n }) =>
       n === name
@@ -168,12 +173,16 @@ const callToResult =
     if (!action) return { name, result: `Function ${name} not found` };
     const { handler, parameters } = action;
     const parseResult = parseWithCatch(parameters, args);
-    return {
-      name,
-      result: parseResult.ok
-        ? await handler(parseResult.result)
-        : `Invalid arguments: ${JSON.stringify(parseResult.error)}`,
-    };
+    if (!parseResult.ok) {
+      return {
+        name,
+        result: `Invalid arguments: ${JSON.stringify(parseResult.error)}`,
+      };
+    }
+    const out = await handler(parseResult.result);
+    return typeof out === "string"
+      ? { name, result: out }
+      : { name, result: out.result, attachments: out.attachments };
   };
 
 export const toolUseTurnWithMetadata = <Metadata>(
@@ -195,12 +204,17 @@ export const toolUseTurn = <Metadata>(
   toolUseTurnWithMetadata({ name, args }, undefined);
 
 export const participantUtteranceTurn = (
-  { name, text }: { name: string; text: string },
+  { name, text, attachments }: {
+    name: string;
+    text: string;
+    attachments?: MediaAttachment[];
+  },
 ): HistoryEvent => ({
   type: "participant_utterance",
   isOwn: false,
   name: coerce(name),
   text,
+  attachments,
   ...sharedFields(),
 });
 
@@ -226,13 +240,18 @@ const sharedFields = () => ({
 });
 
 export const toolResultTurn = (
-  { name, result }: { name: string; result: string },
+  { name, result, attachments }: {
+    name: string;
+    result: string;
+    attachments?: MediaAttachment[];
+  },
 ): HistoryEvent => ({
   ...sharedFields(),
   type: "tool_result",
   isOwn: true,
   name,
   result,
+  attachments,
 });
 
 export const doNothingEvent = <Metadata>(

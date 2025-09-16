@@ -51,3 +51,35 @@ const result = await injectSecrets(async () =>
 );
 console.log(result); // { hello: "..." }
 ```
+
+### Media with Gemini agent
+
+You can attach media to user messages using `attachments` when creating a
+`participantUtteranceTurn`.
+
+```ts
+import { participantUtteranceTurn, runAgent } from "@uri/ai-utils";
+
+const history = [
+  participantUtteranceTurn({
+    name: "user",
+    text: "What's in this image?",
+    attachments: [
+      {
+        kind: "file",
+        mimeType: "image/jpeg",
+        fileUri: "https://example.com/cat.jpg",
+      },
+      // Or inline data
+      // { kind: "inline", mimeType: "image/png", dataBase64: "...base64..." },
+    ],
+  }),
+];
+
+await runAgent({
+  prompt: "You can see images and describe them.",
+  tools: [],
+  maxIterations: 3,
+  lightModel: true,
+});
+```
