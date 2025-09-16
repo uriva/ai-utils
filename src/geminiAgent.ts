@@ -13,6 +13,7 @@ import {
   doNothingEvent,
   generateId,
   type HistoryEventWithMetadata,
+  type MediaAttachment,
   type MessageId,
   ownUtteranceTurn,
   ownUtteranceTurnWithMetadata,
@@ -63,11 +64,23 @@ const actionToTool = ({ name, description, parameters }: Tool<any>) => ({
   parameters: zodToGeminiParameters(parameters),
 });
 
+const attachmentsToParts = (attachments?: MediaAttachment[]): Part[] =>
+  (attachments ?? []).map((a): Part =>
+    a.kind === "inline"
+      ? { inlineData: { data: a.dataBase64, mimeType: a.mimeType } }
+      : { fileData: { fileUri: a.fileUri, mimeType: a.mimeType } }
+  );
+
 const historyEventToContent =
   (eventById: (id: string) => GeminiHistoryEvent) =>
   (e: GeminiHistoryEvent): Content => {
     if (e.type === "participant_utterance") {
-      return wrapUserContent([{ text: `${e.name}: ${e.text}` }]);
+      return wrapUserContent([
+        e.text && e.text.length > 0
+          ? ({ text: `${e.name}: ${e.text}` })
+          : undefined,
+        ...attachmentsToParts(e.attachments),
+      ].filter((x): x is Part => !!x));
     }
     if (e.type === "own_utterance") {
       return wrapModelContent([{
@@ -85,11 +98,11 @@ const historyEventToContent =
       }]);
     }
     if (e.type === "tool_result") {
-      return wrapUserContent(
-        [{
-          functionResponse: { name: e.name, response: { result: e.result } },
-        }],
-      );
+      const parts: Part[] = [
+        { functionResponse: { name: e.name, response: { result: e.result } } },
+        ...attachmentsToParts(e.attachments),
+      ];
+      return wrapUserContent(parts);
     }
     if (e.type === "own_reaction") {
       const msg = eventById(e.onMessage);

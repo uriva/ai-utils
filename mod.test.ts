@@ -1,5 +1,5 @@
-import { each, pipe, sleep } from "gamla";
 import { assert, assertEquals } from "@std/assert";
+import { each, pipe, sleep } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z } from "zod/v4";
 import {
@@ -17,8 +17,10 @@ import {
   ownUtteranceTurn,
   participantUtteranceTurn,
   toolResultTurn,
+  type ToolReturn,
   toolUseTurn,
 } from "./src/agent.ts";
+import { geminiFlashVersion } from "./src/gemini.ts";
 import type { FnToSameFn } from "./src/utils.ts";
 
 const injectSecrets = pipe(
@@ -306,4 +308,97 @@ Deno.test(
     });
     assertEquals(mockHistory[mockHistory.length - 1].type, "do_nothing");
   }),
+);
+
+const toBase64 = (u8: Uint8Array): string => {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < u8.length; i += chunk) {
+    binary += String.fromCharCode(...u8.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+};
+
+const bytes = await Deno.readFile("./dog.jpg");
+
+const b64 = toBase64(bytes);
+
+const mediaTool = {
+  name: "returnMedia",
+  description: "Returns media via attachments",
+  parameters: z.object({}),
+  handler: () => {
+    const ret: ToolReturn = {
+      result: "image attached",
+      attachments: [
+        { kind: "inline", mimeType: "image/jpeg", dataBase64: b64 },
+      ],
+    };
+    return Promise.resolve(ret);
+  },
+};
+
+Deno.test(
+  {
+    name: "tool result attachments are forwarded to model",
+    sanitizeOps: false,
+    sanitizeResources: false,
+    fn: injectSecrets(async () => {
+      const mockHistory: HistoryEvent[] = [
+        participantUtteranceTurn({
+          name: "user",
+          text: "Please call returnMedia and then describe the image.",
+        }),
+      ];
+      await agentDeps(mockHistory)(runAgent)({
+        maxIterations: 3,
+        onMaxIterationsReached: () => {},
+        tools: [mediaTool],
+        prompt: "You can see images returned by tools.",
+        lightModel: true,
+      });
+      assert(
+        mockHistory.some((e) =>
+          e.type === "own_utterance" && e.text.toLowerCase().includes("dog")
+        ),
+        `AI did not describe the image as a dog. History: ${
+          JSON.stringify(mockHistory, null, 2)
+        }`,
+      );
+    }),
+  },
+);
+
+Deno.test(
+  {
+    name: "user attachments are forwarded to model",
+    sanitizeOps: false,
+    sanitizeResources: false,
+    fn: injectSecrets(async () => {
+      const mockHistory: HistoryEvent[] = [
+        participantUtteranceTurn({
+          name: "user",
+          text: "Please describe the attached image.",
+          attachments: [
+            { kind: "inline", mimeType: "image/jpeg", dataBase64: b64 },
+          ],
+        }),
+      ];
+      await agentDeps(mockHistory)(runAgent)({
+        maxIterations: 3,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        prompt: "You can see images attached by the user.",
+        lightModel: true,
+      });
+      assert(
+        mockHistory.some((e) =>
+          e.type === "own_utterance" && e.text.toLowerCase().includes("dog")
+        ),
+        `AI did not describe the image as a dog. History: ${
+          JSON.stringify(mockHistory, null, 2)
+        }`,
+      );
+    }),
+  },
 );

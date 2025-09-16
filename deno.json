@@ -12,6 +12,6 @@
     "zod": "npm:zod@3.25.57"
   },
   "tasks": {
-    "test": "deno test --allow-env --allow-net --env=.env"
+    "test": "deno test --allow-env --allow-net --allow-read --env=.env"
   }
 }
