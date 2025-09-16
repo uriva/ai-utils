@@ -338,66 +338,58 @@ const mediaTool = {
 };
 
 Deno.test(
-  {
-    name: "tool result attachments are forwarded to model",
-    sanitizeOps: false,
-    sanitizeResources: false,
-    fn: injectSecrets(async () => {
-      const mockHistory: HistoryEvent[] = [
-        participantUtteranceTurn({
-          name: "user",
-          text: "Please call returnMedia and then describe the image.",
-        }),
-      ];
-      await agentDeps(mockHistory)(runAgent)({
-        maxIterations: 3,
-        onMaxIterationsReached: () => {},
-        tools: [mediaTool],
-        prompt: "You can see images returned by tools.",
-        lightModel: true,
-      });
-      assert(
-        mockHistory.some((e) =>
-          e.type === "own_utterance" && e.text.toLowerCase().includes("dog")
-        ),
-        `AI did not describe the image as a dog. History: ${
-          JSON.stringify(mockHistory, null, 2)
-        }`,
-      );
-    }),
-  },
+  "tool result attachments are forwarded to model",
+  injectSecrets(async () => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please call returnMedia and then describe the image.",
+      }),
+    ];
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 3,
+      onMaxIterationsReached: () => {},
+      tools: [mediaTool],
+      prompt: "You can see images returned by tools.",
+      lightModel: true,
+    });
+    assert(
+      mockHistory.some((e) =>
+        e.type === "own_utterance" && e.text.toLowerCase().includes("dog")
+      ),
+      `AI did not describe the image as a dog. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+  }),
 );
 
 Deno.test(
-  {
-    name: "user attachments are forwarded to model",
-    sanitizeOps: false,
-    sanitizeResources: false,
-    fn: injectSecrets(async () => {
-      const mockHistory: HistoryEvent[] = [
-        participantUtteranceTurn({
-          name: "user",
-          text: "Please describe the attached image.",
-          attachments: [
-            { kind: "inline", mimeType: "image/jpeg", dataBase64: b64 },
-          ],
-        }),
-      ];
-      await agentDeps(mockHistory)(runAgent)({
-        maxIterations: 3,
-        onMaxIterationsReached: () => {},
-        tools: [],
-        prompt: "You can see images attached by the user.",
-        lightModel: true,
-      });
-      assert(
-        mockHistory.some((e) =>
-          e.type === "own_utterance" && e.text.toLowerCase().includes("dog")
-        ),
-        `AI did not describe the image as a dog. History: ${
-          JSON.stringify(mockHistory, null, 2)
-        }`,
-      );
-    }),
-  },
+  "user attachments are forwarded to model",
+  injectSecrets(async () => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please describe the attached image.",
+        attachments: [
+          { kind: "inline", mimeType: "image/jpeg", dataBase64: b64 },
+        ],
+      }),
+    ];
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 3,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "You can see images attached by the user.",
+      lightModel: true,
+    });
+    assert(
+      mockHistory.some((e) =>
+        e.type === "own_utterance" && e.text.toLowerCase().includes("dog")
+      ),
+      `AI did not describe the image as a dog. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+  }),
 );
