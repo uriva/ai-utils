@@ -20,7 +20,6 @@ import {
   type ToolReturn,
   toolUseTurn,
 } from "./src/agent.ts";
-import { geminiFlashVersion } from "./src/gemini.ts";
 import type { FnToSameFn } from "./src/utils.ts";
 
 const injectSecrets = pipe(
