@@ -1,15 +1,9 @@
-import { context } from "context-inject";
-import type { Func } from "gamla";
+import { context, type Injection, type Injector } from "@uri/inject";
 
-const injection: {
-  inject: (
-    fn: (_cacheId: string) => <F extends Func>(_f: F) => F,
-  ) => <F_1 extends Func>(f: F_1) => F_1;
-  access: (_cacheId: string) => <F extends Func>(_f: F) => F;
-} = context(
-  (_cacheId: string) => <F extends Func>(_f: F): F => {
+const injection: Injection<(cacheId: string) => Injector> = context(
+  (_cacheId) => (((_f) => {
     throw new Error("cacher not injected");
-  },
+  }) as Injector),
 );
 
 export const injectCacher = injection.inject;

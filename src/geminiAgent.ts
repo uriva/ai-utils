@@ -6,7 +6,7 @@ import {
   GoogleGenAI,
   type Part,
 } from "@google/genai";
-import { context } from "context-inject";
+import { context, Injection } from "@uri/inject";
 import { coerce, empty, groupBy, map, pipe, retry } from "gamla";
 import {
   type AgentSpec,
@@ -28,9 +28,8 @@ import {
   geminiProVersion,
   zodToGeminiParameters,
 } from "./gemini.ts";
-import type { SomethingInjection } from "./utils.ts";
 
-const geminiError: SomethingInjection<
+const geminiError: Injection<
   (_1: Error, _2: GenerateContentParameters) => void
 > = context((_1: Error, _2: GenerateContentParameters) => {});
 

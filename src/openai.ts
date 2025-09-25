@@ -1,4 +1,4 @@
-import { context } from "context-inject";
+import { context, type Injection, type Injector } from "@uri/inject";
 import { map, pipe, prop } from "gamla";
 import { OpenAI } from "openai";
 import type {
@@ -7,18 +7,13 @@ import type {
 } from "openai/resources/index.mjs";
 import z, { type ZodType } from "zod/v4";
 import { makeCache } from "./cacher.ts";
-import {
-  aiRefusesToAdhereTyping,
-  type FnToSameFn,
-  type ModelOpts,
-  type TokenInjection,
-} from "./utils.ts";
+import { aiRefusesToAdhereTyping, type ModelOpts } from "./utils.ts";
 
-const tokenInjection: TokenInjection = context((): string => {
+const tokenInjection: Injection<() => string> = context((): string => {
   throw new Error("no openai token injected");
 });
 
-export const injectOpenAiToken = (token: string): FnToSameFn =>
+export const injectOpenAiToken = (token: string): Injector =>
   tokenInjection.inject(() => token);
 
 // deno-lint-ignore no-explicit-any
