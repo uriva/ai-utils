@@ -4,13 +4,13 @@ import {
   type GenerateContentParameters,
   GoogleGenAI,
 } from "@google/genai";
-import { context } from "context-inject";
+import { context, type Injection, Injector } from "@uri/inject";
 import { coerce, empty, map, pipe, remove } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z, type ZodType } from "zod/v4";
 import { makeCache } from "./cacher.ts";
 import { structuredMsgs } from "./openai.ts";
-import type { FnToSameFn, ModelOpts, TokenInjection } from "./utils.ts";
+import type { ModelOpts } from "./utils.ts";
 
 // deno-lint-ignore no-explicit-any
 const isRedundantAnyMember = (x: any) =>
@@ -60,12 +60,12 @@ export const zodToGeminiParameters = (zodObj: ZodType): FunctionDeclaration => {
   return rest;
 };
 
-const tokenInjection: TokenInjection = context((): string => {
+const tokenInjection: Injection<() => string> = context((): string => {
   throw new Error("no gemini token injected");
 });
 
 export const accessGeminiToken = tokenInjection.access;
-export const injectGeminiToken = (token: string): FnToSameFn =>
+export const injectGeminiToken = (token: string): Injector =>
   tokenInjection.inject(() => token);
 
 const openAiToGeminiMessage = pipe(

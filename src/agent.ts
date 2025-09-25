@@ -1,4 +1,4 @@
-import { context } from "context-inject";
+import { context, type Injection } from "@uri/inject";
 import {
   coerce,
   each,
@@ -10,7 +10,6 @@ import {
   timeit,
 } from "gamla";
 import type { z, ZodType } from "zod/v4";
-import type { SomethingInjection } from "./utils.ts";
 
 export type MediaAttachment =
   | { kind: "inline"; mimeType: string; dataBase64: string }
@@ -100,10 +99,10 @@ export type HistoryEventWithMetadata<ModelMetadata> =
 
 export type HistoryEvent = HistoryEventWithMetadata<unknown>;
 
-const idGeneration: SomethingInjection<() => string> = context((): MessageId =>
+const idGeneration: Injection<() => string> = context((): MessageId =>
   crypto.randomUUID()
 );
-const timestampGeneration: SomethingInjection<() => number> = context(
+const timestampGeneration: Injection<() => number> = context(
   (): number => Date.now(),
 );
 
@@ -117,14 +116,14 @@ type FunctionCall = {
   name?: string;
 };
 
-const makeDebugLogger = <Input>(): SomethingInjection<
+const makeDebugLogger = <Input>(): Injection<
   (inp: Input) => void | Promise<void>
 > => context((_) => {});
 
-const debugHistory: SomethingInjection<
+const debugHistory: Injection<
   (inp: HistoryEvent[]) => void | Promise<void>
 > = makeDebugLogger<HistoryEvent[]>();
-const debugTimeElapsedMs: SomethingInjection<
+const debugTimeElapsedMs: Injection<
   (inp: number) => void | Promise<void>
 > = makeDebugLogger<number>();
 
@@ -133,18 +132,20 @@ const reportTimeElapsedMs = debugTimeElapsedMs.access;
 export const injectDebugHistory = debugHistory.inject;
 const reportHistoryForDebug = debugHistory.access;
 
-const modelOutput: SomethingInjection<(event: HistoryEvent) => Promise<void>> =
-  context((_event: HistoryEvent): Promise<void> => {
+const modelOutput: Injection<(event: HistoryEvent) => Promise<void>> = context(
+  (_event: HistoryEvent): Promise<void> => {
     throw new Error("output function not injected");
-  });
+  },
+);
 
 const outputEvent = modelOutput.access;
 export const injectOutputEvent = modelOutput.inject;
 
-const historyInjection: SomethingInjection<() => Promise<HistoryEvent[]>> =
-  context((): Promise<HistoryEvent[]> => {
+const historyInjection: Injection<() => Promise<HistoryEvent[]>> = context(
+  (): Promise<HistoryEvent[]> => {
     throw new Error("History not injected");
-  });
+  },
+);
 
 const getHistory = historyInjection.access;
 export const injectAccessHistory = historyInjection.inject;
@@ -312,8 +313,77 @@ export const runAbstractAgent = async (
     )();
     await handleFunctionCalls(tools)(output);
     if (
-      !(output.some(({ type }) => type === "tool_call")) &&
+      !(output.some((ev: HistoryEvent) => ev.type === "tool_call")) &&
       last(await getHistory()).isOwn
     ) return;
   }
+};
+
+// --- Token estimation -------------------------------------------------------
+// A lightweight, overridable heuristic for estimating the token cost of
+// processing a single HistoryEvent. This intentionally avoids binding to any
+// provider-specific tokenizer (so the library stays dependency‑light) while
+// still giving callers a way to reason about budget / pruning.
+//
+// Rough heuristic: ~1 token per ~4 characters (English) with a 30% buffer.
+// For base64 media we count each 4 chars as 1 token (very rough) – callers
+// relying on precise billing should override.
+const approxTextTokens = (text: string | undefined): number => {
+  if (!text) return 0;
+  return Math.max(1, Math.ceil((text.length / 4) * 1.3));
+};
+
+const approxJsonTokens = (obj: unknown): number => {
+  try {
+    return approxTextTokens(JSON.stringify(obj));
+  } catch (_) {
+    return 10; // fallback small constant
+  }
+};
+
+const attachmentTokens = (
+  attachments: MediaAttachment[] | undefined,
+): number => {
+  if (!attachments || attachments.length === 0) return 0;
+  return attachments.reduce((sum, a) => {
+    if (a.kind === "inline") {
+      // base64 length / 4 (very rough) with small buffer
+      return sum + Math.ceil(a.dataBase64.length / 4 * 1.1);
+    }
+    // file references assumed minimal (URI + metadata)
+    return sum + approxTextTokens(a.fileUri) + approxTextTokens(a.mimeType);
+  }, 0);
+};
+
+const assertNever = (x: never): never => {
+  throw new Error(
+    `Unhandled HistoryEvent variant in token estimator: ${JSON.stringify(x)}`,
+  );
+};
+
+export const estimateTokens = (e: HistoryEvent): number => {
+  if (e.type === "participant_utterance") {
+    return approxTextTokens(e.name) + approxTextTokens(e.text) +
+      attachmentTokens(e.attachments) + 2;
+  }
+  if (e.type === "own_utterance") {
+    return approxTextTokens(e.text) + 2;
+  }
+  if (e.type === "tool_call") {
+    return approxTextTokens(e.name) + approxJsonTokens(e.parameters) + 4;
+  }
+  if (e.type === "tool_result") {
+    return approxTextTokens(e.name) + approxTextTokens(e.result) +
+      attachmentTokens(e.attachments) + 4;
+  }
+  if (e.type === "participant_reaction") {
+    return approxTextTokens(e.name) + approxTextTokens(e.reaction) + 2;
+  }
+  if (e.type === "own_reaction") {
+    return approxTextTokens(e.reaction) + 2;
+  }
+  if (e.type === "do_nothing") {
+    return 1;
+  }
+  return assertNever(e);
 };

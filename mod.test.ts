@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import type { Injector } from "@uri/inject";
 import { each, pipe, sleep } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z } from "zod/v4";
@@ -20,7 +21,6 @@ import {
   type ToolReturn,
   toolUseTurn,
 } from "./src/agent.ts";
-import type { FnToSameFn } from "./src/utils.ts";
 
 const injectSecrets = pipe(
   injectCacher(() => (f) => f),
@@ -61,7 +61,7 @@ Deno.test(
   }),
 );
 
-const agentDeps = (inMemoryHistory: HistoryEvent[]): FnToSameFn =>
+const agentDeps = (inMemoryHistory: HistoryEvent[]): Injector =>
   pipe(
     injectAccessHistory(() => Promise.resolve(inMemoryHistory)),
     injectOutputEvent((event) => {
