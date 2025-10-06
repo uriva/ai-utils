@@ -23,6 +23,7 @@ import {
 } from "./src/agent.ts";
 
 const injectSecrets = pipe(
+  // @ts-expect-error passthrough cacher is sufficient for tests
   injectCacher(() => (f) => f),
   injectOpenAiToken(
     Deno.env.get("OPENAI_API_KEY") ?? "",
@@ -306,6 +307,85 @@ Deno.test(
       lightModel: true,
     });
     assertEquals(mockHistory[mockHistory.length - 1].type, "do_nothing");
+  }),
+);
+
+const findTextualAnswer = (events: HistoryEvent[]) =>
+  events.find((event): event is Extract<HistoryEvent, {
+    type: "own_utterance";
+    text: string;
+  }> =>
+    event.type === "own_utterance" && typeof event.text === "string" &&
+    event.text.length > 0
+  );
+
+const collectAttachment = (events: HistoryEvent[], toolName?: string) => {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (
+      event.type === "tool_result" && event.attachments?.length &&
+      (!toolName || event.name === toolName)
+    ) {
+      return event.attachments[0];
+    }
+    if (event.type === "own_utterance" && event.attachments?.length) {
+      return event.attachments[0];
+    }
+  }
+  return undefined;
+};
+
+Deno.test(
+  "agent emits native image and separate agent verifies it",
+  injectSecrets(async () => {
+    const generationHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "creator",
+        text:
+          "Produce a vibrant poster that displays the single word SUNRISE in bold orange letters. Create the image directly in your response and then briefly confirm what you rendered.",
+      }),
+    ];
+
+    await agentDeps(generationHistory)(runAgent)({
+      maxIterations: 4,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt:
+        "You are a graphic designer who can emit inline images. When asked for a poster, respond with a PNG attachment via inline data that clearly shows the requested text, then acknowledge that text in plain language.",
+      imageGen: true,
+    });
+
+    const attachment = collectAttachment(generationHistory);
+    assert(attachment, "Response should include an image attachment");
+    assert(
+      attachment.mimeType?.startsWith("image/"),
+      `Expected image mime type, got ${attachment?.mimeType}`,
+    );
+
+    const verificationHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "inspector",
+        text:
+          "Inspect the attachment and reply with a sentence that repeats the exact word you see emblazoned on the poster.",
+        attachments: [attachment],
+      }),
+    ];
+
+    await agentDeps(verificationHistory)(runAgent)({
+      maxIterations: 4,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt:
+        "You can read text from images. Double-check what the poster says and mention the word explicitly in your short reply.",
+      lightModel: true,
+    });
+
+    const answer = findTextualAnswer(verificationHistory);
+    assert(answer, "Verification agent did not respond");
+    assert(
+      answer.text.toLowerCase().includes("sunrise"),
+      `Expected the response to mention sunrise, got: ${answer.text}`,
+    );
   }),
 );
 

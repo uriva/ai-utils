@@ -45,6 +45,7 @@ export type OwnUtterance<ModelMetadata> = {
   modelMetadata?: ModelMetadata;
   type: "own_utterance";
   text: string;
+  attachments?: MediaAttachment[];
 } & SharedFields;
 
 export type ParticipantReaction =
@@ -222,18 +223,21 @@ export const participantUtteranceTurn = (
 export const ownUtteranceTurnWithMetadata = <Metadata>(
   text: string,
   modelMetadata: Metadata | undefined,
+  attachments?: MediaAttachment[],
 ): HistoryEventWithMetadata<Metadata> => ({
   type: "own_utterance",
   isOwn: true,
   modelMetadata,
   text,
+  attachments,
   ...sharedFields(),
 });
 
 export const ownUtteranceTurn = <Metadata>(
   text: string,
+  attachments?: MediaAttachment[],
 ): HistoryEventWithMetadata<Metadata> =>
-  ownUtteranceTurnWithMetadata(text, undefined);
+  ownUtteranceTurnWithMetadata(text, undefined, attachments);
 
 const sharedFields = () => ({
   id: idGeneration.access(),
@@ -292,6 +296,7 @@ export type AgentSpec = {
   onMaxIterationsReached: () => any;
   lightModel?: boolean;
   provider?: "gemini";
+  imageGen?: boolean;
 };
 
 export const runAbstractAgent = async (
@@ -367,7 +372,8 @@ export const estimateTokens = (e: HistoryEvent): number => {
       attachmentTokens(e.attachments) + 2;
   }
   if (e.type === "own_utterance") {
-    return approxTextTokens(e.text) + 2;
+    return approxTextTokens(e.text) +
+      attachmentTokens(e.attachments) + 2;
   }
   if (e.type === "tool_call") {
     return approxTextTokens(e.name) + approxJsonTokens(e.parameters) + 4;

@@ -13,15 +13,32 @@ A collection of utilities for working with AI APIs (OpenAI, Gemini) in Deno.
 
 Install via [jsr](https://jsr.io):
 
-```ts
+````ts
 import {
-  geminiGenJsonFromConvo,
-  injectCacher,
-  injectGeminiToken,
-  injectOpenAiToken,
-  openAiGenJsonFromConvo,
-} from "@uri/ai-utils";
-```
+  # ai-utils
+
+  A collection of utilities for working with AI APIs (OpenAI, Gemini) in Deno.
+
+  ## Features
+
+  - Unified interface for different providers.
+  - Schema-based JSON output using [zod](https://github.com/colinhacks/zod)
+  - Dependency injection for API keys and caching
+  - Utilities for matching, conversation history, and more
+
+  ## Usage
+
+  Install via [jsr](https://jsr.io):
+
+  ```ts
+  import {
+    geminiGenJsonFromConvo,
+    injectCacher,
+    injectGeminiToken,
+    injectOpenAiToken,
+    openAiGenJsonFromConvo,
+  } from "@uri/ai-utils";
+````
 
 Inject your API keys and cacher:
 
@@ -60,7 +77,7 @@ You can attach media to user messages using `attachments` when creating a
 ```ts
 import { participantUtteranceTurn, runAgent } from "@uri/ai-utils";
 
-const history = [
+const history is [
   participantUtteranceTurn({
     name: "user",
     text: "What's in this image?",
