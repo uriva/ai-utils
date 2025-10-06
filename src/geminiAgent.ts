@@ -6,7 +6,7 @@ import {
   GoogleGenAI,
   type Part,
 } from "@google/genai";
-import { context, Injection } from "@uri/inject";
+import { context, type Injection } from "@uri/inject";
 import { coerce, empty, groupBy, map, pipe, retry } from "gamla";
 import {
   type AgentSpec,
@@ -24,6 +24,7 @@ import {
 import { makeCache } from "./cacher.ts";
 import {
   accessGeminiToken,
+  geminiFlashImageVersion,
   geminiFlashVersion,
   geminiProVersion,
   zodToGeminiParameters,
@@ -42,9 +43,16 @@ const callGemini = (req: GenerateContentParameters): Promise<GeminiOutput> =>
     .then((resp: GenerateContentResponse): GeminiOutput =>
       (resp.candidates?.[0]?.content?.parts ?? [])
         .flatMap((part: Part): GeminiOutput => {
-          const { text, functionCall, thoughtSignature } = part;
+          const { text, functionCall, thoughtSignature, inlineData, fileData } =
+            part;
           if (functionCall) {
             return [{ type: "function_call", functionCall, thoughtSignature }];
+          }
+          if (inlineData) {
+            return [{ type: "inline_data", inlineData, thoughtSignature }];
+          }
+          if (fileData) {
+            return [{ type: "file_data", fileData, thoughtSignature }];
           }
           if (typeof text === "string") {
             return [{ type: "text", text, thoughtSignature }];
@@ -82,10 +90,22 @@ const historyEventToContent =
       ].filter((x): x is Part => !!x));
     }
     if (e.type === "own_utterance") {
-      return wrapModelContent([{
-        thoughtSignature: e.modelMetadata?.thoughtSignature,
-        text: e.text,
-      }]);
+      const parts: Part[] = [];
+      if (e.text && e.text.length > 0) {
+        parts.push({
+          thoughtSignature: e.modelMetadata?.thoughtSignature,
+          text: e.text,
+        });
+      }
+      if (e.attachments && e.attachments.length > 0) {
+        parts.push(...attachmentsToParts(e.attachments));
+      }
+      return wrapModelContent(
+        parts.length > 0 ? parts : [{
+          thoughtSignature: e.modelMetadata?.thoughtSignature,
+          text: "",
+        }],
+      );
     }
     if (e.type === "tool_call") {
       return wrapModelContent([{
@@ -160,6 +180,18 @@ type GeminiFunctiontoolPart = {
   thoughtSignature?: string;
 };
 
+type GeminiInlinePart = {
+  type: "inline_data";
+  inlineData: NonNullable<Part["inlineData"]>;
+  thoughtSignature?: string;
+};
+
+type GeminiFilePart = {
+  type: "file_data";
+  fileData: NonNullable<Part["fileData"]>;
+  thoughtSignature?: string;
+};
+
 type GeminiHistoryEvent = HistoryEventWithMetadata<{
   type: "gemini";
   thoughtSignature: string;
@@ -168,7 +200,9 @@ type GeminiHistoryEvent = HistoryEventWithMetadata<{
 
 type GeminiPartOfInterest =
   | { type: "text"; text: string; thoughtSignature?: string }
-  | GeminiFunctiontoolPart;
+  | GeminiFunctiontoolPart
+  | GeminiInlinePart
+  | GeminiFilePart;
 
 const sawFunction = (output: GeminiOutput) =>
   output.some(({ type }: GeminiPartOfInterest) => type === "function_call");
@@ -177,7 +211,12 @@ const didNothing = (output: GeminiOutput) =>
   !sawFunction(output) &&
   !output.some((p: GeminiPartOfInterest) => p.type === "text" && p.text);
 
-export const geminiAgentCaller = ({ lightModel, prompt, tools }: AgentSpec) =>
+export const geminiAgentCaller = ({
+  lightModel,
+  prompt,
+  tools,
+  imageGen,
+}: AgentSpec) =>
   pipe(
     (historyOuter: GeminiHistoryEvent[]) => {
       const eventById = indexById(historyOuter);
@@ -195,7 +234,9 @@ export const geminiAgentCaller = ({ lightModel, prompt, tools }: AgentSpec) =>
       return history;
     },
     (contents: Content[]): GenerateContentParameters => ({
-      model: lightModel ? geminiFlashVersion : geminiProVersion,
+      model: imageGen
+        ? geminiFlashImageVersion
+        : (lightModel ? geminiFlashVersion : geminiProVersion),
       config: {
         systemInstruction: prompt,
         tools: [{ functionDeclarations: tools.map(actionToTool) }],
@@ -251,6 +292,44 @@ const geminiOutputPartToHistoryEvent =
           thoughtSignature: p.thoughtSignature,
         })
         : toolUseTurn(p.functionCall);
+    }
+    if (p.type === "inline_data") {
+      const { data, mimeType } = p.inlineData;
+      if (!data) {
+        return ownUtteranceTurn("");
+      }
+      const attachments: MediaAttachment[] = [{
+        kind: "inline",
+        mimeType: mimeType ?? "application/octet-stream",
+        dataBase64: data,
+      }];
+      const metadata = p.thoughtSignature
+        ? {
+          type: "gemini" as const,
+          responseId,
+          thoughtSignature: p.thoughtSignature,
+        }
+        : undefined;
+      return ownUtteranceTurnWithMetadata("", metadata, attachments);
+    }
+    if (p.type === "file_data") {
+      const { fileUri, mimeType } = p.fileData;
+      if (!fileUri) {
+        return ownUtteranceTurn("");
+      }
+      const attachments: MediaAttachment[] = [{
+        kind: "file",
+        mimeType: mimeType ?? "application/octet-stream",
+        fileUri,
+      }];
+      const metadata = p.thoughtSignature
+        ? {
+          type: "gemini" as const,
+          responseId,
+          thoughtSignature: p.thoughtSignature,
+        }
+        : undefined;
+      return ownUtteranceTurnWithMetadata("", metadata, attachments);
     }
     throw new Error(`Unknown part type: ${JSON.stringify(p)}`);
   };
