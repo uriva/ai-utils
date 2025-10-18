@@ -417,6 +417,26 @@ const mediaTool = {
   },
 };
 
+const mediaToolWithCaption = {
+  name: "returnMediaWithCaption",
+  description: "Returns media with caption via attachments",
+  parameters: z.object({}),
+  handler: () => {
+    const ret: ToolReturn = {
+      result: "image with caption attached",
+      attachments: [
+        { 
+          kind: "inline", 
+          mimeType: "image/jpeg", 
+          dataBase64: b64,
+          caption: "A friendly golden retriever sitting in the grass"
+        },
+      ],
+    };
+    return Promise.resolve(ret);
+  },
+};
+
 Deno.test(
   "tool result attachments are forwarded to model",
   injectSecrets(async () => {
@@ -468,6 +488,72 @@ Deno.test(
         e.type === "own_utterance" && e.text.toLowerCase().includes("dog")
       ),
       `AI did not describe the image as a dog. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+  }),
+);
+
+Deno.test(
+  "attachment captions are included in model input",
+  injectSecrets(async () => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "What do you see?",
+        attachments: [
+          { 
+            kind: "inline", 
+            mimeType: "image/jpeg", 
+            dataBase64: b64,
+            caption: "This is my beloved golden retriever named Buddy"
+          },
+        ],
+      }),
+    ];
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 3,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "You can see images and their captions. Always mention the caption information in your response.",
+      lightModel: true,
+    });
+    assert(
+      mockHistory.some((e) =>
+        e.type === "own_utterance" && 
+        e.text.toLowerCase().includes("buddy") &&
+        e.text.toLowerCase().includes("golden retriever")
+      ),
+      `AI did not mention the caption information. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+  }),
+);
+
+Deno.test(
+  "tool result attachments with captions are forwarded to model",
+  injectSecrets(async () => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please call returnMediaWithCaption and describe what you received.",
+      }),
+    ];
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 3,
+      onMaxIterationsReached: () => {},
+      tools: [mediaToolWithCaption],
+      prompt: "You can see images and their captions returned by tools. Always mention the caption information in your response.",
+      lightModel: true,
+    });
+    assert(
+      mockHistory.some((e) =>
+        e.type === "own_utterance" && 
+        e.text.toLowerCase().includes("grass") &&
+        (e.text.toLowerCase().includes("golden") || e.text.toLowerCase().includes("retriever"))
+      ),
+      `AI did not mention the tool caption information. History: ${
         JSON.stringify(mockHistory, null, 2)
       }`,
     );
