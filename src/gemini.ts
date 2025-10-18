@@ -160,7 +160,7 @@ const uploadToGeminiFromFile = (
     new Uint8Array(Array.from(atob(dataBase64), (c) => c.charCodeAt(0))),
   );
 
-export const ensureGeminiAttachment = async (
+export const ensureGeminiAttachmentIsLink = async (
   attachment: MediaAttachment,
 ): Promise<MediaAttachment> => {
   if (attachment.kind === "file" && attachment.fileUri?.trim()) {
