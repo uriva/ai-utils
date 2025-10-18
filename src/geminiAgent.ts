@@ -72,11 +72,16 @@ const actionToTool = ({ name, description, parameters }: Tool<any>) => ({
 });
 
 const attachmentsToParts = (attachments?: MediaAttachment[]): Part[] =>
-  (attachments ?? []).map((a): Part =>
-    a.kind === "inline"
+  (attachments ?? []).flatMap((a): Part[] => {
+    const mediaPart: Part = a.kind === "inline"
       ? { inlineData: { data: a.dataBase64, mimeType: a.mimeType } }
-      : { fileData: { fileUri: a.fileUri, mimeType: a.mimeType } }
-  );
+      : { fileData: { fileUri: a.fileUri, mimeType: a.mimeType } };
+    const parts: Part[] = [mediaPart];
+    if (a.caption && a.caption.trim()) {
+      parts.push({ text: a.caption });
+    }
+    return parts;
+  });
 
 const historyEventToContent =
   (eventById: (id: string) => GeminiHistoryEvent) =>

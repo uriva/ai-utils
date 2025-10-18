@@ -8,6 +8,7 @@ import { context, type Injection, type Injector } from "@uri/inject";
 import { coerce, empty, map, pipe, remove } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z, type ZodType } from "zod/v4";
+import type { MediaAttachment } from "./agent.ts";
 import { makeCache } from "./cacher.ts";
 import { structuredMsgs } from "./openai.ts";
 import type { ModelOpts } from "./utils.ts";
@@ -117,3 +118,74 @@ export const geminiGenJson =
       structuredMsgs(systemMsg, userMsg),
       zodType,
     );
+
+type UploadResult = { geminiUri: string; mimeType: string };
+
+const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
+  const buf = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buf).set(bytes);
+  return buf;
+};
+
+const uploadBytesToGemini =
+  (mimeType: string) => async (bytes: Uint8Array): Promise<UploadResult> => {
+    const ai = new GoogleGenAI({ apiKey: tokenInjection.access() });
+    const file = new File([toArrayBuffer(bytes)], "file", { type: mimeType });
+    const { uri, mimeType: mimeType2 } = await ai.files.upload({
+      file,
+      config: { mimeType },
+    });
+    if (!uri || !mimeType2) {
+      throw new Error("Gemini file upload failed: missing uri or mimeType");
+    }
+    return { geminiUri: uri, mimeType: mimeType2 };
+  };
+
+const uploadToGeminiFromUrl = async (
+  url: string,
+  mimeType: string,
+): Promise<UploadResult> => {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch file for Gemini upload: ${url}`);
+  }
+  return uploadBytesToGemini(mimeType)(new Uint8Array(await res.arrayBuffer()));
+};
+
+const uploadToGeminiFromFile = (
+  mimeType: string,
+  dataBase64: string,
+): Promise<UploadResult> =>
+  uploadBytesToGemini(mimeType)(
+    new Uint8Array(Array.from(atob(dataBase64), (c) => c.charCodeAt(0))),
+  );
+
+export const ensureGeminiAttachment = async (
+  attachment: MediaAttachment,
+): Promise<MediaAttachment> => {
+  if (attachment.kind === "file" && attachment.fileUri?.trim()) {
+    const { geminiUri, mimeType } = await uploadToGeminiFromUrl(
+      attachment.fileUri,
+      attachment.mimeType,
+    );
+    return {
+      kind: "file",
+      fileUri: geminiUri,
+      mimeType,
+      caption: attachment.caption,
+    };
+  }
+  if (attachment.kind === "inline") {
+    const { geminiUri, mimeType } = await uploadToGeminiFromFile(
+      attachment.mimeType,
+      attachment.dataBase64,
+    );
+    return {
+      kind: "file",
+      fileUri: geminiUri,
+      mimeType,
+      caption: attachment.caption,
+    };
+  }
+  throw new Error("Unsupported attachment kind or missing data");
+};

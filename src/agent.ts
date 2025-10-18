@@ -12,8 +12,8 @@ import {
 import type { z, ZodType } from "zod/v4";
 
 export type MediaAttachment =
-  | { kind: "inline"; mimeType: string; dataBase64: string }
-  | { kind: "file"; mimeType: string; fileUri: string };
+  | { kind: "inline"; mimeType: string; dataBase64: string, caption?: string }
+  | { kind: "file"; mimeType: string; fileUri: string, caption?: string };
 
 export type ToolReturn = { result: string; attachments?: MediaAttachment[] };
 
