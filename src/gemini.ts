@@ -4,7 +4,7 @@ import {
   type GenerateContentParameters,
   GoogleGenAI,
 } from "@google/genai";
-import { context, type Injection, Injector } from "@uri/inject";
+import { context, type Injection, type Injector } from "@uri/inject";
 import { coerce, empty, map, pipe, remove } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z, type ZodType } from "zod/v4";
