@@ -79,8 +79,8 @@ const openAiToGeminiMessage = pipe(
   remove(({ parts }: Content) => empty(parts ?? [])),
 );
 
-export const geminiProVersion = "gemini-2.5-pro-preview-06-05";
-export const geminiFlashVersion = "gemini-2.5-flash-preview-05-20";
+export const geminiProVersion = "gemini-2.5-pro";
+export const geminiFlashVersion = "gemini-2.5-flash";
 export const geminiFlashImageVersion = "gemini-2.5-flash-image";
 
 export const geminiGenJsonFromConvo: <T extends ZodType>(
