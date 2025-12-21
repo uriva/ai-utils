@@ -12,8 +12,8 @@ import {
 import type { z, ZodType } from "zod/v4";
 
 export type MediaAttachment =
-  | { kind: "inline"; mimeType: string; dataBase64: string, caption?: string }
-  | { kind: "file"; mimeType: string; fileUri: string, caption?: string };
+  | { kind: "inline"; mimeType: string; dataBase64: string; caption?: string }
+  | { kind: "file"; mimeType: string; fileUri: string; caption?: string };
 
 export type ToolReturn = { result: string; attachments?: MediaAttachment[] };
 
@@ -84,6 +84,13 @@ export type ToolResult = {
   attachments?: MediaAttachment[];
 } & SharedFields;
 
+export type OwnThought<ModelMetadata> = {
+  type: "own_thought";
+  isOwn: true;
+  modelMetadata?: ModelMetadata;
+  text: string;
+} & SharedFields;
+
 export type DoNothing<ModelMetadata> = {
   type: "do_nothing";
   modelMetadata?: ModelMetadata;
@@ -96,6 +103,7 @@ export type HistoryEventWithMetadata<ModelMetadata> =
   | ParticipantReaction
   | ToolUseWithMetadata<unknown, ModelMetadata>
   | ToolResult
+  | OwnThought<ModelMetadata>
   | DoNothing<ModelMetadata>;
 
 export type HistoryEvent = HistoryEventWithMetadata<unknown>;
@@ -239,12 +247,21 @@ export const ownUtteranceTurn = <Metadata>(
 ): HistoryEventWithMetadata<Metadata> =>
   ownUtteranceTurnWithMetadata(text, undefined, attachments);
 
+export const ownThoughtTurn = <Metadata>(
+  text: string,
+): HistoryEventWithMetadata<Metadata> => ({
+  type: "own_thought",
+  isOwn: true,
+  text,
+  ...sharedFields(),
+});
+
 const sharedFields = () => ({
   id: idGeneration.access(),
   timestamp: timestampGeneration.access(),
 });
 
-export const toolResultTurn = (
+const toolResultTurn = (
   { name, result, attachments }: {
     name: string;
     result: string;
@@ -381,6 +398,9 @@ export const estimateTokens = (e: HistoryEvent): number => {
   if (e.type === "tool_result") {
     return approxTextTokens(e.name) + approxTextTokens(e.result) +
       attachmentTokens(e.attachments) + 4;
+  }
+  if (e.type === "own_thought") {
+    return approxTextTokens(e.text) + 2;
   }
   if (e.type === "participant_reaction") {
     return approxTextTokens(e.name) + approxTextTokens(e.reaction) + 2;

@@ -127,6 +127,11 @@ const historyEventToContent =
       ];
       return wrapUserContent(parts);
     }
+    if (e.type === "own_thought") {
+      return wrapUserContent([{
+        text: `[Internal thought, visible only to you: ${e.text}]`,
+      }]);
+    }
     if (e.type === "own_reaction") {
       const msg = eventById(e.onMessage);
       const text = typeof msg === "object" && "text" in msg ? msg.text : "";
