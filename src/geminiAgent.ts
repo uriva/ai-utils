@@ -26,6 +26,7 @@ import {
   accessGeminiToken,
   geminiFlashImageVersion,
   geminiFlashVersion,
+  geminiProImageVersion,
   geminiProVersion,
   zodToGeminiParameters,
 } from "./gemini.ts";
@@ -240,7 +241,7 @@ export const geminiAgentCaller = ({
     },
     (contents: Content[]): GenerateContentParameters => ({
       model: imageGen
-        ? geminiFlashImageVersion
+        ? (lightModel ? geminiFlashImageVersion : geminiProImageVersion)
         : (lightModel ? geminiFlashVersion : geminiProVersion),
       config: {
         systemInstruction: prompt,
