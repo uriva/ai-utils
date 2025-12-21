@@ -15,10 +15,8 @@ import {
   type HistoryEventWithMetadata,
   type MediaAttachment,
   type MessageId,
-  ownUtteranceTurn,
   ownUtteranceTurnWithMetadata,
   type Tool,
-  toolUseTurn,
   toolUseTurnWithMetadata,
 } from "./agent.ts";
 import { makeCache } from "./cacher.ts";
@@ -198,11 +196,13 @@ type GeminiFilePart = {
   thoughtSignature?: string;
 };
 
-type GeminiHistoryEvent = HistoryEventWithMetadata<{
+type GeminiMetadata = {
   type: "gemini";
   thoughtSignature: string;
   responseId: string;
-}>;
+};
+
+type GeminiHistoryEvent = HistoryEventWithMetadata<GeminiMetadata>;
 
 type GeminiPartOfInterest =
   | { type: "text"; text: string; thoughtSignature?: string }
@@ -215,7 +215,11 @@ const sawFunction = (output: GeminiOutput) =>
 
 const didNothing = (output: GeminiOutput) =>
   !sawFunction(output) &&
-  !output.some((p: GeminiPartOfInterest) => p.type === "text" && p.text);
+  !output.some((p: GeminiPartOfInterest) =>
+    (p.type === "text" && p.text) ||
+    p.type === "inline_data" ||
+    p.type === "file_data"
+  );
 
 export const geminiAgentCaller = ({
   lightModel,
@@ -281,61 +285,67 @@ export const geminiAgentCaller = ({
 
 const geminiOutputPartToHistoryEvent =
   (responseId: string) => (p: GeminiPartOfInterest): GeminiHistoryEvent => {
-    if (p.type === "text" && p.text) {
-      return p.thoughtSignature
-        ? ownUtteranceTurnWithMetadata(p.text, {
+    if (p.type === "text") {
+      return ownUtteranceTurnWithMetadata<GeminiMetadata>(
+        typeof p.text === "string" ? p.text : "",
+        {
           type: "gemini",
           responseId,
-          thoughtSignature: p.thoughtSignature,
-        })
-        : ownUtteranceTurn(p.text);
+          thoughtSignature: p.thoughtSignature ?? "",
+        },
+      );
     }
     if (p.type === "function_call") {
-      return p.thoughtSignature
-        ? toolUseTurnWithMetadata(p.functionCall, {
-          type: "gemini",
-          responseId,
-          thoughtSignature: p.thoughtSignature,
-        })
-        : toolUseTurn(p.functionCall);
+      return toolUseTurnWithMetadata(p.functionCall, {
+        type: "gemini",
+        responseId,
+        thoughtSignature: p.thoughtSignature ?? "",
+      });
     }
     if (p.type === "inline_data") {
       const { data, mimeType } = p.inlineData;
       if (!data) {
-        return ownUtteranceTurn("");
-      }
-      const attachments: MediaAttachment[] = [{
-        kind: "inline",
-        mimeType: mimeType ?? "application/octet-stream",
-        dataBase64: data,
-      }];
-      const metadata = p.thoughtSignature
-        ? {
-          type: "gemini" as const,
+        return ownUtteranceTurnWithMetadata<GeminiMetadata>("", {
+          type: "gemini",
           responseId,
-          thoughtSignature: p.thoughtSignature,
-        }
-        : undefined;
-      return ownUtteranceTurnWithMetadata("", metadata, attachments);
+          thoughtSignature: "",
+        });
+      }
+      return ownUtteranceTurnWithMetadata<GeminiMetadata>(
+        "",
+        {
+          type: "gemini",
+          responseId,
+          thoughtSignature: p.thoughtSignature ?? "",
+        },
+        [{
+          kind: "inline",
+          mimeType: mimeType ?? "application/octet-stream",
+          dataBase64: data,
+        }],
+      );
     }
     if (p.type === "file_data") {
       const { fileUri, mimeType } = p.fileData;
-      if (!fileUri) {
-        return ownUtteranceTurn("");
-      }
-      const attachments: MediaAttachment[] = [{
-        kind: "file",
-        mimeType: mimeType ?? "application/octet-stream",
-        fileUri,
-      }];
-      const metadata = p.thoughtSignature
-        ? {
-          type: "gemini" as const,
+      return fileUri
+        ? ownUtteranceTurnWithMetadata<GeminiMetadata>(
+          "",
+          {
+            type: "gemini",
+            responseId,
+            thoughtSignature: p.thoughtSignature ?? "",
+          },
+          [{
+            kind: "file",
+            mimeType: mimeType ?? "application/octet-stream",
+            fileUri,
+          }],
+        )
+        : ownUtteranceTurnWithMetadata<GeminiMetadata>("", {
+          type: "gemini",
           responseId,
-          thoughtSignature: p.thoughtSignature,
-        }
-        : undefined;
-      return ownUtteranceTurnWithMetadata("", metadata, attachments);
+          thoughtSignature: "",
+        });
     }
     throw new Error(`Unknown part type: ${JSON.stringify(p)}`);
   };
