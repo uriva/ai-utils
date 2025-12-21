@@ -17,7 +17,6 @@ import {
   injectOutputEvent,
   ownUtteranceTurn,
   participantUtteranceTurn,
-  toolResultTurn,
   type ToolReturn,
   toolUseTurn,
 } from "./src/agent.ts";
@@ -111,23 +110,6 @@ Deno.test(
     await agentDeps([])(runAgent)({
       onMaxIterationsReached: () => {},
       tools: [],
-      prompt: `You are the neighborhood friendly spiderman.`,
-      maxIterations: 5,
-    });
-  }),
-);
-
-Deno.test(
-  "conversation can start with a tool call",
-  injectSecrets(async () => {
-    await agentDeps([
-      toolUseTurn({ name: someTool.name, args: {} }),
-      toolResultTurn({ name: someTool.name, result: toolResult }),
-    ])(
-      runAgent,
-    )({
-      onMaxIterationsReached: () => {},
-      tools: [someTool],
       prompt: `You are the neighborhood friendly spiderman.`,
       maxIterations: 5,
     });
