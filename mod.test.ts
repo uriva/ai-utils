@@ -356,7 +356,12 @@ Deno.test(
     });
 
     const attachment = collectAttachment(generationHistory);
-    assert(attachment, "Response should include an image attachment");
+    assert(
+      attachment,
+      `Response should include an image attachment. Instead got ${
+        JSON.stringify(generationHistory)
+      }`,
+    );
     assert(
       attachment.mimeType?.startsWith("image/"),
       `Expected image mime type, got ${attachment?.mimeType}`,
