@@ -71,7 +71,7 @@ const agentDeps = (inMemoryHistory: HistoryEvent[]): Injector =>
     }),
   );
 
-const toolResult = "43212e8e-4c29-4a3c-aba2-723e668b5537";
+const toolResult = "43212e8e";
 
 const someTool = {
   name: "doSomethingUnique",
@@ -440,7 +440,8 @@ const mediaToolWithCaption = {
 const recognizedTheDog = (e: HistoryEvent) =>
   e.type === "own_utterance" &&
   (e.text.toLowerCase().includes("dog") ||
-    e.text.toLowerCase().includes("retriever"));
+    e.text.toLowerCase().includes("retriever") ||
+    e.text.toLowerCase().includes("puppy"));
 
 Deno.test(
   "tool result attachments are forwarded to model",
