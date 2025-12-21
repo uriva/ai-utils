@@ -18,7 +18,6 @@ import {
   ownUtteranceTurn,
   participantUtteranceTurn,
   type ToolReturn,
-  toolUseTurn,
 } from "./src/agent.ts";
 
 const injectSecrets = pipe(

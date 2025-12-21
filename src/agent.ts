@@ -208,11 +208,6 @@ export const toolUseTurnWithMetadata = <Metadata>(
   modelMetadata,
 });
 
-export const toolUseTurn = <Metadata>(
-  { name, args }: FunctionCall,
-): HistoryEventWithMetadata<Metadata> =>
-  toolUseTurnWithMetadata({ name, args }, undefined);
-
 export const participantUtteranceTurn = (
   { name, text, attachments }: {
     name: string;
