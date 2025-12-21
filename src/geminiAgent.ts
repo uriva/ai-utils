@@ -17,6 +17,7 @@ import {
   type MessageId,
   ownUtteranceTurnWithMetadata,
   type Tool,
+  toolUseTurnWithMetadata,
 } from "./agent.ts";
 import { makeCache } from "./cacher.ts";
 import {
