@@ -548,3 +548,24 @@ Deno.test(
     );
   }),
 );
+
+Deno.test(
+  "agent with history starting with only tool result triggers 400",
+  injectSecrets(async () => {
+    const mockHistory: HistoryEvent[] = [{
+      type: "tool_result",
+      isOwn: true,
+      id: "test-id",
+      timestamp: Date.now(),
+      name: "someTool",
+      result: "some result",
+    }];
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "You are a helper.",
+      lightModel: true,
+    });
+  }),
+);
