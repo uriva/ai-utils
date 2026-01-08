@@ -80,6 +80,7 @@ export type ToolResult = {
   type: "tool_result";
   isOwn: true;
   name: string;
+  toolCallId?: string;
   result: string;
   attachments?: MediaAttachment[];
 } & SharedFields;
@@ -175,24 +176,31 @@ const parseWithCatch = <T extends ZodType>(
 const callToResult =
   // deno-lint-ignore no-explicit-any
   (actions: Tool<any>[]) => async <T extends ZodType>(fc: FunctionCall) => {
-    const { name, args } = fc;
+    const { name, args, id } = fc;
+    const toolCallId = id;
     const action: Tool<T> | undefined = actions.find(({ name: n }) =>
       n === name
     );
     if (!name) throw new Error("Function call name is missing");
-    if (!action) return { name, result: `Function ${name} not found` };
+    if (!action) {
+      return { toolCallId, name, result: `Function ${name} not found` };
+    }
     const { handler, parameters } = action;
     const parseResult = parseWithCatch(parameters, args);
     if (!parseResult.ok) {
       return {
+        toolCallId,
         name,
         result: `Invalid arguments: ${JSON.stringify(parseResult.error)}`,
       };
     }
     const out = await handler(parseResult.result);
-    return typeof out === "string"
-      ? { name, result: out }
-      : { name, result: out.result, attachments: out.attachments };
+    return typeof out === "string" ? { toolCallId, name, result: out } : {
+      toolCallId,
+      name,
+      result: out.result,
+      attachments: out.attachments,
+    };
   };
 
 export const toolUseTurnWithMetadata = <Metadata>(
@@ -257,10 +265,11 @@ const sharedFields = () => ({
 });
 
 const toolResultTurn = (
-  { name, result, attachments }: {
+  { name, result, attachments, toolCallId }: {
     name: string;
     result: string;
     attachments?: MediaAttachment[];
+    toolCallId?: string;
   },
 ): HistoryEvent => ({
   ...sharedFields(),
@@ -269,6 +278,7 @@ const toolResultTurn = (
   name,
   result,
   attachments,
+  toolCallId,
 });
 
 export const doNothingEvent = <Metadata>(
@@ -295,6 +305,7 @@ const handleFunctionCalls = (tools: Tool<any>[]) =>
     map((t: ToolUse<any>): FunctionCall => ({
       name: t.name,
       args: t.parameters,
+      id: t.id,
     })),
     each(pipe(callToResult(tools), toolResultTurn, outputEvent)),
   );

@@ -19,6 +19,7 @@ import {
   participantUtteranceTurn,
   type ToolReturn,
 } from "./src/agent.ts";
+import { filterOrphanedToolResults } from "./src/geminiAgent.ts";
 
 const injectSecrets = pipe(
   // @ts-expect-error passthrough cacher is sufficient for tests
@@ -549,8 +550,82 @@ Deno.test(
   }),
 );
 
+
+Deno.test("filterOrphanedToolResults logic", () => {
+  const baseAuth = { isOwn: true, id: "msg-id", timestamp: 100 } as const;
+  const mkCall = (
+    id: string,
+    name: string,
+    timestamp: number,
+  ) => ({
+    ...baseAuth,
+    type: "tool_call" as const,
+    id,
+    name,
+    timestamp,
+    parameters: {},
+    modelMetadata: { type: "gemini", responseId: "r1", thoughtSignature: "" },
+  });
+  const mkResult = (
+    name: string,
+    timestamp: number,
+    toolCallId?: string,
+  ) => ({
+    ...baseAuth,
+    type: "tool_result" as const,
+    name,
+    timestamp,
+    toolCallId,
+    result: "res",
+    modelMetadata: { type: "gemini", responseId: "r1", thoughtSignature: "" },
+  });
+
+  // Case 1: Legacy match
+  const h1 = [
+    mkCall("c1", "toolA", 100),
+    mkResult("toolA", 101),
+  ];
+  // @ts-ignore - types match roughly
+  assertEquals(filterOrphanedToolResults(h1).length, 2);
+
+  // Case 2: Orphaned legacy
+  const h2 = [
+    mkResult("toolA", 101),
+  ];
+  // @ts-ignore - types match roughly
+  assertEquals(filterOrphanedToolResults(h2).length, 0);
+
+  // Case 3: Mixed strict and legacy
+  const h3 = [
+    mkCall("c1", "toolA", 100),
+    mkCall("c2", "toolA", 102),
+    mkResult("toolA", 103, "c2"), // Claims c2
+    mkResult("toolA", 104), // Should claim c1
+  ];
+  // @ts-ignore - types match roughly
+  assertEquals(filterOrphanedToolResults(h3).length, 4);
+
+  // Case 4: Stealing prevention
+  const h4 = [
+    mkCall("c1", "toolA", 100),
+    mkResult("toolA", 103, "c1"), // Claims c1
+    mkResult("toolA", 104), // Orphan, because c1 is taken
+  ];
+  // @ts-ignore - types match roughly
+  assertEquals(filterOrphanedToolResults(h4).length, 2);
+
+  // Case 5: Excess legacy results (1 call, 2 results)
+  const h5 = [
+    mkCall("c1", "toolA", 100),
+    mkResult("toolA", 101),
+    mkResult("toolA", 102),
+  ];
+  // @ts-ignore - types match roughly
+  assertEquals(filterOrphanedToolResults(h5).length, 2);
+});
+
 Deno.test(
-  "agent with history starting with only tool result triggers 400",
+  "agent with history starting with only tool doesn't trigger 400",
   injectSecrets(async () => {
     const mockHistory: HistoryEvent[] = [{
       type: "tool_result",

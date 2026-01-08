@@ -226,21 +226,52 @@ const didNothing = (output: GeminiOutput) =>
     p.type === "file_data"
   );
 
-const filterOrphanedToolResults = (
+export const filterOrphanedToolResults = (
   history: GeminiHistoryEvent[],
 ): GeminiHistoryEvent[] => {
-  const toolCallIds = new Set(
-    history
-      .filter((e) => e.type === "tool_call")
-      .map((e) => e.id),
-  );
+  const allCalls = history.filter((e) => e.type === "tool_call");
+
+  // Reservartion pass: mark calls that are claimed by strict ID matching
+  const reservedCallIds = new Set<string>();
+  history.forEach((e) => {
+    if (e.type === "tool_result" && e.toolCallId) {
+      const call = allCalls.find((c) => c.id === e.toolCallId);
+      if (call) reservedCallIds.add(call.id);
+    }
+  });
+
+  const processedStrictCalls = new Set<string>();
+  const processedLegacyCalls = new Set<string>();
+
   return history.filter((e) => {
     if (e.type !== "tool_result") return true;
-    const correspondingCall = history.find(
-      (call) => call.type === "tool_call" && call.name === e.name &&
-        call.timestamp < e.timestamp,
+
+    if (e.toolCallId) {
+      // Strict match: must match an ID not yet fully processed/duplicated
+      const call = allCalls.find((c) =>
+        c.id === e.toolCallId && !processedStrictCalls.has(c.id)
+      );
+      if (call) {
+        processedStrictCalls.add(call.id);
+        return true;
+      }
+      return false;
+    }
+
+    // Legacy match: find available call (not reserved, not used)
+    const call = allCalls.find((c) =>
+      c.name === e.name &&
+      c.timestamp < e.timestamp &&
+      !reservedCallIds.has(c.id) &&
+      !processedLegacyCalls.has(c.id)
     );
-    return !!correspondingCall;
+
+    if (call) {
+      processedLegacyCalls.add(call.id);
+      return true;
+    }
+
+    return false;
   });
 };
 
