@@ -226,6 +226,24 @@ const didNothing = (output: GeminiOutput) =>
     p.type === "file_data"
   );
 
+const filterOrphanedToolResults = (
+  history: GeminiHistoryEvent[],
+): GeminiHistoryEvent[] => {
+  const toolCallIds = new Set(
+    history
+      .filter((e) => e.type === "tool_call")
+      .map((e) => e.id),
+  );
+  return history.filter((e) => {
+    if (e.type !== "tool_result") return true;
+    const correspondingCall = history.find(
+      (call) => call.type === "tool_call" && call.name === e.name &&
+        call.timestamp < e.timestamp,
+    );
+    return !!correspondingCall;
+  });
+};
+
 export const geminiAgentCaller = ({
   lightModel,
   prompt,
@@ -233,6 +251,7 @@ export const geminiAgentCaller = ({
   imageGen,
 }: AgentSpec) =>
   pipe(
+    filterOrphanedToolResults,
     (historyOuter: GeminiHistoryEvent[]) => {
       const eventById = indexById(historyOuter);
       const history = pipe(
