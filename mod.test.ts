@@ -644,3 +644,34 @@ Deno.test(
     });
   }),
 );
+
+Deno.test("tool_call with empty thoughtSignature is filtered out with warning", injectSecrets(async () => {
+  const mockHistory: HistoryEvent[] = [
+    participantUtteranceTurn({
+      name: "user",
+      text: "Please call the testTool.",
+    }),
+    // Inject a tool_call event with empty thoughtSignature
+    {
+      type: "tool_call",
+      isOwn: true,
+      id: "test-id",
+      timestamp: Date.now(),
+      name: "testTool",
+      parameters: {},
+      modelMetadata: {
+        type: "gemini",
+        thoughtSignature: "", // Empty - this should trigger the bug
+        responseId: "resp_id",
+      },
+    } as HistoryEvent,
+  ];
+
+  await agentDeps(mockHistory)(runAgent)({
+    maxIterations: 1,
+    onMaxIterationsReached: () => {},
+    tools: [someTool],
+    prompt: "You are a helper.",
+    lightModel: false, // Use full model to trigger API call
+  });
+}));

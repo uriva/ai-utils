@@ -255,6 +255,10 @@ export const filterOrphanedToolResults = (
         processedStrictCalls.add(call.id);
         return true;
       }
+      console.warn(
+        `Warning: Filtering out orphaned tool_result for "${e.name}" (toolCallId: ${e.toolCallId}). ` +
+          `No matching tool_call found with that ID.`,
+      );
       return false;
     }
 
@@ -271,7 +275,26 @@ export const filterOrphanedToolResults = (
       return true;
     }
 
+    console.warn(
+      `Warning: Filtering out orphaned tool_result for "${e.name}" (id: ${e.id}). ` +
+        `No matching tool_call found.`,
+    );
     return false;
+  });
+};
+
+export const filterInvalidToolCalls = (
+  history: GeminiHistoryEvent[],
+): GeminiHistoryEvent[] => {
+  return history.filter((e) => {
+    if (e.type === "tool_call" && !e.modelMetadata?.thoughtSignature?.trim()) {
+      console.warn(
+        `Warning: Filtering out tool_call "${e.name}" (id: ${e.id}) with missing or empty thoughtSignature. ` +
+          `This would cause Gemini API error: "Function call is missing a thought_signature in functionCall parts".`,
+      );
+      return false;
+    }
+    return true;
   });
 };
 
@@ -283,6 +306,7 @@ export const geminiAgentCaller = ({
 }: AgentSpec) =>
   pipe(
     filterOrphanedToolResults,
+    filterInvalidToolCalls,
     (historyOuter: GeminiHistoryEvent[]) => {
       const eventById = indexById(historyOuter);
       const history = pipe(
