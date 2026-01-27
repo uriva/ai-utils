@@ -164,6 +164,12 @@ const uploadToGeminiFromFile = (
 export const ensureGeminiAttachmentIsLink = async (
   attachment: MediaAttachment,
 ): Promise<MediaAttachment> => {
+  if (
+    attachment.kind === "file" &&
+    attachment.fileUri.startsWith("https://generativelanguage.googleapis.com/")
+  ) {
+    return attachment;
+  }
   if (attachment.kind === "file" && attachment.fileUri?.trim()) {
     const { geminiUri, mimeType } = await uploadToGeminiFromUrl(
       attachment.fileUri,
@@ -188,5 +194,7 @@ export const ensureGeminiAttachmentIsLink = async (
       caption: attachment.caption,
     };
   }
-  throw new Error("Unsupported attachment kind or missing data");
+  throw new Error(
+    "File attachment missing fileUri or unsupported attachment kind",
+  );
 };
