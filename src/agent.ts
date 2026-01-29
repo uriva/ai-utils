@@ -320,6 +320,7 @@ export type AgentSpec = {
   lightModel?: boolean;
   provider?: "gemini";
   imageGen?: boolean;
+  rewriteHistory: (replacements: Record<string, HistoryEvent>) => Promise<void>;
 };
 
 export const runAbstractAgent = async (
