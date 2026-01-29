@@ -1,3 +1,6 @@
 {
-  "deno.enable": true
+  "deno.enable": true,
+  "chat.tools.terminal.autoApprove": {
+    "deno": true
+  }
 }

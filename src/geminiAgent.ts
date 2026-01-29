@@ -7,7 +7,7 @@ import {
   type Part,
 } from "@google/genai";
 import { context, type Injection } from "@uri/inject";
-import { coerce, empty, groupBy, map, pipe, retry } from "gamla";
+import { coerce, empty, filter, groupBy, map, pipe } from "gamla";
 import {
   type AgentSpec,
   doNothingEvent,
@@ -15,11 +15,13 @@ import {
   type HistoryEventWithMetadata,
   type MediaAttachment,
   type MessageId,
+  type OwnUtterance,
   ownUtteranceTurnWithMetadata,
+  type ParticipantUtterance,
   type Tool,
+  type ToolResult,
   toolUseTurnWithMetadata,
 } from "./agent.ts";
-import { makeCache } from "./cacher.ts";
 import {
   accessGeminiToken,
   geminiFlashImageVersion,
@@ -28,6 +30,7 @@ import {
   geminiProVersion,
   zodToGeminiParameters,
 } from "./gemini.ts";
+import type { ZodType } from "zod/v4";
 
 const geminiError: Injection<
   (_1: Error, _2: GenerateContentParameters) => void
@@ -36,6 +39,78 @@ const geminiError: Injection<
 export const injectGeminiErrorLogger = geminiError.inject;
 
 type GeminiOutput = GeminiPartOfInterest[];
+
+const extractFileIdFromError = (error: Error): string | null => {
+  const match = error.message.match(/File\s+([a-zA-Z0-9]+)/);
+  return match ? match[1] : null;
+};
+
+const is403PermissionError = (error: Error): boolean => {
+  return error.message.includes("403") &&
+    error.message.includes("PERMISSION_DENIED");
+};
+
+const getExpiredMediaText = (attachments: MediaAttachment[]): string =>
+  !empty(attachments)
+    ? ` <media file expired: ${
+      attachments.map((a: MediaAttachment) => a.caption || a.mimeType)
+        .join(", ")
+    }>`
+    : "";
+
+const handleFilePermissionError = (
+  error: Error,
+  events: GeminiHistoryEvent[],
+  rewriteHistory: (
+    replacements: Record<string, HistoryEventWithMetadata<unknown>>,
+  ) => Promise<void>,
+):
+  | { updatedHistory: GeminiHistoryEvent[]; rewritePromise: Promise<void> }
+  | undefined => {
+  if (!is403PermissionError(error)) return undefined;
+  const fileId = extractFileIdFromError(error);
+  if (!fileId) return undefined;
+  const replacements = pipe(
+    filter((event): event is
+      | ParticipantUtterance
+      | OwnUtterance<GeminiMetadata>
+      | ToolResult =>
+      "attachments" in event &&
+      !!event.attachments?.some((att: MediaAttachment) =>
+        att.kind === "file" && att.fileUri.includes(fileId)
+      )
+    ),
+    map((event): [string, GeminiHistoryEvent] => {
+      const expiredMediaText = getExpiredMediaText(
+        event.attachments?.filter((att: MediaAttachment) =>
+          att.kind === "file" && att.fileUri.includes(fileId)
+        ) ?? [],
+      );
+      return [
+        event.id,
+        {
+          ...event,
+          ...event.type === "tool_result"
+            ? { result: event.result + expiredMediaText }
+            : { text: (event.text ?? "") + expiredMediaText },
+          attachments: event.attachments?.filter((
+            att: MediaAttachment,
+          ) =>
+            att.kind === "inline" ||
+            (att.kind === "file" && !att.fileUri.includes(fileId))
+          ),
+        },
+      ];
+    }),
+    Object.fromEntries<GeminiHistoryEvent>,
+  )(events);
+  return {
+    updatedHistory: map((event: GeminiHistoryEvent) =>
+      event.id in replacements ? replacements[event.id] : event
+    )(events),
+    rewritePromise: rewriteHistory(replacements),
+  };
+};
 
 const callGemini = (req: GenerateContentParameters): Promise<GeminiOutput> =>
   new GoogleGenAI({ apiKey: accessGeminiToken() }).models.generateContent(req)
@@ -63,12 +138,14 @@ const callGemini = (req: GenerateContentParameters): Promise<GeminiOutput> =>
       throw err;
     });
 
-// deno-lint-ignore no-explicit-any
-const actionToTool = ({ name, description, parameters }: Tool<any>) => ({
+const actionToTool = ({ name, description, parameters }: Tool<ZodType>) => ({
   name,
   description,
   parameters: zodToGeminiParameters(parameters),
 });
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const attachmentsToParts = (attachments?: MediaAttachment[]): Part[] =>
   (attachments ?? []).flatMap((a): Part[] => {
@@ -87,25 +164,23 @@ const historyEventToContent =
   (e: GeminiHistoryEvent): Content => {
     if (e.type === "participant_utterance") {
       return wrapUserContent([
-        e.text && e.text.length > 0
-          ? ({ text: `${e.name}: ${e.text}` })
-          : undefined,
+        e.text ? ({ text: `${e.name}: ${e.text}` }) : undefined,
         ...attachmentsToParts(e.attachments),
       ].filter((x): x is Part => !!x));
     }
     if (e.type === "own_utterance") {
       const parts: Part[] = [];
-      if (e.text && e.text.length > 0) {
+      if (e.text) {
         parts.push({
           thoughtSignature: e.modelMetadata?.thoughtSignature,
           text: e.text,
         });
       }
-      if (e.attachments && e.attachments.length > 0) {
+      if (e.attachments && !empty(e.attachments)) {
         parts.push(...attachmentsToParts(e.attachments));
       }
       return wrapModelContent(
-        parts.length > 0 ? parts : [{
+        !empty(parts) ? parts : [{
           thoughtSignature: e.modelMetadata?.thoughtSignature,
           text: "",
         }],
@@ -116,7 +191,7 @@ const historyEventToContent =
         thoughtSignature: e.modelMetadata?.thoughtSignature,
         functionCall: {
           name: e.name,
-          args: e.parameters as Record<string, unknown>,
+          args: isRecord(e.parameters) ? e.parameters : {},
         },
       }]);
     }
@@ -177,6 +252,37 @@ const wrapUserContent = wrapRole("user");
 
 const getOriginalId = (e: GeminiHistoryEvent): string =>
   "modelMetadata" in e ? e.modelMetadata?.responseId ?? e.id : e.id;
+
+const fixStart = (history: Content[]) =>
+  (empty(history) || history[0].role !== "user")
+    ? [
+      { role: "user", parts: [{ text: "<conversation started>" }] },
+      ...history,
+    ]
+    : history;
+
+const buildReq = (
+  imageGen: boolean | undefined,
+  lightModel: boolean | undefined,
+  prompt: string,
+  tools: Tool<ZodType>[],
+) =>
+(events: GeminiHistoryEvent[]): GenerateContentParameters => ({
+  model: imageGen
+    ? (lightModel ? geminiFlashImageVersion : geminiProImageVersion)
+    : (lightModel ? geminiFlashVersion : geminiProVersion),
+  config: {
+    systemInstruction: prompt,
+    tools: [{ functionDeclarations: tools.map(actionToTool) }],
+    toolConfig: { functionCallingConfig: {} },
+  },
+  contents: pipe(
+    groupBy(getOriginalId),
+    Object.values<GeminiHistoryEvent[]>,
+    map(pipe(map(historyEventToContent(indexById(events))), combineContent)),
+    fixStart,
+  )(events),
+});
 
 const indexById = (events: GeminiHistoryEvent[]) => {
   const eventIdToEvents = groupBy(({ id }: GeminiHistoryEvent) => id)(events);
@@ -298,49 +404,47 @@ export const filterInvalidToolCalls = (
   });
 };
 
+const callGeminiWithFixHistory = (
+  rewriteHistory: AgentSpec["rewriteHistory"],
+  eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
+) =>
+async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
+  try {
+    return await callGemini(eventsToRequest(events));
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    const handled = handleFilePermissionError(err, events, rewriteHistory);
+    if (!handled) throw err;
+    const { updatedHistory, rewritePromise } = handled;
+    const fixedRequest = eventsToRequest(updatedHistory);
+    const [result] = await Promise.all([
+      callGemini(fixedRequest).catch((retryError) => {
+        const retryErr = retryError instanceof Error
+          ? retryError
+          : new Error(String(retryError));
+        geminiError.access(retryErr, fixedRequest);
+        throw retryErr;
+      }),
+      rewritePromise,
+    ]);
+    return result;
+  }
+};
+
 export const geminiAgentCaller = ({
   lightModel,
   prompt,
   tools,
   imageGen,
+  rewriteHistory,
 }: AgentSpec) =>
+(events: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> =>
   pipe(
     filterOrphanedToolResults,
     filterInvalidToolCalls,
-    (historyOuter: GeminiHistoryEvent[]) => {
-      const eventById = indexById(historyOuter);
-      const history = pipe(
-        groupBy(getOriginalId),
-        Object.values<GeminiHistoryEvent[]>,
-        map(pipe(map(historyEventToContent(eventById)), combineContent)),
-      )(historyOuter);
-      if (empty(history) || history[0].role !== "user") {
-        history.unshift({
-          role: "user",
-          parts: [{ text: "<conversation started>" }],
-        });
-      }
-      return history;
-    },
-    (contents: Content[]): GenerateContentParameters => ({
-      model: imageGen
-        ? (lightModel ? geminiFlashImageVersion : geminiProImageVersion)
-        : (lightModel ? geminiFlashVersion : geminiProVersion),
-      config: {
-        systemInstruction: prompt,
-        tools: [{ functionDeclarations: tools.map(actionToTool) }],
-        // Only set allowedFunctionNames if mode is ANY. Since mode is not set, omit allowedFunctionNames.
-        toolConfig: {
-          functionCallingConfig: {
-            // allowedFunctionNames: actions.map((a) => a.name),
-          },
-        },
-      },
-      contents,
-    }),
-    makeCache("gemini response with function calls v5")(
-      // August 31st 2025, gemini returns frequent 500 errors.
-      retry(1000, 2, callGemini),
+    callGeminiWithFixHistory(
+      rewriteHistory,
+      buildReq(imageGen, lightModel, prompt, tools),
     ),
     (geminiOutput: GeminiOutput): GeminiHistoryEvent[] => {
       const responseId = generateId();
@@ -360,7 +464,7 @@ export const geminiAgentCaller = ({
       }
       return geminiOutput.map(geminiOutputPartToHistoryEvent(responseId));
     },
-  );
+  )(events);
 
 const geminiOutputPartToHistoryEvent =
   (responseId: string) => (p: GeminiPartOfInterest): GeminiHistoryEvent => {
