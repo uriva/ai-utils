@@ -9,8 +9,12 @@ Avoid try/catch in tests unless explicitly approved by user.
 
 Avoid nested functions, unless necessary. Consider currying if you need to inject dependencies.
 
-Use a functional style, prefer `map`, `filter`, `pipe` from Gamla instead of loops and mutable variables.
-
 If a variable is used only once, consider inlining it. If it is too complex, factor it into a well-named function instead.
 
 Prefer gamla's `empty` than length checks - more readable.
+
+Don't use commenting or jsdoc unless instructed or in extreme cases. Typings and names of variables should do most of the documenting.
+
+Use arrow functions instead of `function` keyword.
+
+Use a functional style, prefer `map`, `filter`, `pipe` from Gamla instead of loops and mutable variables. Don't use `class` or `for`/`while` loops unless absolutely necessary.
