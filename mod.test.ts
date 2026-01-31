@@ -549,8 +549,8 @@ Deno.test(
       onMaxIterationsReached: () => {},
       tools: [mediaToolWithCaption],
       prompt:
-        "You can see images and their captions returned by tools. Always mention the caption information in your response.",
-      lightModel: true,
+        "You can see images and their captions returned by tools. Reply with one sentence that includes the words 'grass' and 'retriever'.",
+      lightModel: false,
       rewriteHistory: noopRewriteHistory,
     });
     assert(
@@ -691,6 +691,33 @@ Deno.test(
       tools: [someTool],
       prompt: "You are a helper.",
       lightModel: false, // Use full model to trigger API call
+      rewriteHistory: noopRewriteHistory,
+    });
+  }),
+);
+
+Deno.test(
+  "agent filters unsupported gemini attachments before api call",
+  injectSecrets(async () => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Describe the text message only.",
+        attachments: [
+          {
+            kind: "inline",
+            mimeType: "application/octet-stream",
+            dataBase64: "dGVzdA==",
+          },
+        ],
+      }),
+    ];
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "You are a helper.",
+      lightModel: true,
       rewriteHistory: noopRewriteHistory,
     });
   }),
