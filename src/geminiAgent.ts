@@ -332,6 +332,41 @@ const didNothing = (output: GeminiOutput) =>
     p.type === "file_data"
   );
 
+const isUnsupportedGeminiMimeType = (mimeType: string | undefined): boolean => {
+  if (!mimeType) return true;
+  const normalized = mimeType.trim().toLowerCase();
+  if (!normalized) return true;
+  if (normalized === "application/octet-stream") return true;
+  return false;
+};
+
+const filterUnsupportedGeminiAttachments = (
+  history: GeminiHistoryEvent[],
+): GeminiHistoryEvent[] =>
+  history.map((event) => {
+    if (!("attachments" in event)) return event;
+    const attachments = event.attachments ?? [];
+    if (empty(attachments)) return event;
+    const kept = attachments.filter((att) =>
+      !isUnsupportedGeminiMimeType(att.mimeType)
+    );
+    if (kept.length === attachments.length) return event;
+    const removed = attachments.filter((att) =>
+      isUnsupportedGeminiMimeType(att.mimeType)
+    );
+    if (!empty(removed)) {
+      console.warn(
+        `Warning: Filtering out unsupported Gemini attachment mime types on event ${event.id}: ${
+          removed.map((att) => att.mimeType).join(", ")
+        }`,
+      );
+    }
+    return {
+      ...event,
+      attachments: empty(kept) ? undefined : kept,
+    };
+  });
+
 export const filterOrphanedToolResults = (
   history: GeminiHistoryEvent[],
 ): GeminiHistoryEvent[] => {
@@ -442,6 +477,7 @@ export const geminiAgentCaller = ({
   pipe(
     filterOrphanedToolResults,
     filterInvalidToolCalls,
+    filterUnsupportedGeminiAttachments,
     callGeminiWithFixHistory(
       rewriteHistory,
       buildReq(imageGen, lightModel, prompt, tools),

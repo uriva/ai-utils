@@ -18,3 +18,7 @@ Don't use commenting or jsdoc unless instructed or in extreme cases. Typings and
 Use arrow functions instead of `function` keyword.
 
 Use a functional style, prefer `map`, `filter`, `pipe` from Gamla instead of loops and mutable variables. Don't use `class` or `for`/`while` loops unless absolutely necessary.
+
+When writing tests that verify a behaviour against the api, actually call the api instead of mocking it. Only mock when given explicit permission by the user.
+
+When running the tests after changes, first run only the tests that were affected by the changes. Only in your final verification run the full test suite.
