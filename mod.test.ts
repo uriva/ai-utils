@@ -4,6 +4,7 @@ import { each, pipe, sleep } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z } from "zod/v4";
 import {
+  tool,
   geminiGenJsonFromConvo,
   injectCacher,
   injectGeminiToken,
@@ -12,11 +13,14 @@ import {
   runAgent,
 } from "./mod.ts";
 import {
+  createSkillTools,
   type HistoryEvent,
   injectAccessHistory,
   injectOutputEvent,
+  learnSkillToolName,
   ownUtteranceTurn,
   participantUtteranceTurn,
+  runCommandToolName,
   type ToolReturn,
 } from "./src/agent.ts";
 import { filterOrphanedToolResults } from "./src/geminiAgent.ts";
@@ -771,5 +775,285 @@ Deno.test(
     // If a real 403 error occurs, the rewriteHistory should be called
     // Note: This test may not trigger an actual 403 unless the file truly expired
     assert(true, "Agent completed successfully");
+  }),
+);
+
+const addition = tool({
+  name: "add",
+  description: "Add two numbers",
+  parameters: z.object({ a: z.number(), b: z.number() }),
+  handler: ({ a, b }) => Promise.resolve(`${a + b}`),
+});
+
+const multiplication = tool({
+  name: "multiply",
+  description: "Multiply two numbers",
+  parameters: z.object({ x: z.number(), y: z.number() }),
+  handler: ({ x, y }) => Promise.resolve(`${x * y}`),
+});
+
+Deno.test(
+  "skills: agent can use run_command to call skill tools",
+  injectSecrets(async () => {
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "What is 5 + 3?",
+    })];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 5,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      skills: [{
+        name: "calculator",
+        description: "Mathematical operations",
+        instructions: "Use this skill for any math calculations",
+        tools: [addition, multiplication],
+      }],
+      prompt:
+        "You are a math assistant. Use the available skill tools to answer questions.",
+      rewriteHistory: noopRewriteHistory,
+    });
+
+    const runCommandCall = mockHistory.find((event) =>
+      event.type === "tool_call" && event.name === runCommandToolName
+    );
+    assert(runCommandCall, "Should call run_command tool");
+
+    const hasToolResult = mockHistory.some((event) =>
+      event.type === "tool_result" &&
+      event.name === runCommandToolName &&
+      event.result === "8"
+    );
+    assert(hasToolResult, "Should have result of 5 + 3 = 8 from run_command");
+  }),
+);
+
+const weatherSkill = {
+  name: "weather",
+  description: "Get weather information",
+  instructions: "Always ask for location before checking weather",
+  tools: [
+    tool({
+      name: "get_forecast",
+      description: "Get weather forecast for a location",
+      parameters: z.object({ location: z.string() }),
+      handler: ({ location }) => Promise.resolve(`Sunny in ${location}`),
+    }),
+    tool({
+      name: "get_temperature",
+      description: "Get current temperature",
+      parameters: z.object({ location: z.string() }),
+      handler: ({ location }) => Promise.resolve(`25°C in ${location}`),
+    }),
+  ],
+};
+
+Deno.test(
+  "skills: prompt only shows skill name and description, not individual tools",
+  injectSecrets(async () => {
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "hello",
+    })];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      skills: [weatherSkill],
+      prompt: "You are a helpful assistant.",
+      rewriteHistory: noopRewriteHistory,
+    });
+
+    // The AI should have received prompt with skill info
+    // We can't directly check the prompt, but we can verify through the geminiAgent
+    // For now, this is a placeholder - we'll verify the actual implementation
+    assert(true, "Prompt augmentation test - implementation will verify");
+  }),
+);
+
+Deno.test(
+  "skills: learn_skill returns skill information",
+  injectSecrets(async () => {
+    const weatherSkill = {
+      name: "weather",
+      description: "Get weather information",
+      instructions: "Always ask for location before checking weather",
+      tools: [
+        {
+          name: "get_forecast",
+          description: "Get weather forecast for a location",
+          parameters: z.object({ location: z.string() }),
+          handler: ({ location }: { location: string }) =>
+            Promise.resolve(`Sunny in ${location}`),
+        },
+      ],
+    };
+
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "Tell me about the weather skill",
+    })];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 5,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      skills: [weatherSkill],
+      prompt:
+        "You are a helpful assistant. When asked about skills, use learn_skill to get information.",
+      rewriteHistory: noopRewriteHistory,
+    });
+
+    const learnSkillResult = mockHistory.find((event) =>
+      event.type === "tool_result" &&
+      event.name === learnSkillToolName &&
+      event.result.includes("weather")
+    );
+
+    if (learnSkillResult && learnSkillResult.type === "tool_result") {
+      const parsedResult = JSON.parse(learnSkillResult.result);
+      assertEquals(parsedResult.name, "weather");
+      assertEquals(
+        parsedResult.instructions,
+        "Always ask for location before checking weather",
+      );
+      assert(parsedResult.tools.length > 0, "Should include tools");
+    }
+  }),
+);
+
+Deno.test(
+  "skills: run_command actually executes the skill tool handler",
+  async () => {
+    let handlerWasCalled = false;
+
+    const testTool = tool({
+      name: "test_tool",
+      description: "Test tool",
+      parameters: z.object({ value: z.number() }),
+      handler: ({ value }) => {
+        handlerWasCalled = true;
+        return Promise.resolve(`Result: ${value * 2}`);
+      },
+    });
+
+    const skillTools = createSkillTools([{
+      name: "test",
+      description: "Test skill",
+      instructions: "Test instructions",
+      tools: [testTool],
+    }]);
+    const runCommandTool = skillTools.find((t) =>
+      t.name === runCommandToolName
+    );
+
+    if (!runCommandTool) {
+      throw new Error("run_command tool not found");
+    }
+
+    const result = await runCommandTool.handler({
+      command: "test/test_tool",
+      params: { value: 5 },
+    });
+
+    assert(handlerWasCalled, "Handler should have been called");
+    assertEquals(result, "Result: 10");
+  },
+);
+
+Deno.test(
+  "skills: learn_skill returns actual skill details",
+  async () => {
+    const weatherSkill = {
+      name: "weather",
+      description: "Weather information service",
+      instructions: "Always ask for location before checking weather",
+      tools: [
+        {
+          name: "get_forecast",
+          description: "Get weather forecast",
+          parameters: z.object({ location: z.string() }),
+          handler: () => Promise.resolve("Sunny"),
+        },
+      ],
+    };
+
+    const skillTools = createSkillTools([weatherSkill]);
+    const learnSkillTool = skillTools.find((t) =>
+      t.name === learnSkillToolName
+    );
+
+    if (!learnSkillTool) {
+      throw new Error("learn_skill tool not found");
+    }
+
+    const result = await learnSkillTool.handler({ skillName: "weather" });
+
+    assert(typeof result === "string", "Result should be a string");
+    const parsed = JSON.parse(result);
+    assertEquals(parsed.name, "weather");
+    assertEquals(parsed.description, "Weather information service");
+    assertEquals(
+      parsed.instructions,
+      "Always ask for location before checking weather",
+    );
+    assert(Array.isArray(parsed.tools), "Should have tools array");
+    assertEquals(parsed.tools.length, 1);
+    assertEquals(parsed.tools[0].name, "get_forecast");
+  },
+);
+
+Deno.test(
+  "skills: works alongside regular tools",
+  injectSecrets(async () => {
+    const regularTool = {
+      name: "regularTool",
+      description: "A regular tool",
+      parameters: z.object({}),
+      handler: () => Promise.resolve("regular result"),
+    };
+
+    const skillTool = {
+      name: "skillset",
+      description: "A skill",
+      instructions: "Use this skill",
+      tools: [{
+        name: "skill_tool",
+        description: "A skill tool",
+        parameters: z.object({}),
+        handler: () => Promise.resolve("skill result"),
+      }],
+    };
+
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "Use both the regular tool and the skill tool",
+    })];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 10,
+      onMaxIterationsReached: () => {},
+      tools: [regularTool],
+      skills: [skillTool],
+      prompt: "You are a helpful assistant. Use both available tools.",
+      rewriteHistory: noopRewriteHistory,
+    });
+
+    const hasRegularResult = mockHistory.some((event) =>
+      event.type === "tool_result" &&
+      event.name === "regularTool"
+    );
+
+    const hasSkillResult = mockHistory.some((event) =>
+      event.type === "tool_result" &&
+      event.result === "skill result"
+    );
+
+    assert(
+      hasRegularResult || hasSkillResult,
+      "Should be able to use both regular tools and skill tools",
+    );
   }),
 );

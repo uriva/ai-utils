@@ -10,6 +10,7 @@ import { context, type Injection } from "@uri/inject";
 import { coerce, empty, filter, groupBy, map, pipe } from "gamla";
 import {
   type AgentSpec,
+  createSkillTools,
   doNothingEvent,
   generateId,
   type HistoryEventWithMetadata,
@@ -470,6 +471,7 @@ export const geminiAgentCaller = ({
   lightModel,
   prompt,
   tools,
+  skills,
   imageGen,
   rewriteHistory,
 }: AgentSpec) =>
@@ -480,7 +482,20 @@ export const geminiAgentCaller = ({
     filterUnsupportedGeminiAttachments,
     callGeminiWithFixHistory(
       rewriteHistory,
-      buildReq(imageGen, lightModel, prompt, tools),
+      buildReq(
+        imageGen,
+        lightModel,
+        skills && skills.length > 0
+          ? `${prompt}\n\nAvailable skills:\n${
+            skills.map((skill) => `- ${skill.name}: ${skill.description}`)
+              .join("\n")
+          }`
+          : prompt,
+        [
+          ...tools,
+          ...(skills && skills.length > 0 ? createSkillTools(skills) : []),
+        ],
+      ),
     ),
     (geminiOutput: GeminiOutput): GeminiHistoryEvent[] => {
       const responseId = generateId();

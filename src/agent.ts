@@ -9,7 +9,8 @@ import {
   sideEffect,
   timeit,
 } from "gamla";
-import type { z, ZodType } from "zod/v4";
+import { z, type ZodType } from "zod/v4";
+import { zodToGeminiParameters } from "./gemini.ts";
 
 export type MediaAttachment =
   | { kind: "inline"; mimeType: string; dataBase64: string; caption?: string }
@@ -22,6 +23,14 @@ export type Tool<T extends ZodType> = {
   name: string;
   parameters: T;
   handler: (params: z.infer<T>) => Promise<string | ToolReturn>;
+};
+
+export type Skill = {
+  name: string;
+  description: string;
+  instructions: string;
+  // deno-lint-ignore no-explicit-any
+  tools: Tool<any>[];
 };
 
 type SharedFields = { id: MessageId; timestamp: number; isOwn: boolean };
@@ -310,9 +319,97 @@ const handleFunctionCalls = (tools: Tool<any>[]) =>
     each(pipe(callToResult(tools), toolResultTurn, outputEvent)),
   );
 
+export const runCommandToolName = "run_command";
+export const learnSkillToolName = "learn_skill";
+
+export const tool = <ParametersSchema extends z.ZodObject<z.ZodRawShape>>(
+  tool: Tool<ParametersSchema>,
+) => ({
+  ...tool,
+  handler: (params: z.infer<ParametersSchema>): ReturnType<
+    typeof tool.handler
+  > => tool.handler(params),
+});
+
+// deno-lint-ignore no-explicit-any
+export const createSkillTools = (skills: Skill[]): Tool<any>[] => {
+  const skillMap = Object.fromEntries(skills.map((s) => [s.name, s]));
+  const toolMap = Object.fromEntries(
+    skills.flatMap((skill) =>
+      skill.tools.map((tool) => [`${skill.name}/${tool.name}`, tool])
+    ),
+  );
+  const skillNames = skills.map((s) => s.name).join(", ");
+  return [
+    tool({
+      name: runCommandToolName,
+      description:
+        "Execute a tool from a specific skill. Format: skillName/toolName",
+      parameters: z.object({
+        command: z.string().describe(
+          "The command in format skillName/toolName",
+        ),
+        params: z.any().describe("The parameters for the tool"),
+      }),
+      handler: async ({ command, params }) => {
+        if (!command.includes("/")) {
+          return `Invalid command format. Expected "skillName/toolName", got "${command}". Available skills: ${skillNames}`;
+        }
+        const [skillName, toolName] = command.split("/");
+        if (!skillMap[skillName]) {
+          return `Skill "${skillName}" not found. Available skills: ${skillNames}`;
+        }
+        const fullToolName = `${skillName}/${toolName}`;
+        const tool = toolMap[fullToolName];
+        if (!tool) {
+          const availableTools = skillMap[skillName].tools.map((t) => t.name)
+            .join(", ");
+          return `Tool "${toolName}" not found in skill "${skillName}". Available tools: ${availableTools}`;
+        }
+        const parseResult = parseWithCatch(tool.parameters, params);
+        if (!parseResult.ok) {
+          return `Invalid parameters for ${fullToolName}: ${parseResult.error.message}`;
+        }
+        return await tool.handler(parseResult.result);
+      },
+    }),
+    tool({
+      name: learnSkillToolName,
+      description:
+        "Get detailed information about a skill including its instructions and available tools",
+      parameters: z.object({
+        skillName: z.string().describe("The name of the skill to learn about"),
+      }),
+      handler: ({ skillName }) => {
+        const skill = skillMap[skillName];
+        if (!skill) {
+          return Promise.resolve(
+            `Skill "${skillName}" not found. Available skills: ${skillNames}`,
+          );
+        }
+        return Promise.resolve(JSON.stringify(
+          {
+            name: skill.name,
+            description: skill.description,
+            instructions: skill.instructions,
+            tools: skill.tools.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              parameters: zodToGeminiParameters(tool.parameters),
+            })),
+          },
+          null,
+          2,
+        ));
+      },
+    }),
+  ];
+};
+
 export type AgentSpec = {
   // deno-lint-ignore no-explicit-any
   tools: Tool<any>[];
+  skills?: Skill[];
   prompt: string;
   maxIterations: number;
   // deno-lint-ignore no-explicit-any
@@ -324,9 +421,12 @@ export type AgentSpec = {
 };
 
 export const runAbstractAgent = async (
-  { maxIterations, tools, onMaxIterationsReached }: AgentSpec,
+  { maxIterations, tools, skills, onMaxIterationsReached }: AgentSpec,
   callModel: (history: HistoryEvent[]) => Promise<HistoryEvent[]>,
 ) => {
+  const allTools = skills && skills.length > 0
+    ? [...tools, ...createSkillTools(skills)]
+    : tools;
   let c = 0;
   while (true) {
     c++;
@@ -340,7 +440,7 @@ export const runAbstractAgent = async (
       timeit(reportTimeElapsedMs, callModel),
       sideEffect(each(outputEvent)),
     )();
-    await handleFunctionCalls(tools)(output);
+    await handleFunctionCalls(allTools)(output);
     if (
       !(output.some((ev: HistoryEvent) => ev.type === "tool_call")) &&
       last(await getHistory()).isOwn
