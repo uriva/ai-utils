@@ -97,7 +97,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
   const cachedCall = cacher((req: GenerateContentParameters) =>
     new GoogleGenAI({ apiKey: tokenInjection.access() }).models.generateContent(
       req,
-    ).then(({ text }) => text ?? "{}")
+    ).then(({ text }) => text || "{}")
   );
   return JSON.parse(
     await cachedCall({
