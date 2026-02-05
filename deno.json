@@ -14,4 +14,4 @@
   "tasks": {
     "test": "deno test --allow-env --allow-net --allow-read --env=.env"
   }
-}5
+}
