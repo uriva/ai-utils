@@ -283,6 +283,7 @@ const buildReq = (
   prompt: string,
   tools: Tool<ZodType>[],
   timezoneIANA: string,
+  maxOutputTokens: number | undefined,
 ) =>
 (events: GeminiHistoryEvent[]): GenerateContentParameters => ({
   model: imageGen
@@ -292,6 +293,7 @@ const buildReq = (
     systemInstruction: prompt,
     tools: [{ functionDeclarations: tools.map(actionToTool) }],
     toolConfig: { functionCallingConfig: {} },
+    ...(maxOutputTokens ? { maxOutputTokens } : {}),
   },
   contents: pipe(
     groupBy(getOriginalId),
@@ -491,6 +493,7 @@ export const geminiAgentCaller = ({
   imageGen,
   rewriteHistory,
   timezoneIANA,
+  maxOutputTokens,
 }: AgentSpec) =>
 (events: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> =>
   pipe(
@@ -513,6 +516,7 @@ export const geminiAgentCaller = ({
           ...(skills && skills.length > 0 ? createSkillTools(skills) : []),
         ],
         timezoneIANA,
+        maxOutputTokens,
       ),
     ),
     (geminiOutput: GeminiOutput): GeminiHistoryEvent[] => {

@@ -116,6 +116,33 @@ Deno.test(
 );
 
 Deno.test(
+  "maxOutputTokens limits gemini output length",
+  injectSecrets(async () => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Write the full alphabet from A to Z",
+      }),
+    ];
+    await agentDeps(mockHistory)(runAgent)({
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "You are a helpful assistant that writes the full alphabet.",
+      maxIterations: 1,
+      maxOutputTokens: 2,
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+    console.log(mockHistory)
+    const ownUtterance = mockHistory.find((e) => e.type === "own_utterance");
+    assert(
+      !ownUtterance?.text || ownUtterance.text.length <= 2,
+      `Expected at most 2 characters but got: "${ownUtterance?.text}"`,
+    );
+  }),
+);
+
+Deno.test(
   "agent can start an empty conversation",
   injectSecrets(async () => {
     await agentDeps([])(runAgent)({

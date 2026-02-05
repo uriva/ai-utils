@@ -85,11 +85,11 @@ export const geminiFlashImageVersion = "gemini-2.5-flash-image";
 export const geminiProImageVersion = "gemini-3-pro-image-preview";
 
 export const geminiGenJsonFromConvo: <T extends ZodType>(
-  { mini }: ModelOpts,
+  { mini, maxOutputTokens }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
 ) => Promise<z.infer<T>> = async <T extends ZodType>(
-  { mini }: ModelOpts,
+  { mini, maxOutputTokens }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
 ): Promise<z.infer<T>> => {
@@ -105,6 +105,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
       config: {
         responseMimeType: "application/json",
         responseSchema: zodToGeminiParameters(zodType),
+        ...(maxOutputTokens ? { maxOutputTokens } : {}),
       },
       contents: pipe(openAiToGeminiMessage)(messages),
     }),

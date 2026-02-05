@@ -417,6 +417,7 @@ export type AgentSpec = {
   imageGen?: boolean;
   rewriteHistory: (replacements: Record<string, HistoryEvent>) => Promise<void>;
   timezoneIANA: string;
+  maxOutputTokens?: number;
 };
 
 export const runAbstractAgent = async (
