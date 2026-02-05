@@ -362,9 +362,7 @@ export const createSkillTools = (skills: Skill[]): Tool<any>[] => {
         const fullToolName = `${skillName}/${toolName}`;
         const tool = toolMap[fullToolName];
         if (!tool) {
-          const availableTools = skillMap[skillName].tools.map((t) => t.name)
-            .join(", ");
-          return `Tool "${toolName}" not found in skill "${skillName}". Available tools: ${availableTools}`;
+          return `Tool "${toolName}" not found in skill "${skillName}". Please call ${learnSkillToolName}.`;
         }
         const parseResult = parseWithCatch(tool.parameters, params);
         if (!parseResult.ok) {
