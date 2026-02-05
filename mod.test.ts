@@ -4,13 +4,13 @@ import { each, pipe, sleep } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z } from "zod/v4";
 import {
-  tool,
   geminiGenJsonFromConvo,
   injectCacher,
   injectGeminiToken,
   injectOpenAiToken,
   openAiGenJsonFromConvo,
   runAgent,
+  tool,
 } from "./mod.ts";
 import {
   createSkillTools,
@@ -895,7 +895,7 @@ Deno.test(
 );
 
 Deno.test(
-  "skills: learn_skill returns skill information",
+  `skills: ${learnSkillToolName} returns skill information`,
   injectSecrets(async () => {
     const weatherSkill = {
       name: "weather",
@@ -923,7 +923,7 @@ Deno.test(
       tools: [],
       skills: [weatherSkill],
       prompt:
-        "You are a helpful assistant. When asked about skills, use learn_skill to get information.",
+        `You are a helpful assistant. When asked about skills, use ${learnSkillToolName} to get information.`,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -986,7 +986,7 @@ Deno.test(
 );
 
 Deno.test(
-  "skills: learn_skill returns actual skill details",
+  `skills: ${learnSkillToolName} returns actual skill details`,
   async () => {
     const weatherSkill = {
       name: "weather",
@@ -1008,7 +1008,7 @@ Deno.test(
     );
 
     if (!learnSkillTool) {
-      throw new Error("learn_skill tool not found");
+      throw new Error(`${learnSkillToolName} tool not found`);
     }
 
     const result = await learnSkillTool.handler({ skillName: "weather" });
@@ -1105,7 +1105,9 @@ Deno.test(
       timezoneIANA: "America/New_York",
     });
 
-    const response = mockHistory.find((e): e is Extract<HistoryEvent, { type: "own_utterance" }> =>
+    const response = mockHistory.find((
+      e,
+    ): e is Extract<HistoryEvent, { type: "own_utterance" }> =>
       e.type === "own_utterance" && !!e.text
     );
     assert(response, "AI should respond with an own_utterance");
