@@ -364,7 +364,7 @@ export const createSkillTools = (skills: Skill[]): Tool<any>[] => {
         if (!tool) {
           return `Tool "${toolName}" not found in skill "${skillName}". Please call ${learnSkillToolName}.`;
         }
-        const parseResult = parseWithCatch(tool.parameters, params);
+        const parseResult = parseWithCatch(tool.parameters.strict(), params);
         if (!parseResult.ok) {
           return `Invalid parameters for ${fullToolName}: ${parseResult.error.message}`;
         }
