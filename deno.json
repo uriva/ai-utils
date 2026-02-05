@@ -1,6 +1,6 @@
 {
   "name": "@uri/ai-utils",
-  "version": "0.1.74",
+  "version": "0.1.75",
   "license": "MIT",
   "exports": "./mod.ts",
   "imports": {
@@ -14,4 +14,4 @@
   "tasks": {
     "test": "deno test --allow-env --allow-net --allow-read --env=.env"
   }
-}
+}5

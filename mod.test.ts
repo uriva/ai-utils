@@ -18,6 +18,7 @@ import {
   injectAccessHistory,
   injectOutputEvent,
   learnSkillToolName,
+  overrideTime,
   ownUtteranceTurn,
   participantUtteranceTurn,
   runCommandToolName,
@@ -62,6 +63,7 @@ Deno.test(
       prompt: "You are a helper.",
       lightModel: true,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
   }),
 );
@@ -100,6 +102,7 @@ Deno.test(
       tools: [someTool],
       prompt: `You are an AI assistant.`,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
     assert(
       mockHistory.some((event) => (event.type === "own_utterance" &&
@@ -121,6 +124,7 @@ Deno.test(
       prompt: `You are the neighborhood friendly spiderman.`,
       maxIterations: 5,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
   }),
 );
@@ -142,6 +146,7 @@ Deno.test(
       prompt:
         `You are an AI assistant. Always explain what you're doing before using tools.`,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
     const firstTextIndex = mockHistory.findIndex((event) =>
       event.type === "own_utterance" && event.text
@@ -187,6 +192,7 @@ Deno.test(
       tools: [slowTool],
       prompt: `You are an AI assistant. Always acknowledge new messages.`,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
 
     // Check that the tool was called
@@ -246,6 +252,7 @@ Deno.test(
       prompt:
         `You are a chatty AI. Always call the continueTalking tool in every response and keep the conversation going.`,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
     assert(callbackCalled, "onMaxIterationsReached callback should be called");
   }),
@@ -273,6 +280,7 @@ Deno.test(
       prompt:
         "You are an AI that strictly follows formatting instructions. When asked to list speakers, reply exactly as instructed without extra text.",
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
 
     const answer = mockHistory.find((
@@ -301,6 +309,7 @@ Deno.test(
         "You are an AI assistant. If the user says 'Say nothing.', do not reply with any text.",
       lightModel: true,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
     assertEquals(mockHistory[mockHistory.length - 1].type, "do_nothing");
   }),
@@ -350,6 +359,7 @@ Deno.test(
         "You are a graphic designer who can emit inline images. When asked for a poster, respond with a PNG attachment via inline data that clearly shows the requested text, then acknowledge that text in plain language.",
       imageGen: true,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
 
     const attachment = collectAttachment(generationHistory);
@@ -381,6 +391,7 @@ Deno.test(
         "You can read text from images. Double-check what the poster says and mention the word explicitly in your short reply.",
       lightModel: true,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
 
     const answer = findTextualAnswer(verificationHistory);
@@ -462,6 +473,7 @@ Deno.test(
       prompt: "You can see images returned by tools.",
       lightModel: true,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
     assert(
       mockHistory.some(recognizedTheDog),
@@ -491,6 +503,7 @@ Deno.test(
       prompt: "You can see images attached by the user.",
       lightModel: true,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
     assert(
       mockHistory.some(recognizedTheDog),
@@ -524,6 +537,7 @@ Deno.test(
         "You can see images and their captions. Always mention the caption information in your response.",
       lightModel: true,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
     assert(
       mockHistory.some((e) =>
@@ -556,6 +570,7 @@ Deno.test(
         "You can see images and their captions returned by tools. Reply with one sentence that includes the words 'grass' and 'retriever'.",
       lightModel: false,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
     assert(
       mockHistory.some((e) =>
@@ -661,6 +676,7 @@ Deno.test(
       prompt: "You are a helper.",
       lightModel: true,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
   }),
 );
@@ -696,6 +712,7 @@ Deno.test(
       prompt: "You are a helper.",
       lightModel: false, // Use full model to trigger API call
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
   }),
 );
@@ -723,6 +740,7 @@ Deno.test(
       prompt: "You are a helper.",
       lightModel: true,
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
   }),
 );
@@ -769,6 +787,7 @@ Deno.test(
         });
         return Promise.resolve();
       },
+      timezoneIANA: "UTC",
     });
 
     // The test should complete without throwing
@@ -813,6 +832,7 @@ Deno.test(
       prompt:
         "You are a math assistant. Use the available skill tools to answer questions.",
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
 
     const runCommandCall = mockHistory.find((event) =>
@@ -864,6 +884,7 @@ Deno.test(
       skills: [weatherSkill],
       prompt: "You are a helpful assistant.",
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
 
     // The AI should have received prompt with skill info
@@ -904,6 +925,7 @@ Deno.test(
       prompt:
         "You are a helpful assistant. When asked about skills, use learn_skill to get information.",
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
 
     const learnSkillResult = mockHistory.find((event) =>
@@ -1039,6 +1061,7 @@ Deno.test(
       skills: [skillTool],
       prompt: "You are a helpful assistant. Use both available tools.",
       rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
     });
 
     const hasRegularResult = mockHistory.some((event) =>
@@ -1054,6 +1077,41 @@ Deno.test(
     assert(
       hasRegularResult || hasSkillResult,
       "Should be able to use both regular tools and skill tools",
+    );
+  }),
+);
+
+Deno.test(
+  "agent knows the time from message timestamps",
+  pipe(
+    injectSecrets,
+    overrideTime(() => new Date("2026-02-05T21:34:00Z").getTime()),
+  )(async () => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "What time is it right now?",
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 2,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt:
+        "You are a helpful assistant. When asked about the time, look at the timestamp shown in brackets before the user's message.",
+      lightModel: true,
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "America/New_York",
+    });
+
+    const response = mockHistory.find((e): e is Extract<HistoryEvent, { type: "own_utterance" }> =>
+      e.type === "own_utterance" && !!e.text
+    );
+    assert(response, "AI should respond with an own_utterance");
+    assert(
+      response.text.includes("4:34") || response.text.includes("4:34 PM"),
+      `AI should mention the time 4:34 PM (got: ${response.text})`,
     );
   }),
 );

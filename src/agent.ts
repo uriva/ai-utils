@@ -418,6 +418,7 @@ export type AgentSpec = {
   provider?: "gemini";
   imageGen?: boolean;
   rewriteHistory: (replacements: Record<string, HistoryEvent>) => Promise<void>;
+  timezoneIANA: string;
 };
 
 export const runAbstractAgent = async (

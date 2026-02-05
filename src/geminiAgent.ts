@@ -145,6 +145,17 @@ const actionToTool = ({ name, description, parameters }: Tool<ZodType>) => ({
   parameters: zodToGeminiParameters(parameters),
 });
 
+const formatTimestamp = (ts: number, timezoneIANA: string): string =>
+  new Date(ts).toLocaleString("en-US", {
+    timeZone: timezoneIANA,
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -161,11 +172,15 @@ const attachmentsToParts = (attachments?: MediaAttachment[]): Part[] =>
   });
 
 const historyEventToContent =
-  (eventById: (id: string) => GeminiHistoryEvent) =>
+  (eventById: (id: string) => GeminiHistoryEvent, timezoneIANA: string) =>
   (e: GeminiHistoryEvent): Content => {
     if (e.type === "participant_utterance") {
       return wrapUserContent([
-        e.text ? ({ text: `${e.name}: ${e.text}` }) : undefined,
+        e.text
+          ? ({
+            text: `[${formatTimestamp(e.timestamp, timezoneIANA)}] ${e.name}: ${e.text}`,
+          })
+          : undefined,
         ...attachmentsToParts(e.attachments),
       ].filter((x): x is Part => !!x));
     }
@@ -267,6 +282,7 @@ const buildReq = (
   lightModel: boolean | undefined,
   prompt: string,
   tools: Tool<ZodType>[],
+  timezoneIANA: string,
 ) =>
 (events: GeminiHistoryEvent[]): GenerateContentParameters => ({
   model: imageGen
@@ -280,7 +296,7 @@ const buildReq = (
   contents: pipe(
     groupBy(getOriginalId),
     Object.values<GeminiHistoryEvent[]>,
-    map(pipe(map(historyEventToContent(indexById(events))), combineContent)),
+    map(pipe(map(historyEventToContent(indexById(events), timezoneIANA)), combineContent)),
     fixStart,
   )(events),
 });
@@ -474,6 +490,7 @@ export const geminiAgentCaller = ({
   skills,
   imageGen,
   rewriteHistory,
+  timezoneIANA,
 }: AgentSpec) =>
 (events: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> =>
   pipe(
@@ -495,6 +512,7 @@ export const geminiAgentCaller = ({
           ...tools,
           ...(skills && skills.length > 0 ? createSkillTools(skills) : []),
         ],
+        timezoneIANA,
       ),
     ),
     (geminiOutput: GeminiOutput): GeminiHistoryEvent[] => {
