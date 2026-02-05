@@ -8,6 +8,7 @@ import {
 } from "@google/genai";
 import { context, type Injection } from "@uri/inject";
 import { coerce, empty, filter, groupBy, map, pipe } from "gamla";
+import type { ZodType } from "zod/v4";
 import {
   type AgentSpec,
   createSkillTools,
@@ -31,7 +32,6 @@ import {
   geminiProVersion,
   zodToGeminiParameters,
 } from "./gemini.ts";
-import type { ZodType } from "zod/v4";
 
 const geminiError: Injection<
   (_1: Error, _2: GenerateContentParameters) => void
@@ -178,7 +178,9 @@ const historyEventToContent =
       return wrapUserContent([
         e.text
           ? ({
-            text: `[${formatTimestamp(e.timestamp, timezoneIANA)}] ${e.name}: ${e.text}`,
+            text: `[${
+              formatTimestamp(e.timestamp, timezoneIANA)
+            }] ${e.name}: ${e.text}`,
           })
           : undefined,
         ...attachmentsToParts(e.attachments),
@@ -298,7 +300,12 @@ const buildReq = (
   contents: pipe(
     groupBy(getOriginalId),
     Object.values<GeminiHistoryEvent[]>,
-    map(pipe(map(historyEventToContent(indexById(events), timezoneIANA)), combineContent)),
+    map(
+      pipe(
+        map(historyEventToContent(indexById(events), timezoneIANA)),
+        combineContent,
+      ),
+    ),
     fixStart,
   )(events),
 });
@@ -346,7 +353,7 @@ const sawFunction = (output: GeminiOutput) =>
 const didNothing = (output: GeminiOutput) =>
   !sawFunction(output) &&
   !output.some((p: GeminiPartOfInterest) =>
-    (p.type === "text" && p.text) ||
+    (p.type === "text" && p.text.replace(/[\s\u200B\u200C\u200D\uFEFF]/, "")) ||
     p.type === "inline_data" ||
     p.type === "file_data"
   );
