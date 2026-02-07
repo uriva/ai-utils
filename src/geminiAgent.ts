@@ -47,6 +47,9 @@ const extractFileIdFromError = (error: Error): string | null => {
 };
 
 const is403PermissionError = (error: Error): boolean => {
+  if ("status" in error && (error as { status: number }).status === 403) {
+    return true;
+  }
   return error.message.includes("403") &&
     error.message.includes("PERMISSION_DENIED");
 };
