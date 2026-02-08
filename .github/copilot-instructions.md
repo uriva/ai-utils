@@ -22,3 +22,11 @@ Use a functional style, prefer `map`, `filter`, `pipe` from Gamla instead of loo
 When writing tests that verify a behaviour against the api, actually call the api instead of mocking it. Only mock when given explicit permission by the user.
 
 When running the tests after changes, first run only the tests that were affected by the changes. Only in your final verification run the full test suite.
+
+When adding logic, function bodies typically should not enlarge. New logic can be encapsulated in a new function. Or, one can refactor such that the old functions are even smaller than before. The added benefit is that there are less diffs hard to review.
+
+Typically it's better to "solve for the single case" then use functions like `map` and `filter` to handle the more complex cases. To prevent indent, one can define the single case and use `map` or similar functions in the call site.
+
+Destructuring in the function signature makes for more readable code rather than repeat myArg.x myArg.y everywhere. Most times this is possible, but not always.
+
+If a type is inferrable from the function, prefer not to annotate it. This is the common case.

@@ -41,12 +41,12 @@ export const injectGeminiErrorLogger = geminiError.inject;
 
 type GeminiOutput = GeminiPartOfInterest[];
 
-const extractFileIdFromError = (error: Error): string | null => {
+const extractFileIdFromError = (error: Error) => {
   const match = error.message.match(/File\s+([a-zA-Z0-9]+)/);
   return match ? match[1] : null;
 };
 
-const is403PermissionError = (error: Error): boolean => {
+const is403PermissionError = (error: Error) => {
   if ("status" in error && (error as { status: number }).status === 403) {
     return true;
   }
@@ -54,7 +54,12 @@ const is403PermissionError = (error: Error): boolean => {
     error.message.includes("PERMISSION_DENIED");
 };
 
-const getExpiredMediaText = (attachments: MediaAttachment[]): string =>
+const isFileNotActiveError = (error: Error) =>
+  error.message.includes("not in an ACTIVE state") ||
+  (error.message.includes("FAILED_PRECONDITION") &&
+    error.message.includes("File"));
+
+const getExpiredMediaText = (attachments: MediaAttachment[]) =>
   !empty(attachments)
     ? ` <media file expired: ${
       attachments.map((a: MediaAttachment) => a.caption || a.mimeType)
@@ -74,37 +79,20 @@ const handleFilePermissionError = (
   if (!is403PermissionError(error)) return undefined;
   const fileId = extractFileIdFromError(error);
   if (!fileId) return undefined;
+  const matchesFile = hasFileAttachment(fileId);
   const replacements = pipe(
     filter((event): event is
       | ParticipantUtterance
       | OwnUtterance<GeminiMetadata>
-      | ToolResult =>
-      "attachments" in event &&
-      !!event.attachments?.some((att: MediaAttachment) =>
-        att.kind === "file" && att.fileUri.includes(fileId)
-      )
+      | ToolResult => matchesFile(event)
     ),
     map((event): [string, GeminiHistoryEvent] => {
-      const expiredMediaText = getExpiredMediaText(
+      const placeholder = getExpiredMediaText(
         event.attachments?.filter((att: MediaAttachment) =>
           att.kind === "file" && att.fileUri.includes(fileId)
         ) ?? [],
       );
-      return [
-        event.id,
-        {
-          ...event,
-          ...event.type === "tool_result"
-            ? { result: event.result + expiredMediaText }
-            : { text: (event.text ?? "") + expiredMediaText },
-          attachments: event.attachments?.filter((
-            att: MediaAttachment,
-          ) =>
-            att.kind === "inline" ||
-            (att.kind === "file" && !att.fileUri.includes(fileId))
-          ),
-        },
-      ];
+      return [event.id, stripFileFromEvent(fileId, placeholder)(event)];
     }),
     Object.fromEntries<GeminiHistoryEvent>,
   )(events);
@@ -469,6 +457,56 @@ export const filterInvalidToolCalls = (
   });
 };
 
+const hasFileAttachment =
+  (fileId: string) =>
+  (event: GeminiHistoryEvent): event is EventWithAttachments =>
+    "attachments" in event &&
+    !!event.attachments?.some((att) =>
+      att.kind === "file" && att.fileUri.includes(fileId)
+    );
+
+type EventWithAttachments =
+  | ParticipantUtterance
+  | OwnUtterance<GeminiMetadata>
+  | ToolResult;
+
+const stripFileFromEvent =
+  (fileId: string, placeholder: string) =>
+  (event: EventWithAttachments): EventWithAttachments => ({
+    ...event,
+    ...event.type === "tool_result"
+      ? { result: event.result + placeholder }
+      : { text: (event.text ?? "") + placeholder },
+    attachments: event.attachments?.filter((att) =>
+      att.kind === "inline" ||
+      (att.kind === "file" && !att.fileUri.includes(fileId))
+    ),
+  });
+
+const replaceFileWithProcessingPlaceholder = (
+  fileId: string,
+  events: GeminiHistoryEvent[],
+) => {
+  const shouldReplace = hasFileAttachment(fileId);
+  const replace = stripFileFromEvent(
+    fileId,
+    " <user sent a file which is still being processed>",
+  );
+  return map((event: GeminiHistoryEvent): GeminiHistoryEvent =>
+    shouldReplace(event) ? replace(event) : event
+  )(events);
+};
+
+const handleFileNotActiveError = (
+  error: Error,
+  events: GeminiHistoryEvent[],
+) => {
+  if (!isFileNotActiveError(error)) return undefined;
+  const fileId = extractFileIdFromError(error);
+  if (!fileId) return undefined;
+  return replaceFileWithProcessingPlaceholder(fileId, events);
+};
+
 const callGeminiWithFixHistory = (
   rewriteHistory: AgentSpec["rewriteHistory"],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
@@ -478,6 +516,8 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
     return await callGemini(eventsToRequest(events));
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
+    const tempFixed = handleFileNotActiveError(err, events);
+    if (tempFixed) return callGemini(eventsToRequest(tempFixed));
     const handled = handleFilePermissionError(err, events, rewriteHistory);
     if (!handled) throw err;
     const { updatedHistory, rewritePromise } = handled;
