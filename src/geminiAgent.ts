@@ -507,6 +507,24 @@ const handleFileNotActiveError = (
   return replaceFileWithProcessingPlaceholder(fileId, events);
 };
 
+const stripAllNotActiveFiles = async (
+  events: GeminiHistoryEvent[],
+  eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
+): Promise<GeminiOutput> => {
+  let currentEvents = events;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await callGemini(eventsToRequest(currentEvents));
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      const fixed = handleFileNotActiveError(err, currentEvents);
+      if (!fixed) throw err;
+      currentEvents = fixed;
+    }
+  }
+  return callGemini(eventsToRequest(currentEvents));
+};
+
 const callGeminiWithFixHistory = (
   rewriteHistory: AgentSpec["rewriteHistory"],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
@@ -516,8 +534,8 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
     return await callGemini(eventsToRequest(events));
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
-    const tempFixed = handleFileNotActiveError(err, events);
-    if (tempFixed) return callGemini(eventsToRequest(tempFixed));
+    if (isFileNotActiveError(err))
+      return stripAllNotActiveFiles(events, eventsToRequest);
     const handled = handleFilePermissionError(err, events, rewriteHistory);
     if (!handled) throw err;
     const { updatedHistory, rewritePromise } = handled;
