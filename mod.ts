@@ -4,6 +4,7 @@ export { z } from "zod/v4";
 export * from "./src/agent.ts";
 export { injectCacher } from "./src/cacher.ts";
 export {
+  ensureGeminiAttachmentIsActive,
   ensureGeminiAttachmentIsLink,
   geminiGenJson,
   geminiGenJsonFromConvo,

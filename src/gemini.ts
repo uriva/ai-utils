@@ -5,7 +5,7 @@ import {
   GoogleGenAI,
 } from "@google/genai";
 import { context, type Injection, type Injector } from "@uri/inject";
-import { coerce, empty, map, pipe, remove } from "gamla";
+import { coerce, empty, map, pipe, remove, sleep } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z, type ZodType } from "zod/v4";
 import type { MediaAttachment } from "./agent.ts";
@@ -162,6 +162,33 @@ const uploadToGeminiFromFile = (
     new Uint8Array(Array.from(atob(dataBase64), (c) => c.charCodeAt(0))),
   );
 
+const geminiFileNameFromUri = (uri: string) => {
+  const match = uri.match(/files\/([^/?]+)/);
+  return match ? `files/${match[1]}` : null;
+};
+
+const isGeminiFileUri = (uri: string) =>
+  uri.startsWith("https://generativelanguage.googleapis.com/");
+
+const waitForFileActive = async (
+  fileUri: string,
+  attempts = 30,
+): Promise<void> => {
+  const name = geminiFileNameFromUri(fileUri);
+  if (!name) return;
+  if (attempts <= 0) {
+    throw new Error(`Gemini file ${name} did not become ACTIVE after 30s`);
+  }
+  const ai = new GoogleGenAI({ apiKey: tokenInjection.access() });
+  const file = await ai.files.get({ name });
+  if (file.state === "ACTIVE") return;
+  if (file.state === "FAILED") {
+    throw new Error(`Gemini file ${name} failed processing`);
+  }
+  await sleep(1000);
+  return waitForFileActive(fileUri, attempts - 1);
+};
+
 export const ensureGeminiAttachmentIsLink = async (
   attachment: MediaAttachment,
 ): Promise<MediaAttachment> => {
@@ -198,4 +225,14 @@ export const ensureGeminiAttachmentIsLink = async (
   throw new Error(
     "File attachment missing fileUri or unsupported attachment kind",
   );
+};
+
+export const ensureGeminiAttachmentIsActive = async (
+  attachment: MediaAttachment,
+): Promise<MediaAttachment> => {
+  const result = await ensureGeminiAttachmentIsLink(attachment);
+  if (result.kind === "file" && isGeminiFileUri(result.fileUri)) {
+    await waitForFileActive(result.fileUri);
+  }
+  return result;
 };
