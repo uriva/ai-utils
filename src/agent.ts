@@ -195,7 +195,7 @@ const callToResult =
       return { toolCallId, name, result: `Function ${name} not found` };
     }
     const { handler, parameters } = action;
-    const parseResult = parseWithCatch(parameters, args ?? {});
+    const parseResult = parseWithCatch(parameters, args);
     if (!parseResult.ok) {
       return {
         toolCallId,
@@ -364,7 +364,7 @@ export const createSkillTools = (skills: Skill[]): Tool<any>[] => {
         if (!tool) {
           return `Tool "${toolName}" not found in skill "${skillName}". Please call ${learnSkillToolName}.`;
         }
-        const parseResult = parseWithCatch(tool.parameters.strict(), params ?? {});
+        const parseResult = parseWithCatch(tool.parameters.strict(), params);
         if (!parseResult.ok) {
           return `Invalid parameters for ${fullToolName}: ${parseResult.error.message}`;
         }
