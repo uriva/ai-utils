@@ -8,7 +8,6 @@ import {
 } from "@google/genai";
 import { context, type Injection } from "@uri/inject";
 import {
-  coerce,
   conditionalRetry,
   empty,
   filter,
@@ -192,14 +191,17 @@ const attachmentsToParts = (attachments?: MediaAttachment[]): Part[] =>
   });
 
 const referencedMessageText =
-  (eventById: (id: string) => GeminiHistoryEvent) =>
+  (eventById: (id: string) => GeminiHistoryEvent | undefined) =>
   (onMessage: MessageId): string => {
     const msg = eventById(onMessage);
     return typeof msg === "object" && "text" in msg ? msg.text : "";
   };
 
 const historyEventToContent =
-  (eventById: (id: string) => GeminiHistoryEvent, timezoneIANA: string) =>
+  (
+    eventById: (id: string) => GeminiHistoryEvent | undefined,
+    timezoneIANA: string,
+  ) =>
   (e: GeminiHistoryEvent): Content => {
     const getRefText = referencedMessageText(eventById);
     if (
@@ -351,7 +353,7 @@ const buildReq = (
 
 const indexById = (events: GeminiHistoryEvent[]) => {
   const eventIdToEvents = groupBy(({ id }: GeminiHistoryEvent) => id)(events);
-  return (id: MessageId) => coerce(eventIdToEvents[id]?.[0]);
+  return (id: MessageId) => eventIdToEvents[id]?.[0];
 };
 
 type GeminiFunctiontoolPart = {
