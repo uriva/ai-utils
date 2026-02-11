@@ -7,7 +7,15 @@ import {
   type Part,
 } from "@google/genai";
 import { context, type Injection } from "@uri/inject";
-import { coerce, empty, filter, groupBy, map, pipe } from "gamla";
+import {
+  coerce,
+  conditionalRetry,
+  empty,
+  filter,
+  groupBy,
+  map,
+  pipe,
+} from "gamla";
 import type { ZodType } from "zod/v4";
 import {
   type AgentSpec,
@@ -34,6 +42,21 @@ import {
   geminiProVersion,
   zodToGeminiParameters,
 } from "./gemini.ts";
+
+const is500Error = (error: unknown) =>
+  error instanceof Error && "status" in error &&
+  (error as { status: number }).status === 500;
+
+const alternateModel = (model: string) =>
+  model === geminiProVersion
+    ? geminiFlashVersion
+    : model === geminiFlashVersion
+    ? geminiProVersion
+    : model === geminiProImageVersion
+    ? geminiFlashImageVersion
+    : model === geminiFlashImageVersion
+    ? geminiProImageVersion
+    : model;
 
 const geminiError: Injection<
   (_1: Error, _2: GenerateContentParameters) => void
@@ -97,7 +120,9 @@ const stripExpiredFile = (error: Error, events: GeminiHistoryEvent[]) => {
   };
 };
 
-const callGemini = (req: GenerateContentParameters): Promise<GeminiOutput> =>
+const rawCallGemini = (
+  req: GenerateContentParameters,
+): Promise<GeminiOutput> =>
   new GoogleGenAI({ apiKey: accessGeminiToken() }).models.generateContent(req)
     .then((resp: GenerateContentResponse): GeminiOutput =>
       (resp.candidates?.[0]?.content?.parts ?? [])
@@ -122,6 +147,21 @@ const callGemini = (req: GenerateContentParameters): Promise<GeminiOutput> =>
       geminiError.access(err, req);
       throw err;
     });
+
+const callGeminiWithRetry = conditionalRetry(is500Error)(
+  1000,
+  2,
+  rawCallGemini,
+);
+
+const callGemini = (req: GenerateContentParameters): Promise<GeminiOutput> =>
+  callGeminiWithRetry(req).catch((err) => {
+    if (!is500Error(err)) throw err;
+    return rawCallGemini({
+      ...req,
+      model: alternateModel(req.model),
+    });
+  });
 
 const actionToTool = ({ name, description, parameters }: Tool<ZodType>) => ({
   name,
