@@ -97,11 +97,7 @@ const stripExpiredFile = (error: Error, events: GeminiHistoryEvent[]) => {
   if (!fileId) return undefined;
   const matchesFile = hasFileAttachment(fileId);
   const replacements = pipe(
-    filter((event): event is
-      | ParticipantUtterance
-      | OwnUtterance<GeminiMetadata>
-      | ToolResult => matchesFile(event)
-    ),
+    filter((event): event is EventWithAttachments => matchesFile(event)),
     map((event): [string, GeminiHistoryEvent] => {
       const placeholder = getExpiredMediaText(
         event.attachments?.filter((att: MediaAttachment) =>
