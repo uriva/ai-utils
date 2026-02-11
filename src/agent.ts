@@ -75,6 +75,14 @@ export type OwnReaction<ModelMetadata> = {
   onMessage: MessageId;
 } & SharedFields;
 
+export type ParticipantEditMessage =
+  & Omit<ParticipantUtterance, "type">
+  & { type: "participant_edit_message"; onMessage: MessageId };
+
+export type OwnEditMessage<ModelMetadata> =
+  & Omit<OwnUtterance<ModelMetadata>, "type">
+  & { type: "own_edit_message"; onMessage: MessageId };
+
 type ToolUseWithMetadata<T, ModelMetadata> = {
   type: "tool_call";
   isOwn: true;
@@ -111,6 +119,8 @@ export type HistoryEventWithMetadata<ModelMetadata> =
   | OwnUtterance<ModelMetadata>
   | OwnReaction<ModelMetadata>
   | ParticipantReaction
+  | ParticipantEditMessage
+  | OwnEditMessage<ModelMetadata>
   | ToolUseWithMetadata<unknown, ModelMetadata>
   | ToolResult
   | OwnThought<ModelMetadata>
@@ -288,6 +298,40 @@ const toolResultTurn = (
   result,
   attachments,
   toolCallId,
+});
+
+export const participantEditMessageTurn = (
+  { name, text, onMessage, attachments }: {
+    name: string;
+    text: string;
+    onMessage: MessageId;
+    attachments?: MediaAttachment[];
+  },
+): HistoryEvent => ({
+  type: "participant_edit_message",
+  isOwn: false,
+  name,
+  text,
+  onMessage,
+  attachments,
+  ...sharedFields(),
+});
+
+export const ownEditMessageTurnWithMetadata = <Metadata>(
+  { text, onMessage, modelMetadata, attachments }: {
+    text: string;
+    onMessage: MessageId;
+    modelMetadata?: Metadata;
+    attachments?: MediaAttachment[];
+  },
+): HistoryEventWithMetadata<Metadata> => ({
+  type: "own_edit_message",
+  isOwn: true,
+  modelMetadata,
+  text,
+  onMessage,
+  attachments,
+  ...sharedFields(),
 });
 
 export const doNothingEvent = <Metadata>(
@@ -491,11 +535,11 @@ const assertNever = (x: never): never => {
 };
 
 export const estimateTokens = (e: HistoryEvent): number => {
-  if (e.type === "participant_utterance") {
+  if (e.type === "participant_utterance" || e.type === "participant_edit_message") {
     return approxTextTokens(e.name) + approxTextTokens(e.text) +
       attachmentTokens(e.attachments) + 2;
   }
-  if (e.type === "own_utterance") {
+  if (e.type === "own_utterance" || e.type === "own_edit_message") {
     return approxTextTokens(e.text) +
       attachmentTokens(e.attachments) + 2;
   }

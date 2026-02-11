@@ -17,8 +17,10 @@ import {
   type HistoryEventWithMetadata,
   type MediaAttachment,
   type MessageId,
+  type OwnEditMessage,
   type OwnUtterance,
   ownUtteranceTurnWithMetadata,
+  type ParticipantEditMessage,
   type ParticipantUtterance,
   type Tool,
   type ToolResult,
@@ -162,27 +164,44 @@ const attachmentsToParts = (attachments?: MediaAttachment[]): Part[] =>
     return parts;
   });
 
+const referencedMessageText =
+  (eventById: (id: string) => GeminiHistoryEvent) =>
+  (onMessage: MessageId): string => {
+    const msg = eventById(onMessage);
+    return typeof msg === "object" && "text" in msg ? msg.text : "";
+  };
+
 const historyEventToContent =
   (eventById: (id: string) => GeminiHistoryEvent, timezoneIANA: string) =>
   (e: GeminiHistoryEvent): Content => {
-    if (e.type === "participant_utterance") {
+    const getRefText = referencedMessageText(eventById);
+    if (
+      e.type === "participant_utterance" ||
+      e.type === "participant_edit_message"
+    ) {
+      const text = e.type === "participant_edit_message"
+        ? `${e.name} edited message "${getRefText(e.onMessage).slice(0, 100)}" to: ${e.text}`
+        : e.text
+        ? `${e.name}: ${e.text}`
+        : "";
       return wrapUserContent([
-        e.text
-          ? ({
-            text: `[${
-              formatTimestamp(e.timestamp, timezoneIANA)
-            }] ${e.name}: ${e.text}`,
-          })
+        text
+          ? {
+            text: `[${formatTimestamp(e.timestamp, timezoneIANA)}] ${text}`,
+          }
           : undefined,
         ...attachmentsToParts(e.attachments),
       ].filter((x): x is Part => !!x));
     }
-    if (e.type === "own_utterance") {
+    if (e.type === "own_utterance" || e.type === "own_edit_message") {
+      const text = e.type === "own_edit_message"
+        ? `You edited message "${getRefText(e.onMessage).slice(0, 100)}" to: ${e.text}`
+        : e.text;
       const parts: Part[] = [];
-      if (e.text) {
+      if (text) {
         parts.push({
           thoughtSignature: e.modelMetadata?.thoughtSignature,
-          text: e.text,
+          text,
         });
       }
       if (e.attachments && !empty(e.attachments)) {
@@ -217,20 +236,14 @@ const historyEventToContent =
       }]);
     }
     if (e.type === "own_reaction") {
-      const msg = eventById(e.onMessage);
-      const text = typeof msg === "object" && "text" in msg ? msg.text : "";
       return wrapModelContent([{
         thoughtSignature: e.modelMetadata?.thoughtSignature,
-        text: `You reacted ${e.reaction} to message: ${text.slice(0, 100)}`,
+        text: `You reacted ${e.reaction} to message: ${getRefText(e.onMessage).slice(0, 100)}`,
       }]);
     }
     if (e.type === "participant_reaction") {
-      const msg = eventById(e.onMessage);
-      const text = typeof msg === "object" && "text" in msg ? msg.text : "";
       return wrapUserContent([{
-        text: `${e.name} reacted ${e.reaction} to message: ${
-          text.slice(0, 100)
-        }`,
+        text: `${e.name} reacted ${e.reaction} to message: ${getRefText(e.onMessage).slice(0, 100)}`,
       }]);
     }
     if (e.type === "do_nothing") {
@@ -468,6 +481,8 @@ const hasFileAttachment =
 type EventWithAttachments =
   | ParticipantUtterance
   | OwnUtterance<GeminiMetadata>
+  | ParticipantEditMessage
+  | OwnEditMessage<GeminiMetadata>
   | ToolResult;
 
 const stripFileFromEvent =
