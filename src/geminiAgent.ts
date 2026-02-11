@@ -649,6 +649,36 @@ const stripAllUnsupportedMimeTypes = async (
   return callGemini(eventsToRequest(currentEvents));
 };
 
+const stripAllFileAttachments = (
+  events: GeminiHistoryEvent[],
+): {
+  updatedHistory: GeminiHistoryEvent[];
+  replacements: Record<string, GeminiHistoryEvent>;
+} => {
+  const replacements: Record<string, GeminiHistoryEvent> = {};
+  const updatedHistory = map(
+    (event: GeminiHistoryEvent): GeminiHistoryEvent => {
+      if (!("attachments" in event) || !event.attachments) return event;
+      const fileAttachments = event.attachments.filter((att) =>
+        att.kind === "file"
+      );
+      if (empty(fileAttachments)) return event;
+      const placeholder = getExpiredMediaText(fileAttachments);
+      const kept = event.attachments.filter((att) => att.kind !== "file");
+      const updated = {
+        ...event,
+        ...event.type === "tool_result"
+          ? { result: event.result + placeholder }
+          : { text: ((event as { text?: string }).text ?? "") + placeholder },
+        attachments: empty(kept) ? undefined : kept,
+      } as GeminiHistoryEvent;
+      replacements[event.id] = updated;
+      return updated;
+    },
+  )(events);
+  return { updatedHistory, replacements };
+};
+
 const stripAllExpiredFiles = async (
   initialError: Error,
   events: GeminiHistoryEvent[],
@@ -661,6 +691,17 @@ const stripAllExpiredFiles = async (
   for (let attempt = 0; attempt < 5; attempt++) {
     const fixed = stripExpiredFile(currentError, currentEvents);
     if (!fixed) throw currentError;
+    if (empty(Object.keys(fixed.replacements))) {
+      console.warn(
+        `Could not find file referenced in 403 error in any attachment. Stripping all file attachments as fallback.`,
+      );
+      const nuclear = stripAllFileAttachments(currentEvents);
+      Object.assign(allReplacements, nuclear.replacements);
+      currentEvents = nuclear.updatedHistory;
+      const result = await callGemini(eventsToRequest(currentEvents));
+      await rewriteHistory(allReplacements);
+      return result;
+    }
     Object.assign(allReplacements, fixed.replacements);
     currentEvents = fixed.updatedHistory;
     try {
