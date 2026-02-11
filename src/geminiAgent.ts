@@ -83,6 +83,14 @@ const isFileNotActiveError = (error: Error) =>
   (error.message.includes("FAILED_PRECONDITION") &&
     error.message.includes("File"));
 
+const isUnsupportedMimeTypeError = (error: Error) =>
+  error.message.includes("Unsupported MIME type");
+
+const extractUnsupportedMimeType = (error: Error): string | undefined => {
+  const match = error.message.match(/Unsupported MIME type:\s*([^"\s}]+)/);
+  return match ? match[1] : undefined;
+};
+
 const getExpiredMediaText = (attachments: MediaAttachment[]) =>
   !empty(attachments)
     ? ` <media file expired: ${
@@ -535,6 +543,36 @@ const stripFileFromEvent =
     ),
   });
 
+const stripAttachmentsByMimeType = (
+  mimeType: string,
+  events: GeminiHistoryEvent[],
+): {
+  updatedHistory: GeminiHistoryEvent[];
+  replacements: Record<string, GeminiHistoryEvent>;
+} => {
+  const replacements: Record<string, GeminiHistoryEvent> = {};
+  const updatedHistory = map(
+    (event: GeminiHistoryEvent): GeminiHistoryEvent => {
+      if (!("attachments" in event) || !event.attachments) return event;
+      const kept = event.attachments.filter((att) =>
+        att.mimeType !== mimeType
+      );
+      if (kept.length === event.attachments.length) return event;
+      const placeholder = ` <unsupported file type removed: ${mimeType}>`;
+      const updated = {
+        ...event,
+        ...event.type === "tool_result"
+          ? { result: event.result + placeholder }
+          : { text: ((event as { text?: string }).text ?? "") + placeholder },
+        attachments: empty(kept) ? undefined : kept,
+      } as GeminiHistoryEvent;
+      replacements[event.id] = updated;
+      return updated;
+    },
+  )(events);
+  return { updatedHistory, replacements };
+};
+
 const replaceFileWithProcessingPlaceholder = (
   fileId: string,
   events: GeminiHistoryEvent[],
@@ -572,6 +610,40 @@ const stripAllNotActiveFiles = async (
       const fixed = handleFileNotActiveError(err, currentEvents);
       if (!fixed) throw err;
       currentEvents = fixed;
+    }
+  }
+  return callGemini(eventsToRequest(currentEvents));
+};
+
+const stripAllUnsupportedMimeTypes = async (
+  initialError: Error,
+  events: GeminiHistoryEvent[],
+  eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
+  rewriteHistory: AgentSpec["rewriteHistory"],
+): Promise<GeminiOutput> => {
+  let currentEvents = events;
+  let currentError = initialError;
+  const allReplacements: Record<string, GeminiHistoryEvent> = {};
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const mimeType = extractUnsupportedMimeType(currentError);
+    if (!mimeType) throw currentError;
+    console.warn(
+      `Stripping unsupported MIME type from history: ${mimeType}`,
+    );
+    const { updatedHistory, replacements } = stripAttachmentsByMimeType(
+      mimeType,
+      currentEvents,
+    );
+    Object.assign(allReplacements, replacements);
+    currentEvents = updatedHistory;
+    try {
+      const result = await callGemini(eventsToRequest(currentEvents));
+      await rewriteHistory(allReplacements);
+      return result;
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      if (!isUnsupportedMimeTypeError(err)) throw err;
+      currentError = err;
     }
   }
   return callGemini(eventsToRequest(currentEvents));
@@ -615,6 +687,14 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
     const err = error instanceof Error ? error : new Error(String(error));
     if (isFileNotActiveError(err)) {
       return stripAllNotActiveFiles(events, eventsToRequest);
+    }
+    if (isUnsupportedMimeTypeError(err)) {
+      return stripAllUnsupportedMimeTypes(
+        err,
+        events,
+        eventsToRequest,
+        rewriteHistory,
+      );
     }
     if (!is403PermissionError(err)) throw err;
     return stripAllExpiredFiles(err, events, eventsToRequest, rewriteHistory);

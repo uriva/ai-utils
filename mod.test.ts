@@ -824,6 +824,58 @@ Deno.test(
   }),
 );
 
+Deno.test(
+  "handles unsupported MIME type by stripping attachment and rewriting history",
+  injectSecrets(async () => {
+    const replacedItems = new Map<string, HistoryEvent>();
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Summarize this spreadsheet.",
+        attachments: [
+          {
+            kind: "inline",
+            mimeType:
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            dataBase64: "dGVzdA==",
+          },
+        ],
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "You are a helpful assistant.",
+      lightModel: true,
+      rewriteHistory: (
+        replacements: Record<string, HistoryEvent>,
+      ) => {
+        Object.entries(replacements).forEach(([id, newItem]) => {
+          replacedItems.set(id, newItem);
+          const index = mockHistory.findIndex((e) => e.id === id);
+          if (index !== -1) {
+            mockHistory[index] = newItem;
+          }
+        });
+        return Promise.resolve();
+      },
+      timezoneIANA: "UTC",
+    });
+
+    assert(replacedItems.size > 0, "rewriteHistory should have been called");
+    const rewritten = [...replacedItems.values()][0];
+    assert(
+      !("attachments" in rewritten) || !rewritten.attachments?.some((a) =>
+        a.mimeType ===
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      ),
+      "Unsupported attachment should have been stripped from rewritten history",
+    );
+  }),
+);
+
 const addition = tool({
   name: "add",
   description: "Add two numbers",
