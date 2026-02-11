@@ -69,16 +69,7 @@ const getExpiredMediaText = (attachments: MediaAttachment[]) =>
     }>`
     : "";
 
-const handleFilePermissionError = (
-  error: Error,
-  events: GeminiHistoryEvent[],
-  rewriteHistory: (
-    replacements: Record<string, HistoryEventWithMetadata<unknown>>,
-  ) => Promise<void>,
-):
-  | { updatedHistory: GeminiHistoryEvent[]; rewritePromise: Promise<void> }
-  | undefined => {
-  if (!is403PermissionError(error)) return undefined;
+const stripExpiredFile = (error: Error, events: GeminiHistoryEvent[]) => {
   const fileId = extractFileIdFromError(error);
   if (!fileId) return undefined;
   const matchesFile = hasFileAttachment(fileId);
@@ -102,7 +93,7 @@ const handleFilePermissionError = (
     updatedHistory: map((event: GeminiHistoryEvent) =>
       event.id in replacements ? replacements[event.id] : event
     )(events),
-    rewritePromise: rewriteHistory(replacements),
+    replacements,
   };
 };
 
@@ -180,7 +171,9 @@ const historyEventToContent =
       e.type === "participant_edit_message"
     ) {
       const text = e.type === "participant_edit_message"
-        ? `${e.name} edited message "${getRefText(e.onMessage).slice(0, 100)}" to: ${e.text}`
+        ? `${e.name} edited message "${
+          getRefText(e.onMessage).slice(0, 100)
+        }" to: ${e.text}`
         : e.text
         ? `${e.name}: ${e.text}`
         : "";
@@ -195,7 +188,9 @@ const historyEventToContent =
     }
     if (e.type === "own_utterance" || e.type === "own_edit_message") {
       const text = e.type === "own_edit_message"
-        ? `You edited message "${getRefText(e.onMessage).slice(0, 100)}" to: ${e.text}`
+        ? `You edited message "${
+          getRefText(e.onMessage).slice(0, 100)
+        }" to: ${e.text}`
         : e.text;
       const parts: Part[] = [];
       if (text) {
@@ -238,12 +233,16 @@ const historyEventToContent =
     if (e.type === "own_reaction") {
       return wrapModelContent([{
         thoughtSignature: e.modelMetadata?.thoughtSignature,
-        text: `You reacted ${e.reaction} to message: ${getRefText(e.onMessage).slice(0, 100)}`,
+        text: `You reacted ${e.reaction} to message: ${
+          getRefText(e.onMessage).slice(0, 100)
+        }`,
       }]);
     }
     if (e.type === "participant_reaction") {
       return wrapUserContent([{
-        text: `${e.name} reacted ${e.reaction} to message: ${getRefText(e.onMessage).slice(0, 100)}`,
+        text: `${e.name} reacted ${e.reaction} to message: ${
+          getRefText(e.onMessage).slice(0, 100)
+        }`,
       }]);
     }
     if (e.type === "do_nothing") {
@@ -540,6 +539,33 @@ const stripAllNotActiveFiles = async (
   return callGemini(eventsToRequest(currentEvents));
 };
 
+const stripAllExpiredFiles = async (
+  initialError: Error,
+  events: GeminiHistoryEvent[],
+  eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
+  rewriteHistory: AgentSpec["rewriteHistory"],
+): Promise<GeminiOutput> => {
+  let currentEvents = events;
+  let currentError = initialError;
+  const allReplacements: Record<string, GeminiHistoryEvent> = {};
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const fixed = stripExpiredFile(currentError, currentEvents);
+    if (!fixed) throw currentError;
+    Object.assign(allReplacements, fixed.replacements);
+    currentEvents = fixed.updatedHistory;
+    try {
+      const result = await callGemini(eventsToRequest(currentEvents));
+      await rewriteHistory(allReplacements);
+      return result;
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      if (!is403PermissionError(err)) throw err;
+      currentError = err;
+    }
+  }
+  return callGemini(eventsToRequest(currentEvents));
+};
+
 const callGeminiWithFixHistory = (
   rewriteHistory: AgentSpec["rewriteHistory"],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
@@ -549,23 +575,11 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
     return await callGemini(eventsToRequest(events));
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
-    if (isFileNotActiveError(err))
+    if (isFileNotActiveError(err)) {
       return stripAllNotActiveFiles(events, eventsToRequest);
-    const handled = handleFilePermissionError(err, events, rewriteHistory);
-    if (!handled) throw err;
-    const { updatedHistory, rewritePromise } = handled;
-    const fixedRequest = eventsToRequest(updatedHistory);
-    const [result] = await Promise.all([
-      callGemini(fixedRequest).catch((retryError) => {
-        const retryErr = retryError instanceof Error
-          ? retryError
-          : new Error(String(retryError));
-        geminiError.access(retryErr, fixedRequest);
-        throw retryErr;
-      }),
-      rewritePromise,
-    ]);
-    return result;
+    }
+    if (!is403PermissionError(err)) throw err;
+    return stripAllExpiredFiles(err, events, eventsToRequest, rewriteHistory);
   }
 };
 
