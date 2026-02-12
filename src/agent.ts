@@ -187,7 +187,6 @@ const parseWithCatch = <T extends ZodType>(
   try {
     return { ok: true, result: parameters.parse(args) };
   } catch (error) {
-    console.error("Error parsing function call arguments:", error);
     return { ok: false, error: error as Error };
   }
 };
