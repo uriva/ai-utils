@@ -153,7 +153,7 @@ const rawCallGemini = (
 
 const callGeminiWithRetry = conditionalRetry(is500Error)(
   1000,
-  2,
+  4,
   rawCallGemini,
 );
 
