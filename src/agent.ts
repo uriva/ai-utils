@@ -12,11 +12,32 @@ import {
 import { z, type ZodType } from "zod/v4";
 import { zodToGeminiParameters } from "./gemini.ts";
 
-export type MediaAttachment =
-  | { kind: "inline"; mimeType: string; dataBase64: string; caption?: string }
-  | { kind: "file"; mimeType: string; fileUri: string; caption?: string };
+const mediaAttachmentSchema = z.union([
+  z.object({
+    kind: z.literal("inline"),
+    mimeType: z.string(),
+    dataBase64: z.string(),
+    caption: z.string().optional(),
+  }),
+  z.object({
+    kind: z.literal("file"),
+    mimeType: z.string(),
+    fileUri: z.string(),
+    caption: z.string().optional(),
+  }),
+]);
 
-export type ToolReturn = { result: string; attachments?: MediaAttachment[] };
+export type MediaAttachment = z.infer<typeof mediaAttachmentSchema>;
+
+const toolReturnSchema = z.union([
+  z.string(),
+  z.object({
+    result: z.string(),
+    attachments: z.array(mediaAttachmentSchema).optional(),
+  }),
+]);
+
+export type ToolReturn = z.infer<typeof toolReturnSchema>;
 
 export type Tool<T extends ZodType> = {
   description: string;
@@ -213,12 +234,21 @@ const callToResult =
       };
     }
     const out = await handler(parseResult.result);
-    return typeof out === "string" ? { toolCallId, name, result: out } : {
-      toolCallId,
-      name,
-      result: out.result,
-      attachments: out.attachments,
-    };
+    const parsed = parseWithCatch(toolReturnSchema, out);
+    if (!parsed.ok) {
+      throw new Error(
+        `Tool "${name}" handler returned invalid value: ${JSON.stringify(parsed.error)}`,
+      );
+    }
+    const validated = parsed.result;
+    return typeof validated === "string"
+      ? { toolCallId, name, result: validated }
+      : {
+        toolCallId,
+        name,
+        result: validated.result,
+        attachments: validated.attachments,
+      };
   };
 
 export const toolUseTurnWithMetadata = <Metadata>(
