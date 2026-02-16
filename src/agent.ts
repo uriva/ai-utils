@@ -260,7 +260,6 @@ export const toolUseTurnWithMetadata = <Metadata>(
   type: "tool_call",
   ...sharedFields(),
   isOwn: true,
-  timestamp: timestampGeneration.access(),
   name: coerce(name),
   parameters: args,
   modelMetadata,

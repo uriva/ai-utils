@@ -212,6 +212,8 @@ const historyEventToContent =
   ) =>
   (e: GeminiHistoryEvent): Content => {
     const getRefText = referencedMessageText(eventById);
+    const stampText = (text: string) =>
+      `[${formatTimestamp(e.timestamp, timezoneIANA)}] ${text}`;
     if (
       e.type === "participant_utterance" ||
       e.type === "participant_edit_message"
@@ -226,7 +228,7 @@ const historyEventToContent =
       return wrapUserContent([
         text
           ? {
-            text: `[${formatTimestamp(e.timestamp, timezoneIANA)}] ${text}`,
+            text: stampText(text),
           }
           : undefined,
         ...attachmentsToParts(e.attachments),
@@ -266,14 +268,22 @@ const historyEventToContent =
     }
     if (e.type === "tool_result") {
       const parts: Part[] = [
-        { functionResponse: { name: e.name, response: { result: e.result } } },
+        {
+          functionResponse: {
+            name: e.name,
+            response: {
+              result:
+                stampText(e.result),
+            },
+          },
+        },
         ...attachmentsToParts(e.attachments),
       ];
       return wrapUserContent(parts);
     }
     if (e.type === "own_thought") {
       return wrapUserContent([{
-        text: `[Internal thought, visible only to you: ${e.text}]`,
+        text: stampText(`[Internal thought, visible only to you: ${e.text}]`),
       }]);
     }
     if (e.type === "own_reaction") {
