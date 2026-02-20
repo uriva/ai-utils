@@ -1,6 +1,6 @@
 {
   "name": "@uri/ai-utils",
-  "version": "0.1.97",
+  "version": "0.1.98",
   "license": "MIT",
   "exports": "./mod.ts",
   "imports": {
@@ -12,6 +12,6 @@
     "zod": "npm:zod@3.25.57"
   },
   "tasks": {
-    "test": "deno test --allow-env --allow-net --allow-read --env=.env"
+    "test": "deno test --allow-env --allow-net --allow-read --env=.env --parallel tests/"
   }
 }

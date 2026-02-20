@@ -26,6 +26,7 @@ import {
   type MessageId,
   type OwnEditMessage,
   type OwnUtterance,
+  ownThoughtTurnWithMetadata,
   ownUtteranceTurnWithMetadata,
   type ParticipantEditMessage,
   type ParticipantUtterance,
@@ -130,8 +131,14 @@ const rawCallGemini = (
     .then((resp: GenerateContentResponse): GeminiOutput =>
       (resp.candidates?.[0]?.content?.parts ?? [])
         .flatMap((part: Part): GeminiOutput => {
-          const { text, functionCall, thoughtSignature, inlineData, fileData } =
-            part;
+          const {
+            text,
+            functionCall,
+            thoughtSignature,
+            inlineData,
+            fileData,
+            thought,
+          } = part;
           if (functionCall) {
             return [{ type: "function_call", functionCall, thoughtSignature }];
           }
@@ -142,7 +149,7 @@ const rawCallGemini = (
             return [{ type: "file_data", fileData, thoughtSignature }];
           }
           if (typeof text === "string") {
-            return [{ type: "text", text, thoughtSignature }];
+            return [{ type: "text", text, thoughtSignature, thought }];
           }
           return [];
         })
@@ -282,9 +289,17 @@ const historyEventToContent =
       return wrapUserContent(parts);
     }
     if (e.type === "own_thought") {
-      return wrapUserContent([{
-        text: stampText(`[Internal thought, visible only to you: ${e.text}]`),
-      }]);
+      return e.modelMetadata?.thoughtSignature
+        ? wrapModelContent([{
+          text: e.text,
+          thought: true,
+          thoughtSignature: e.modelMetadata.thoughtSignature,
+        }])
+        : wrapUserContent([{
+          text: stampText(
+            `[Internal thought, visible only to you: ${e.text}]`,
+          ),
+        }]);
     }
     if (e.type === "own_reaction") {
       return wrapModelContent([{
@@ -401,7 +416,7 @@ type GeminiMetadata = {
 type GeminiHistoryEvent = HistoryEventWithMetadata<GeminiMetadata>;
 
 type GeminiPartOfInterest =
-  | { type: "text"; text: string; thoughtSignature?: string }
+  | { type: "text"; text: string; thoughtSignature?: string; thought?: boolean }
   | GeminiFunctiontoolPart
   | GeminiInlinePart
   | GeminiFilePart;
@@ -412,7 +427,7 @@ const sawFunction = (output: GeminiOutput) =>
 const didNothing = (output: GeminiOutput) =>
   !sawFunction(output) &&
   !output.some((p: GeminiPartOfInterest) =>
-    (p.type === "text" &&
+    (p.type === "text" && !p.thought &&
       p.text.replace(/[\s\u200B\u200C\u200D\uFEFF]/g, "")) ||
     p.type === "inline_data" ||
     p.type === "file_data"
@@ -809,14 +824,15 @@ export const geminiAgentCaller = ({
 const geminiOutputPartToHistoryEvent =
   (responseId: string) => (p: GeminiPartOfInterest): GeminiHistoryEvent => {
     if (p.type === "text") {
-      return ownUtteranceTurnWithMetadata<GeminiMetadata>(
-        typeof p.text === "string" ? p.text : "",
-        {
-          type: "gemini",
-          responseId,
-          thoughtSignature: p.thoughtSignature ?? "",
-        },
-      );
+      const metadata: GeminiMetadata = {
+        type: "gemini",
+        responseId,
+        thoughtSignature: p.thoughtSignature ?? "",
+      };
+      const text = typeof p.text === "string" ? p.text : "";
+      return p.thought
+        ? ownThoughtTurnWithMetadata<GeminiMetadata>(text, metadata)
+        : ownUtteranceTurnWithMetadata<GeminiMetadata>(text, metadata);
     }
     if (p.type === "function_call") {
       return toolUseTurnWithMetadata(p.functionCall, {

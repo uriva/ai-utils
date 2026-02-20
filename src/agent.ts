@@ -308,6 +308,17 @@ export const ownThoughtTurn = <Metadata>(
   ...sharedFields(),
 });
 
+export const ownThoughtTurnWithMetadata = <Metadata>(
+  text: string,
+  modelMetadata: Metadata | undefined,
+): HistoryEventWithMetadata<Metadata> => ({
+  type: "own_thought",
+  isOwn: true,
+  modelMetadata,
+  text,
+  ...sharedFields(),
+});
+
 const sharedFields = () => ({
   id: idGeneration.access(),
   timestamp: timestampGeneration.access(),
