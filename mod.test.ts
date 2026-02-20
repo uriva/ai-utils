@@ -323,17 +323,21 @@ Deno.test(
 );
 
 Deno.test(
-  "agent triggers do nothing event when model should say nothing",
+  "agent triggers do nothing event after conversation ends with goodbye",
   injectSecrets(async () => {
     const mockHistory: HistoryEvent[] = [
-      participantUtteranceTurn({ name: "user", text: "Say nothing." }),
+      participantUtteranceTurn({ name: "user", text: "What is 2+2?" }),
+      ownUtteranceTurn("4"),
+      participantUtteranceTurn({ name: "user", text: "Thanks, bye!" }),
+      ownUtteranceTurn("Bye!"),
+      participantUtteranceTurn({ name: "user", text: "\u{1F44D}" }),
     ];
     await agentDeps(mockHistory)(runAgent)({
-      maxIterations: 2,
+      maxIterations: 1,
       onMaxIterationsReached: () => {},
       tools: [],
       prompt:
-        "You are an AI assistant. If the user says 'Say nothing.', do not reply with any text.",
+        "You are a helpful but concise assistant. When a conversation has clearly ended (goodbyes exchanged), do not respond further. A thumbs up or similar acknowledgment after goodbyes does not require a response.",
       lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
