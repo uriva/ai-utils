@@ -239,7 +239,9 @@ const callToResult =
     const parsed = parseWithCatch(toolReturnSchema, out);
     if (!parsed.ok) {
       throw new Error(
-        `Tool "${name}" handler returned invalid value: ${JSON.stringify(parsed.error)}`,
+        `Tool "${name}" handler returned invalid value (args: ${
+          JSON.stringify(args)
+        }): ${JSON.stringify(parsed.error)}`,
       );
     }
     const validated = parsed.result;
@@ -576,7 +578,9 @@ const assertNever = (x: never): never => {
 };
 
 export const estimateTokens = (e: HistoryEvent): number => {
-  if (e.type === "participant_utterance" || e.type === "participant_edit_message") {
+  if (
+    e.type === "participant_utterance" || e.type === "participant_edit_message"
+  ) {
     return approxTextTokens(e.name) + approxTextTokens(e.text) +
       attachmentTokens(e.attachments) + 2;
   }
