@@ -317,7 +317,6 @@ const historyEventToContent =
       }]);
     }
     if (e.type === "do_nothing") {
-      // Carry thoughtSignature if available (assume only one text part)
       return wrapModelContent([{
         text: "",
         thoughtSignature: e.modelMetadata?.thoughtSignature,
@@ -527,8 +526,8 @@ export const filterOrphanedToolResults = (
 
 export const filterInvalidToolCalls = (
   history: GeminiHistoryEvent[],
-): GeminiHistoryEvent[] => {
-  return history.filter((e) => {
+): GeminiHistoryEvent[] =>
+  history.filter((e) => {
     if (e.type === "tool_call" && !e.modelMetadata?.thoughtSignature?.trim()) {
       console.warn(
         `Warning: Filtering out tool_call "${e.name}" (id: ${e.id}) with missing or empty thoughtSignature. ` +
@@ -538,7 +537,56 @@ export const filterInvalidToolCalls = (
     }
     return true;
   });
-};
+
+const toolCallToOwnThought =
+  (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
+    type: "own_thought",
+    isOwn: true,
+    id: e.id,
+    timestamp: e.timestamp,
+    text:
+      `[Removed tool call "${"name" in e ? e.name : "unknown"}" due to missing thought signature. Parameters: ${JSON.stringify("parameters" in e ? e.parameters : {})}]`,
+  });
+
+const toolResultToOwnThought =
+  (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
+    type: "own_thought",
+    isOwn: true,
+    id: e.id,
+    timestamp: e.timestamp,
+    text:
+      `[Removed tool result for "${"name" in e ? e.name : "unknown"}": ${"result" in e ? e.result : ""}]`,
+  });
+
+const filterAndRewriteInvalidToolCalls =
+  (rewriteHistory: AgentSpec["rewriteHistory"]) =>
+  (history: GeminiHistoryEvent[]): GeminiHistoryEvent[] => {
+    const invalidToolCallIds = new Set(
+      history.filter((e) =>
+        e.type === "tool_call" && !e.modelMetadata?.thoughtSignature?.trim()
+      ).map((e) => e.id),
+    );
+    if (invalidToolCallIds.size === 0) return history;
+    const replacements: Record<string, GeminiHistoryEvent> = {};
+    const filtered = history.filter((e) => {
+      if (e.type === "tool_call" && invalidToolCallIds.has(e.id)) {
+        replacements[e.id] = toolCallToOwnThought(e);
+        return false;
+      }
+      if (
+        e.type === "tool_result" && "toolCallId" in e &&
+        e.toolCallId && invalidToolCallIds.has(e.toolCallId)
+      ) {
+        replacements[e.id] = toolResultToOwnThought(e);
+        return false;
+      }
+      return true;
+    });
+    rewriteHistory(replacements).catch((err) =>
+      console.warn("Failed to rewrite history for invalid tool calls:", err)
+    );
+    return filtered;
+  };
 
 const hasFileAttachment =
   (fileId: string) =>
@@ -779,8 +827,8 @@ export const geminiAgentCaller = ({
 }: AgentSpec) =>
 (events: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> =>
   pipe(
+    filterAndRewriteInvalidToolCalls(rewriteHistory),
     filterOrphanedToolResults,
-    filterInvalidToolCalls,
     filterUnsupportedGeminiAttachments,
     callGeminiWithFixHistory(
       rewriteHistory,

@@ -43,7 +43,7 @@ Deno.test(
   }),
 );
 
-Deno.test(
+llmTest(
   "ai returns text event before calling actions",
   injectSecrets(async () => {
     const mockHistory: HistoryEvent[] = [

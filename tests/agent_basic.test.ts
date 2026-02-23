@@ -91,7 +91,7 @@ Deno.test(
 );
 
 Deno.test(
-  "tool_call with empty thoughtSignature is filtered out with warning",
+  "tool_call with empty thoughtSignature is filtered along with its tool_result",
   injectSecrets(async () => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
@@ -111,6 +111,15 @@ Deno.test(
           responseId: "resp_id",
         },
       } as HistoryEvent,
+      {
+        type: "tool_result",
+        isOwn: true,
+        id: "result-id",
+        timestamp: Date.now(),
+        name: "testTool",
+        toolCallId: "test-id",
+        result: "tool result",
+      } as HistoryEvent,
     ];
 
     await agentDeps(mockHistory)(runAgent)({
@@ -118,7 +127,7 @@ Deno.test(
       onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt: "You are a helper.",
-      lightModel: false,
+      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
