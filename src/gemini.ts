@@ -123,25 +123,20 @@ export const geminiGenJson =
 
 type UploadResult = { geminiUri: string; mimeType: string };
 
-const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
-  const buf = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(buf).set(bytes);
-  return buf;
+const uploadBlobToGemini = async (
+  blob: Blob,
+  mimeType: string,
+): Promise<UploadResult> => {
+  const ai = new GoogleGenAI({ apiKey: tokenInjection.access() });
+  const { uri, mimeType: mimeType2 } = await ai.files.upload({
+    file: blob,
+    config: { mimeType },
+  });
+  if (!uri || !mimeType2) {
+    throw new Error("Gemini file upload failed: missing uri or mimeType");
+  }
+  return { geminiUri: uri, mimeType: mimeType2 };
 };
-
-const uploadBytesToGemini =
-  (mimeType: string) => async (bytes: Uint8Array): Promise<UploadResult> => {
-    const ai = new GoogleGenAI({ apiKey: tokenInjection.access() });
-    const file = new File([toArrayBuffer(bytes)], "file", { type: mimeType });
-    const { uri, mimeType: mimeType2 } = await ai.files.upload({
-      file,
-      config: { mimeType },
-    });
-    if (!uri || !mimeType2) {
-      throw new Error("Gemini file upload failed: missing uri or mimeType");
-    }
-    return { geminiUri: uri, mimeType: mimeType2 };
-  };
 
 const uploadToGeminiFromUrl = async (
   url: string,
@@ -151,15 +146,19 @@ const uploadToGeminiFromUrl = async (
   if (!res.ok) {
     throw new Error(`Failed to fetch file for Gemini upload: ${url}`);
   }
-  return uploadBytesToGemini(mimeType)(new Uint8Array(await res.arrayBuffer()));
+  return uploadBlobToGemini(await res.blob(), mimeType);
 };
 
 const uploadToGeminiFromFile = (
   mimeType: string,
   dataBase64: string,
 ): Promise<UploadResult> =>
-  uploadBytesToGemini(mimeType)(
-    new Uint8Array(Array.from(atob(dataBase64), (c) => c.charCodeAt(0))),
+  uploadBlobToGemini(
+    new Blob(
+      [Uint8Array.from(atob(dataBase64), (c) => c.charCodeAt(0))],
+      { type: mimeType },
+    ),
+    mimeType,
   );
 
 const geminiFileNameFromUri = (uri: string) => {
