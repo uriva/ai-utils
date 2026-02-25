@@ -5,6 +5,7 @@ import {
   filter,
   last,
   map,
+  nonempty,
   pipe,
   sideEffect,
   timeit,
@@ -528,9 +529,11 @@ export const runAbstractAgent = async (
       sideEffect(each(outputEvent)),
     )();
     await handleFunctionCalls(allTools)(output);
+    const history = await getHistory();
     if (
       !(output.some((ev: HistoryEvent) => ev.type === "tool_call")) &&
-      last(await getHistory()).isOwn
+      nonempty(history) &&
+      last(history).isOwn
     ) return;
   }
 };

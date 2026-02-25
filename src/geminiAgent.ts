@@ -43,9 +43,9 @@ import {
   zodToGeminiParameters,
 } from "./gemini.ts";
 
-const is500Error = (error: unknown) =>
+const isServerError = (error: unknown) =>
   error instanceof Error && "status" in error &&
-  (error as { status: number }).status === 500;
+  (error as { status: number }).status >= 500;
 
 const alternateModel = (model: string) =>
   model === geminiProVersion
@@ -158,7 +158,7 @@ const rawCallGemini = (
       throw err;
     });
 
-const callGeminiWithRetry = conditionalRetry(is500Error)(
+const callGeminiWithRetry = conditionalRetry(isServerError)(
   1000,
   4,
   rawCallGemini,
@@ -166,7 +166,7 @@ const callGeminiWithRetry = conditionalRetry(is500Error)(
 
 const callGemini = (req: GenerateContentParameters): Promise<GeminiOutput> =>
   callGeminiWithRetry(req).catch((err) => {
-    if (!is500Error(err)) throw err;
+    if (!isServerError(err)) throw err;
     return rawCallGemini({
       ...req,
       model: alternateModel(req.model),
