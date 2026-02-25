@@ -193,11 +193,11 @@ export const ensureGeminiAttachmentIsLink = async (
 ): Promise<MediaAttachment> => {
   if (
     attachment.kind === "file" &&
-    attachment.fileUri?.startsWith("https://generativelanguage.googleapis.com/")
+    attachment.fileUri.startsWith("https://generativelanguage.googleapis.com/")
   ) {
     return attachment;
   }
-  if (attachment.kind === "file" && attachment.fileUri?.trim()) {
+  if (attachment.kind === "file" && attachment.fileUri.trim()) {
     const { geminiUri, mimeType } = await uploadToGeminiFromUrl(
       attachment.fileUri,
       attachment.mimeType,
