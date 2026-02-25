@@ -14,12 +14,14 @@ import {
   groupBy,
   map,
   pipe,
+  sum,
 } from "gamla";
 import type { ZodType } from "zod/v4";
 import {
   type AgentSpec,
   createSkillTools,
   doNothingEvent,
+  estimateTokens,
   generateId,
   type HistoryEventWithMetadata,
   type MediaAttachment,
@@ -86,6 +88,16 @@ const isFileNotActiveError = (error: Error) =>
 
 const isUnsupportedMimeTypeError = (error: Error) =>
   error.message.includes("Unsupported MIME type");
+
+const isTokenLimitExceeded = (error: Error) =>
+  "status" in error && (error as { status: number }).status === 400 &&
+  error.message.includes("token count exceeds");
+
+const dropOldestHalf = <T extends { type: string }>(events: T[]): T[] => {
+  if (events.length <= 2) return events;
+  const half = Math.floor(events.length / 2);
+  return events.slice(half);
+};
 
 const extractUnsupportedMimeType = (error: Error): string | undefined => {
   const match = error.message.match(/Unsupported MIME type:\s*([^"\s}]+)/);
@@ -799,6 +811,15 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
     return await callGemini(eventsToRequest(events));
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
+    if (isTokenLimitExceeded(err)) {
+      const totalTokens = sum(map(estimateTokens)(events));
+      console.warn(
+        `Token limit exceeded (estimated ${totalTokens} tokens, ${events.length} events). Dropping oldest half.`,
+      );
+      const truncated = dropOldestHalf(events);
+      if (truncated.length === events.length) throw err;
+      return callGemini(eventsToRequest(truncated));
+    }
     if (isFileNotActiveError(err)) {
       return stripAllNotActiveFiles(events, eventsToRequest);
     }
