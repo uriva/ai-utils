@@ -4,7 +4,6 @@ import {
   each,
   filter,
   last,
-  map,
   nonempty,
   pipe,
   sideEffect,
@@ -235,7 +234,8 @@ const parseWithCatch = <T extends ZodType>(
 
 const callToResult =
   // deno-lint-ignore no-explicit-any
-  (actions: RegularTool<any>[]) => async <T extends ZodType>(fc: FunctionCall) => {
+  (actions: RegularTool<any>[]) =>
+  async <T extends ZodType>(fc: FunctionCall) => {
     const { name, args, id } = fc;
     const toolCallId = id;
     const action: RegularTool<T> | undefined = actions.find(({ name: n }) =>
@@ -414,9 +414,9 @@ export const generateId = idGeneration.access;
 // deno-lint-ignore no-explicit-any
 const isRegularTool = (t: Tool<any>): t is RegularTool<any> => !t.isDeferred;
 
-// deno-lint-ignore no-explicit-any
-const handleFunctionCalls = (tools: Tool<any>[]) =>
-  async (output: HistoryEvent[]): Promise<boolean> => {
+const handleFunctionCalls =
+  // deno-lint-ignore no-explicit-any
+  (tools: Tool<any>[]) => async (output: HistoryEvent[]): Promise<boolean> => {
     // deno-lint-ignore no-explicit-any
     const toolCalls = filter((p: HistoryEvent): p is ToolUse<any> =>
       p.type === "tool_call"
@@ -453,7 +453,7 @@ export const tool = <ParametersSchema extends z.ZodObject<z.ZodRawShape>>(
 });
 
 // deno-lint-ignore no-explicit-any
-export const createSkillTools = (skills: Skill[]): Tool<any>[] => {
+export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
   const skillMap = Object.fromEntries(skills.map((s) => [s.name, s]));
   const toolMap = Object.fromEntries(
     skills.flatMap((skill) =>

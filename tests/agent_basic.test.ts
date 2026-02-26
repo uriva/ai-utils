@@ -254,10 +254,11 @@ Deno.test(
     assert(replacedItems.size > 0, "rewriteHistory should have been called");
     const rewritten = [...replacedItems.values()][0];
     assert(
-      !("attachments" in rewritten) || !rewritten.attachments?.some((a) =>
-        a.mimeType ===
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      ),
+      !("attachments" in rewritten) ||
+        !rewritten.attachments?.some((a) =>
+          a.mimeType ===
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
       "Unsupported attachment should have been stripped from rewritten history",
     );
   }),

@@ -59,10 +59,14 @@ const captureAudioStream = async function* (): AsyncGenerator<string> {
 
 const playAudioChunk = async (audioBase64: string): Promise<void> => {
   const audioData = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
-  Deno.stdout.writeSync(new TextEncoder().encode(`\n🔊 Playing ${audioData.length} bytes\n`));
+  Deno.stdout.writeSync(
+    new TextEncoder().encode(`\n🔊 Playing ${audioData.length} bytes\n`),
+  );
 
   if (!playbackProcess || !playbackWriter) {
-    Deno.stdout.writeSync(new TextEncoder().encode("🎵 Starting aplay process...\n"));
+    Deno.stdout.writeSync(
+      new TextEncoder().encode("🎵 Starting aplay process...\n"),
+    );
     const command = new Deno.Command("aplay", {
       args: [
         "-f",
@@ -80,11 +84,11 @@ const playAudioChunk = async (audioBase64: string): Promise<void> => {
     });
 
     playbackProcess = command.spawn();
-    
+
     if (playbackProcess.stdin) {
       playbackWriter = playbackProcess.stdin.getWriter();
     }
-    
+
     if (playbackProcess.stderr) {
       (async () => {
         const reader = playbackProcess!.stderr!.getReader();
@@ -95,7 +99,9 @@ const playAudioChunk = async (audioBase64: string): Promise<void> => {
             if (done) break;
             const text = decoder.decode(value);
             if (text.trim()) {
-              Deno.stdout.writeSync(new TextEncoder().encode(`🎵 aplay: ${text.trim()}\n`));
+              Deno.stdout.writeSync(
+                new TextEncoder().encode(`🎵 aplay: ${text.trim()}\n`),
+              );
             }
           }
         } finally {
@@ -108,10 +114,14 @@ const playAudioChunk = async (audioBase64: string): Promise<void> => {
   if (playbackWriter) {
     try {
       await playbackWriter.write(audioData);
-      Deno.stdout.writeSync(new TextEncoder().encode("✅ Audio chunk written to aplay\n"));
+      Deno.stdout.writeSync(
+        new TextEncoder().encode("✅ Audio chunk written to aplay\n"),
+      );
     } catch (error) {
       if (error instanceof Deno.errors.BrokenPipe) {
-        Deno.stdout.writeSync(new TextEncoder().encode("🔄 Restarting playback process...\n"));
+        Deno.stdout.writeSync(
+          new TextEncoder().encode("🔄 Restarting playback process...\n"),
+        );
         playbackWriter = null;
         playbackProcess = null;
         await playAudioChunk(audioBase64);
@@ -137,7 +147,9 @@ const main = async () => {
     });
     await checkFfmpeg.output();
   } catch {
-    console.error("❌ Error: ffmpeg not found. Install: sudo apt-get install ffmpeg");
+    console.error(
+      "❌ Error: ffmpeg not found. Install: sudo apt-get install ffmpeg",
+    );
     Deno.exit(1);
   }
 
@@ -149,7 +161,9 @@ const main = async () => {
     });
     await checkAplay.output();
   } catch {
-    console.error("❌ Error: aplay not found. Install: sudo apt-get install alsa-utils");
+    console.error(
+      "❌ Error: aplay not found. Install: sudo apt-get install alsa-utils",
+    );
     Deno.exit(1);
   }
 
@@ -177,21 +191,21 @@ const main = async () => {
   );
 
   console.log("✅ Message handler set up");
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await new Promise((resolve) => setTimeout(resolve, 500));
 
   console.log("🎤 Voice chat started.");
   console.log("Press SPACE to toggle transmit on/off.");
   console.log("Press Ctrl+C to exit\n");
 
   Deno.stdin.setRaw(true);
-  
+
   const keyListener = async () => {
     const buf = new Uint8Array(1);
     while (true) {
       try {
         const n = await Deno.stdin.read(buf);
         if (n === null) break;
-        
+
         if (buf[0] === 32) {
           isTransmitting = !isTransmitting;
           const status = isTransmitting ? "🎙️  TRANSMITTING..." : "🔇 MUTED";
@@ -200,12 +214,14 @@ const main = async () => {
           Deno.exit(0);
         }
       } catch (e) {
-        Deno.stdout.writeSync(new TextEncoder().encode(`\nKey listener error: ${e}\n`));
+        Deno.stdout.writeSync(
+          new TextEncoder().encode(`\nKey listener error: ${e}\n`),
+        );
         break;
       }
     }
   };
-  
+
   keyListener();
 
   let chunkCount = 0;
@@ -214,18 +230,24 @@ const main = async () => {
       if (isTransmitting) {
         chunkCount++;
         if (chunkCount % 5 === 0) {
-          Deno.stdout.writeSync(new TextEncoder().encode(`📤 Sent ${chunkCount} chunks\n`));
+          Deno.stdout.writeSync(
+            new TextEncoder().encode(`📤 Sent ${chunkCount} chunks\n`),
+          );
         }
         sendAudioChunk(session, audioChunk);
       } else {
         if (chunkCount > 0) {
-          Deno.stdout.writeSync(new TextEncoder().encode(`📤 Sent ${chunkCount} chunks total\n`));
+          Deno.stdout.writeSync(
+            new TextEncoder().encode(`📤 Sent ${chunkCount} chunks total\n`),
+          );
           chunkCount = 0;
         }
       }
     }
   } catch (error) {
-    Deno.stdout.writeSync(new TextEncoder().encode(`Error during audio capture: ${error}\n`));
+    Deno.stdout.writeSync(
+      new TextEncoder().encode(`Error during audio capture: ${error}\n`),
+    );
   }
 };
 

@@ -12,7 +12,8 @@ type LiveSessionState = {
 export const createLiveSession = async ({
   apiKey,
   model = "gemini-2.0-flash-exp",
-  systemInstruction = "You are a helpful voice assistant. Keep responses concise and natural for voice conversation.",
+  systemInstruction =
+    "You are a helpful voice assistant. Keep responses concise and natural for voice conversation.",
 }: LiveSessionConfig): Promise<LiveSessionState> => {
   const ws = new WebSocket(
     `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`,
@@ -79,14 +80,18 @@ export const handleMessages = (
 ): void => {
   state.ws.onmessage = async (event) => {
     let data = event.data;
-    
+
     if (data instanceof Blob) {
       data = await data.text();
     }
-    
+
     const msg = JSON.parse(data);
     const hasContent = !!(msg.setupComplete || msg.serverContent);
-    Deno.stdout.writeSync(new TextEncoder().encode(`📨 Message: ${hasContent ? 'has content' : 'empty'}\n`));
+    Deno.stdout.writeSync(
+      new TextEncoder().encode(
+        `📨 Message: ${hasContent ? "has content" : "empty"}\n`,
+      ),
+    );
 
     if (msg.setupComplete) {
       Deno.stdout.writeSync(new TextEncoder().encode("✅ Setup complete\n"));
@@ -95,15 +100,21 @@ export const handleMessages = (
 
     if (msg.serverContent?.modelTurn) {
       const parts = msg.serverContent.modelTurn.parts || [];
-      Deno.stdout.writeSync(new TextEncoder().encode(`🎯 Model turn with ${parts.length} parts\n`));
+      Deno.stdout.writeSync(
+        new TextEncoder().encode(`🎯 Model turn with ${parts.length} parts\n`),
+      );
 
       for (const part of parts) {
         if (part.inlineData?.data) {
-          Deno.stdout.writeSync(new TextEncoder().encode("🔊 Received audio chunk\n"));
+          Deno.stdout.writeSync(
+            new TextEncoder().encode("🔊 Received audio chunk\n"),
+          );
           onAudioResponse(part.inlineData.data);
         }
         if (part.text) {
-          Deno.stdout.writeSync(new TextEncoder().encode(`💬 Received text: ${part.text}\n`));
+          Deno.stdout.writeSync(
+            new TextEncoder().encode(`💬 Received text: ${part.text}\n`),
+          );
           onTextResponse(part.text);
         }
       }
@@ -115,18 +126,30 @@ export const handleMessages = (
     }
 
     if (msg.error) {
-      Deno.stdout.writeSync(new TextEncoder().encode(`❌ Server error: ${JSON.stringify(msg.error)}\n`));
+      Deno.stdout.writeSync(
+        new TextEncoder().encode(
+          `❌ Server error: ${JSON.stringify(msg.error)}\n`,
+        ),
+      );
       onError(msg.error);
     }
   };
 
   state.ws.onerror = (event) => {
-    Deno.stdout.writeSync(new TextEncoder().encode(`❌ WebSocket error event: ${JSON.stringify(event)}\n`));
+    Deno.stdout.writeSync(
+      new TextEncoder().encode(
+        `❌ WebSocket error event: ${JSON.stringify(event)}\n`,
+      ),
+    );
     onError(event);
   };
 
   state.ws.onclose = (event) => {
-    Deno.stdout.writeSync(new TextEncoder().encode(`🔌 WebSocket closed: ${event.code} ${event.reason}\n`));
+    Deno.stdout.writeSync(
+      new TextEncoder().encode(
+        `🔌 WebSocket closed: ${event.code} ${event.reason}\n`,
+      ),
+    );
   };
 };
 

@@ -1,4 +1,3 @@
-import { assert } from "@std/assert";
 import type { Injector } from "@uri/inject";
 import { pipe } from "gamla";
 import { z } from "zod/v4";
@@ -107,7 +106,10 @@ export const findTextualAnswer = (events: HistoryEvent[]) =>
     event.text.length > 0
   );
 
-export const collectAttachment = (events: HistoryEvent[], toolName?: string) => {
+export const collectAttachment = (
+  events: HistoryEvent[],
+  toolName?: string,
+) => {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (
@@ -177,5 +179,4 @@ export const llmTest = (
   name: string,
   fn: () => Promise<void>,
   retries = 3,
-) =>
-  Deno.test(name, withRetries(retries, fn));
+) => Deno.test(name, withRetries(retries, fn));

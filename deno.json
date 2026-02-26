@@ -12,6 +12,11 @@
     "zod": "npm:zod@3.25.57"
   },
   "tasks": {
+    "check": "deno fmt --check && deno lint && deno check *.ts src/**/*.ts tests/**/*.ts",
     "test": "deno test --allow-env --allow-net --allow-read --env=.env --parallel tests/"
+  },
+  "githooks": {
+    "$schema": "https://deno.land/x/githooks/schema.json",
+    "pre-commit": "check"
   }
 }

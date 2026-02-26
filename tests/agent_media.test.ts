@@ -1,9 +1,6 @@
 import { assert } from "@std/assert";
 import { runAgent } from "../mod.ts";
-import {
-  type HistoryEvent,
-  participantUtteranceTurn,
-} from "../src/agent.ts";
+import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
 import {
   agentDeps,
   b64,

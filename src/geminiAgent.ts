@@ -27,8 +27,8 @@ import {
   type MediaAttachment,
   type MessageId,
   type OwnEditMessage,
-  type OwnUtterance,
   ownThoughtTurnWithMetadata,
+  type OwnUtterance,
   ownUtteranceTurnWithMetadata,
   type ParticipantEditMessage,
   type ParticipantUtterance,
@@ -224,120 +224,118 @@ const referencedMessageText =
     return typeof msg === "object" && "text" in msg ? msg.text : "";
   };
 
-const historyEventToContent =
-  (
-    eventById: (id: string) => GeminiHistoryEvent | undefined,
-    timezoneIANA: string,
-  ) =>
-  (e: GeminiHistoryEvent): Content => {
-    const getRefText = referencedMessageText(eventById);
-    const stampText = (text: string) =>
-      `[${formatTimestamp(e.timestamp, timezoneIANA)}] ${text}`;
-    if (
-      e.type === "participant_utterance" ||
-      e.type === "participant_edit_message"
-    ) {
-      const text = e.type === "participant_edit_message"
-        ? `${e.name} edited message "${
-          getRefText(e.onMessage).slice(0, 100)
-        }" to: ${e.text}`
-        : e.text
-        ? `${e.name}: ${e.text}`
-        : "";
-      return wrapUserContent([
-        text
-          ? {
-            text: stampText(text),
-          }
-          : undefined,
-        ...attachmentsToParts(e.attachments),
-      ].filter((x): x is Part => !!x));
-    }
-    if (e.type === "own_utterance" || e.type === "own_edit_message") {
-      const text = e.type === "own_edit_message"
-        ? `You edited message "${
-          getRefText(e.onMessage).slice(0, 100)
-        }" to: ${e.text}`
-        : e.text;
-      const parts: Part[] = [];
-      if (text) {
-        parts.push({
-          thoughtSignature: e.modelMetadata?.thoughtSignature,
-          text,
-        });
-      }
-      if (e.attachments && !empty(e.attachments)) {
-        parts.push(...attachmentsToParts(e.attachments));
-      }
-      return wrapModelContent(
-        !empty(parts) ? parts : [{
-          thoughtSignature: e.modelMetadata?.thoughtSignature,
-          text: "",
-        }],
-      );
-    }
-    if (e.type === "tool_call") {
-      return wrapModelContent([{
+const historyEventToContent = (
+  eventById: (id: string) => GeminiHistoryEvent | undefined,
+  timezoneIANA: string,
+) =>
+(e: GeminiHistoryEvent): Content => {
+  const getRefText = referencedMessageText(eventById);
+  const stampText = (text: string) =>
+    `[${formatTimestamp(e.timestamp, timezoneIANA)}] ${text}`;
+  if (
+    e.type === "participant_utterance" ||
+    e.type === "participant_edit_message"
+  ) {
+    const text = e.type === "participant_edit_message"
+      ? `${e.name} edited message "${
+        getRefText(e.onMessage).slice(0, 100)
+      }" to: ${e.text}`
+      : e.text
+      ? `${e.name}: ${e.text}`
+      : "";
+    return wrapUserContent([
+      text
+        ? {
+          text: stampText(text),
+        }
+        : undefined,
+      ...attachmentsToParts(e.attachments),
+    ].filter((x): x is Part => !!x));
+  }
+  if (e.type === "own_utterance" || e.type === "own_edit_message") {
+    const text = e.type === "own_edit_message"
+      ? `You edited message "${
+        getRefText(e.onMessage).slice(0, 100)
+      }" to: ${e.text}`
+      : e.text;
+    const parts: Part[] = [];
+    if (text) {
+      parts.push({
         thoughtSignature: e.modelMetadata?.thoughtSignature,
-        functionCall: {
-          name: e.name,
-          args: isRecord(e.parameters) ? e.parameters : {},
-        },
-      }]);
+        text,
+      });
     }
-    if (e.type === "tool_result") {
-      const parts: Part[] = [
-        {
-          functionResponse: {
-            name: e.name,
-            response: {
-              result:
-                stampText(e.result),
-            },
+    if (e.attachments && !empty(e.attachments)) {
+      parts.push(...attachmentsToParts(e.attachments));
+    }
+    return wrapModelContent(
+      !empty(parts) ? parts : [{
+        thoughtSignature: e.modelMetadata?.thoughtSignature,
+        text: "",
+      }],
+    );
+  }
+  if (e.type === "tool_call") {
+    return wrapModelContent([{
+      thoughtSignature: e.modelMetadata?.thoughtSignature,
+      functionCall: {
+        name: e.name,
+        args: isRecord(e.parameters) ? e.parameters : {},
+      },
+    }]);
+  }
+  if (e.type === "tool_result") {
+    const parts: Part[] = [
+      {
+        functionResponse: {
+          name: e.name,
+          response: {
+            result: stampText(e.result),
           },
         },
-        ...attachmentsToParts(e.attachments),
-      ];
-      return wrapUserContent(parts);
-    }
-    if (e.type === "own_thought") {
-      return e.modelMetadata?.thoughtSignature
-        ? wrapModelContent([{
-          text: e.text,
-          thought: true,
-          thoughtSignature: e.modelMetadata.thoughtSignature,
-        }])
-        : wrapUserContent([{
-          text: stampText(
-            `[Internal thought, visible only to you: ${e.text}]`,
-          ),
-        }]);
-    }
-    if (e.type === "own_reaction") {
-      return wrapModelContent([{
-        thoughtSignature: e.modelMetadata?.thoughtSignature,
-        text: `You reacted ${e.reaction} to message: ${
-          getRefText(e.onMessage).slice(0, 100)
-        }`,
+      },
+      ...attachmentsToParts(e.attachments),
+    ];
+    return wrapUserContent(parts);
+  }
+  if (e.type === "own_thought") {
+    return e.modelMetadata?.thoughtSignature
+      ? wrapModelContent([{
+        text: e.text,
+        thought: true,
+        thoughtSignature: e.modelMetadata.thoughtSignature,
+      }])
+      : wrapUserContent([{
+        text: stampText(
+          `[Internal thought, visible only to you: ${e.text}]`,
+        ),
       }]);
-    }
-    if (e.type === "participant_reaction") {
-      return wrapUserContent([{
-        text: `${e.name} reacted ${e.reaction} to message: ${
-          getRefText(e.onMessage).slice(0, 100)
-        }`,
-      }]);
-    }
-    if (e.type === "do_nothing") {
-      return wrapModelContent([{
-        text: "",
-        thoughtSignature: e.modelMetadata?.thoughtSignature,
-      }]);
-    }
-    throw new Error(
-      `Unknown history event type: ${JSON.stringify(e, null, 2)}`,
-    );
-  };
+  }
+  if (e.type === "own_reaction") {
+    return wrapModelContent([{
+      thoughtSignature: e.modelMetadata?.thoughtSignature,
+      text: `You reacted ${e.reaction} to message: ${
+        getRefText(e.onMessage).slice(0, 100)
+      }`,
+    }]);
+  }
+  if (e.type === "participant_reaction") {
+    return wrapUserContent([{
+      text: `${e.name} reacted ${e.reaction} to message: ${
+        getRefText(e.onMessage).slice(0, 100)
+      }`,
+    }]);
+  }
+  if (e.type === "do_nothing") {
+    return wrapModelContent([{
+      text: "",
+      thoughtSignature: e.modelMetadata?.thoughtSignature,
+    }]);
+  }
+  throw new Error(
+    `Unknown history event type: ${JSON.stringify(e, null, 2)}`,
+  );
+};
 
 const combineContent = (contents: Content[]): Content => ({
   role: contents.some((c) => c.role === "model") ? "model" : "user",
@@ -550,25 +548,27 @@ export const filterInvalidToolCalls = (
     return true;
   });
 
-const toolCallToOwnThought =
-  (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
-    type: "own_thought",
-    isOwn: true,
-    id: e.id,
-    timestamp: e.timestamp,
-    text:
-      `[Removed tool call "${"name" in e ? e.name : "unknown"}" due to missing thought signature. Parameters: ${JSON.stringify("parameters" in e ? e.parameters : {})}]`,
-  });
+const toolCallToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
+  type: "own_thought",
+  isOwn: true,
+  id: e.id,
+  timestamp: e.timestamp,
+  text: `[Removed tool call "${
+    "name" in e ? e.name : "unknown"
+  }" due to missing thought signature. Parameters: ${
+    JSON.stringify("parameters" in e ? e.parameters : {})
+  }]`,
+});
 
-const toolResultToOwnThought =
-  (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
-    type: "own_thought",
-    isOwn: true,
-    id: e.id,
-    timestamp: e.timestamp,
-    text:
-      `[Removed tool result for "${"name" in e ? e.name : "unknown"}": ${"result" in e ? e.result : ""}]`,
-  });
+const toolResultToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
+  type: "own_thought",
+  isOwn: true,
+  id: e.id,
+  timestamp: e.timestamp,
+  text: `[Removed tool result for "${"name" in e ? e.name : "unknown"}": ${
+    "result" in e ? e.result : ""
+  }]`,
+});
 
 const filterAndRewriteInvalidToolCalls =
   (rewriteHistory: AgentSpec["rewriteHistory"]) =>
@@ -639,9 +639,7 @@ const stripAttachmentsByMimeType = (
   const updatedHistory = map(
     (event: GeminiHistoryEvent): GeminiHistoryEvent => {
       if (!("attachments" in event) || !event.attachments) return event;
-      const kept = event.attachments.filter((att) =>
-        att.mimeType !== mimeType
-      );
+      const kept = event.attachments.filter((att) => att.mimeType !== mimeType);
       if (kept.length === event.attachments.length) return event;
       const placeholder = ` <unsupported file type removed: ${mimeType}>`;
       const updated = {

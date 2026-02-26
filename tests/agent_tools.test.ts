@@ -202,6 +202,7 @@ Deno.test(
       parameters: z.object({
         ms: z.number().describe("Milliseconds to wait"),
       }),
+      // deno-lint-ignore require-await
       handler: async (_params, toolCallId) => {
         capturedToolCallId = toolCallId;
       },
@@ -223,13 +224,20 @@ Deno.test(
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
-    assert(capturedToolCallId, "Deferred tool handler should have been called with a toolCallId");
     assert(
-      !mockHistory.some((e) => e.type === "tool_result" && e.name === "timeout-wakeup"),
+      capturedToolCallId,
+      "Deferred tool handler should have been called with a toolCallId",
+    );
+    assert(
+      !mockHistory.some((e) =>
+        e.type === "tool_result" && e.name === "timeout-wakeup"
+      ),
       "No tool_result should be emitted for deferred tools",
     );
     assert(
-      mockHistory.some((e) => e.type === "tool_call" && e.name === "timeout-wakeup"),
+      mockHistory.some((e) =>
+        e.type === "tool_call" && e.name === "timeout-wakeup"
+      ),
       "tool_call should be in history",
     );
   }),
