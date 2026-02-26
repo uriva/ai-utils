@@ -34,6 +34,13 @@ const mediaAttachmentSchema: z.ZodType<MediaAttachment> = z.union([
 
 export type ToolReturn = { result: string; attachments?: MediaAttachment[] };
 
+const maxToolOutputChars = 20_000;
+
+const truncateToolOutput = (s: string): string =>
+  s.length <= maxToolOutputChars
+    ? s
+    : s.slice(0, maxToolOutputChars) + "\n[...output truncated]";
+
 const toolReturnSchema: z.ZodType<string | ToolReturn> = z.union([
   z.string(),
   z.object({
@@ -247,11 +254,11 @@ const callToResult =
     }
     const validated = parsed.result;
     return typeof validated === "string"
-      ? { toolCallId, name, result: validated }
+      ? { toolCallId, name, result: truncateToolOutput(validated) }
       : {
         toolCallId,
         name,
-        result: validated.result,
+        result: truncateToolOutput(validated.result),
         attachments: validated.attachments,
       };
   };
