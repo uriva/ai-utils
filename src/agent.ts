@@ -49,19 +49,30 @@ const toolReturnSchema: z.ZodType<string | ToolReturn> = z.union([
   }),
 ]);
 
-export type Tool<T extends ZodType> = {
+type ToolBase<T extends ZodType> = {
   description: string;
   name: string;
   parameters: T;
+};
+
+export type RegularTool<T extends ZodType> = ToolBase<T> & {
+  isDeferred?: false;
   handler: (params: z.infer<T>) => Promise<string | ToolReturn>;
 };
+
+export type DeferredTool<T extends ZodType> = ToolBase<T> & {
+  isDeferred: true;
+  handler: (params: z.infer<T>, toolCallId: string) => Promise<void>;
+};
+
+export type Tool<T extends ZodType> = RegularTool<T> | DeferredTool<T>;
 
 export type Skill = {
   name: string;
   description: string;
   instructions: string;
   // deno-lint-ignore no-explicit-any
-  tools: Tool<any>[];
+  tools: RegularTool<any>[];
 };
 
 type SharedFields = { id: MessageId; timestamp: number; isOwn: boolean };
@@ -224,10 +235,10 @@ const parseWithCatch = <T extends ZodType>(
 
 const callToResult =
   // deno-lint-ignore no-explicit-any
-  (actions: Tool<any>[]) => async <T extends ZodType>(fc: FunctionCall) => {
+  (actions: RegularTool<any>[]) => async <T extends ZodType>(fc: FunctionCall) => {
     const { name, args, id } = fc;
     const toolCallId = id;
-    const action: Tool<T> | undefined = actions.find(({ name: n }) =>
+    const action: RegularTool<T> | undefined = actions.find(({ name: n }) =>
       n === name
     );
     if (!name) throw new Error("Function call name is missing");
@@ -334,7 +345,7 @@ const sharedFields = () => ({
   timestamp: timestampGeneration.access(),
 });
 
-const toolResultTurn = (
+export const toolResultTurn = (
   { name, result, attachments, toolCallId }: {
     name: string;
     result: string;
@@ -401,25 +412,40 @@ export const overrideIdGenerator = idGeneration.inject;
 export const generateId = idGeneration.access;
 
 // deno-lint-ignore no-explicit-any
+const isRegularTool = (t: Tool<any>): t is RegularTool<any> => !t.isDeferred;
+
+// deno-lint-ignore no-explicit-any
 const handleFunctionCalls = (tools: Tool<any>[]) =>
-  pipe(
+  async (output: HistoryEvent[]): Promise<boolean> => {
     // deno-lint-ignore no-explicit-any
-    filter((p: HistoryEvent): p is ToolUse<any> => p.type === "tool_call"),
-    // deno-lint-ignore no-explicit-any
-    map((t: ToolUse<any>): FunctionCall => ({
-      name: t.name,
-      args: t.parameters,
-      id: t.id,
-    })),
-    each(pipe(callToResult(tools), toolResultTurn, outputEvent)),
-  );
+    const toolCalls = filter((p: HistoryEvent): p is ToolUse<any> =>
+      p.type === "tool_call"
+    )(output);
+    const regularTools = tools.filter(isRegularTool);
+    let hadDeferred = false;
+    await each(async (t: ToolUse<Record<string, unknown>>) => {
+      const fc: FunctionCall = { name: t.name, args: t.parameters, id: t.id };
+      // deno-lint-ignore no-explicit-any
+      const action: Tool<any> | undefined = tools.find(({ name: n }) =>
+        n === fc.name
+      );
+      if (action?.isDeferred) {
+        const parseResult = parseWithCatch(action.parameters, fc.args);
+        if (parseResult.ok) await action.handler(parseResult.result, fc.id!);
+        hadDeferred = true;
+        return;
+      }
+      await pipe(callToResult(regularTools), toolResultTurn, outputEvent)(fc);
+    })(toolCalls);
+    return hadDeferred;
+  };
 
 export const runCommandToolName = "run_command";
 export const learnSkillToolName = "learn_skill";
 
 export const tool = <ParametersSchema extends z.ZodObject<z.ZodRawShape>>(
-  tool: Tool<ParametersSchema>,
-) => ({
+  tool: RegularTool<ParametersSchema>,
+): RegularTool<ParametersSchema> => ({
   ...tool,
   handler: (params: z.infer<ParametersSchema>): ReturnType<
     typeof tool.handler
@@ -535,7 +561,8 @@ export const runAbstractAgent = async (
       timeit(reportTimeElapsedMs, callModel),
       sideEffect(each(outputEvent)),
     )();
-    await handleFunctionCalls(allTools)(output);
+    const hadDeferred = await handleFunctionCalls(allTools)(output);
+    if (hadDeferred) return;
     const history = await getHistory();
     if (
       !(output.some((ev: HistoryEvent) => ev.type === "tool_call")) &&

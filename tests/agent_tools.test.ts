@@ -3,6 +3,7 @@ import { sleep } from "gamla";
 import { z } from "zod/v4";
 import { runAgent } from "../mod.ts";
 import {
+  type DeferredTool,
   type HistoryEvent,
   ownUtteranceTurn,
   participantUtteranceTurn,
@@ -187,5 +188,49 @@ llmTest(
       timezoneIANA: "UTC",
     });
     assertEquals(mockHistory[mockHistory.length - 1].type, "do_nothing");
+  }),
+);
+
+Deno.test(
+  "deferred tool handler is called with toolCallId and agent exits without emitting tool_result",
+  injectSecrets(async () => {
+    let capturedToolCallId: string | undefined;
+    const deferredTool: DeferredTool<z.ZodObject<{ ms: z.ZodNumber }>> = {
+      name: "timeout-wakeup",
+      description: "Set a timeout to wake up later",
+      isDeferred: true,
+      parameters: z.object({
+        ms: z.number().describe("Milliseconds to wait"),
+      }),
+      handler: async (_params, toolCallId) => {
+        capturedToolCallId = toolCallId;
+      },
+    };
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text:
+          "Please call the timeout-wakeup tool with ms=5000. Do not say anything else.",
+      }),
+    ];
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 5,
+      onMaxIterationsReached: () => {},
+      tools: [deferredTool],
+      prompt:
+        "You are an assistant. When asked, call the timeout-wakeup tool with the requested parameters.",
+      lightModel: true,
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+    assert(capturedToolCallId, "Deferred tool handler should have been called with a toolCallId");
+    assert(
+      !mockHistory.some((e) => e.type === "tool_result" && e.name === "timeout-wakeup"),
+      "No tool_result should be emitted for deferred tools",
+    );
+    assert(
+      mockHistory.some((e) => e.type === "tool_call" && e.name === "timeout-wakeup"),
+      "tool_call should be in history",
+    );
   }),
 );
