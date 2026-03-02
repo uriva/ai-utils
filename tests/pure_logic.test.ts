@@ -3,7 +3,11 @@ import { z } from "zod/v4";
 import { tool } from "../mod.ts";
 import {
   createSkillTools,
+  type HistoryEvent,
+  injectAccessHistory,
+  injectOutputEvent,
   learnSkillToolName,
+  runAbstractAgent,
   runCommandToolName,
 } from "../src/agent.ts";
 import { filterOrphanedToolResults } from "../src/geminiAgent.ts";
@@ -159,5 +163,63 @@ Deno.test(
     assert(Array.isArray(parsed.tools), "Should have tools array");
     assertEquals(parsed.tools.length, 1);
     assertEquals(parsed.tools[0].name, "get_forecast");
+  },
+);
+
+Deno.test(
+  "direct skillName/toolName call is routed through run_command",
+  async () => {
+    let handlerCalledWith = "";
+    const history: HistoryEvent[] = [];
+
+    const testSkillTool = tool({
+      name: "get_info",
+      description: "Get info",
+      parameters: z.object({ query: z.string() }),
+      handler: ({ query }) => {
+        handlerCalledWith = query;
+        return Promise.resolve(`info for ${query}`);
+      },
+    });
+
+    const mockCallModel = (_h: HistoryEvent[]): Promise<HistoryEvent[]> =>
+      Promise.resolve([{
+        type: "tool_call" as const,
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        isOwn: true,
+        name: "my_skill/get_info",
+        parameters: { query: "test" },
+        modelMetadata: undefined,
+      }]);
+
+    await injectAccessHistory(() => Promise.resolve(history))(
+      injectOutputEvent((event) => {
+        history.push(event);
+        return Promise.resolve();
+      })(runAbstractAgent),
+    )(
+      {
+        maxIterations: 2,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        skills: [{
+          name: "my_skill",
+          description: "A skill",
+          instructions: "Use it",
+          tools: [testSkillTool],
+        }],
+        prompt: "test",
+        rewriteHistory: async () => {},
+        timezoneIANA: "UTC",
+      },
+      mockCallModel,
+    );
+
+    assertEquals(handlerCalledWith, "test");
+    const toolResult = history.find((e) =>
+      e.type === "tool_result" && e.result === "info for test"
+    );
+    assert(toolResult, "Should have tool result with correct output");
   },
 );
