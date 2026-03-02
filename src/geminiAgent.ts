@@ -165,10 +165,7 @@ const rawCallGemini = (
           }
           return [];
         })
-    ).catch((err) => {
-      geminiError.access(err, req);
-      throw err;
-    });
+    );
 
 const callGeminiWithRetry = conditionalRetry(isServerError)(
   1000,
@@ -183,6 +180,9 @@ const callGemini = (req: GenerateContentParameters): Promise<GeminiOutput> =>
       ...req,
       model: alternateModel(req.model),
     });
+  }).catch((err) => {
+    geminiError.access(err, req);
+    throw err;
   });
 
 const actionToTool = ({ name, description, parameters }: Tool<ZodType>) => ({
