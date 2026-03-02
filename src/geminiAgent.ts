@@ -800,21 +800,6 @@ const stripAllExpiredFiles = async (
   return callGemini(eventsToRequest(currentEvents));
 };
 
-const tryDropOldestHalf = (
-  label: string,
-  events: GeminiHistoryEvent[],
-  eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
-  err: Error,
-) => {
-  const totalTokens = sum(map(estimateTokens)(events));
-  console.warn(
-    `${label} (estimated ${totalTokens} tokens, ${events.length} events). Dropping oldest half.`,
-  );
-  const truncated = dropOldestHalf(events);
-  if (truncated.length === events.length) throw err;
-  return callGemini(eventsToRequest(truncated));
-};
-
 const callGeminiWithFixHistory = (
   rewriteHistory: AgentSpec["rewriteHistory"],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
@@ -825,12 +810,13 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
     if (isTokenLimitExceeded(err)) {
-      return tryDropOldestHalf(
-        "Token limit exceeded",
-        events,
-        eventsToRequest,
-        err,
+      const totalTokens = sum(map(estimateTokens)(events));
+      console.warn(
+        `Token limit exceeded (estimated ${totalTokens} tokens, ${events.length} events). Dropping oldest half.`,
       );
+      const truncated = dropOldestHalf(events);
+      if (truncated.length === events.length) throw err;
+      return callGemini(eventsToRequest(truncated));
     }
     if (isFileNotActiveError(err)) {
       return stripAllNotActiveFiles(events, eventsToRequest);
@@ -843,18 +829,8 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
         rewriteHistory,
       );
     }
-    if (is403PermissionError(err)) {
-      return stripAllExpiredFiles(err, events, eventsToRequest, rewriteHistory);
-    }
-    if (isServerError(err)) {
-      return tryDropOldestHalf(
-        "Server error after retries, treating as potential context-too-long",
-        events,
-        eventsToRequest,
-        err,
-      );
-    }
-    throw err;
+    if (!is403PermissionError(err)) throw err;
+    return stripAllExpiredFiles(err, events, eventsToRequest, rewriteHistory);
   }
 };
 
