@@ -238,15 +238,25 @@ const callToResult =
   async <T extends ZodType>(fc: FunctionCall) => {
     const { name, args, id } = fc;
     const toolCallId = id;
-    const action: RegularTool<T> | undefined = actions.find(({ name: n }) =>
-      n === name
-    );
     if (!name) throw new Error("Function call name is missing");
+    const directMatch: RegularTool<T> | undefined = actions.find((
+      { name: n },
+    ) => n === name);
+    const [action, effectiveArgs] = directMatch
+      ? [directMatch, args]
+      : name.includes("/")
+      ? [
+        actions.find(({ name: n }) => n === runCommandToolName) as
+          | RegularTool<T>
+          | undefined,
+        { command: name, params: args },
+      ]
+      : [undefined, args];
     if (!action) {
       return { toolCallId, name, result: `Function ${name} not found` };
     }
     const { handler, parameters } = action;
-    const parseResult = parseWithCatch(parameters, args);
+    const parseResult = parseWithCatch(parameters, effectiveArgs);
     if (!parseResult.ok) {
       return {
         toolCallId,
