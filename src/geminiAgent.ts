@@ -231,7 +231,7 @@ const historyEventToContent = (
 (e: GeminiHistoryEvent): Content => {
   const getRefText = referencedMessageText(eventById);
   const stampText = (text: string) =>
-    `[${formatTimestamp(e.timestamp, timezoneIANA)}] ${text}`;
+    `${text} — sent ${formatTimestamp(e.timestamp, timezoneIANA)}`;
   if (
     e.type === "participant_utterance" ||
     e.type === "participant_edit_message"
