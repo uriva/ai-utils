@@ -3,6 +3,7 @@ import {
   type FunctionDeclaration,
   type GenerateContentParameters,
   GoogleGenAI,
+  type Part,
 } from "@google/genai";
 import { context, type Injection, type Injector } from "@uri/inject";
 import { coerce, empty, map, pipe, remove, sleep } from "gamla";
@@ -120,6 +121,35 @@ export const geminiGenJson =
       structuredMsgs(systemMsg, userMsg),
       zodType,
     );
+
+export const attachmentsToParts = (
+  attachments: MediaAttachment[],
+): Part[] =>
+  attachments.flatMap((a): Part[] => {
+    const mediaPart: Part = a.kind === "inline"
+      ? { inlineData: { data: a.dataBase64, mimeType: a.mimeType } }
+      : { fileData: { fileUri: a.fileUri, mimeType: a.mimeType } };
+    const parts: Part[] = [mediaPart];
+    if (a.caption?.trim()) parts.push({ text: a.caption });
+    return parts;
+  });
+
+export const geminiGenText = async (
+  { mini }: ModelOpts,
+  prompt: string,
+  attachments: MediaAttachment[],
+): Promise<string> => {
+  const result = await new GoogleGenAI({
+    apiKey: tokenInjection.access(),
+  }).models.generateContent({
+    model: mini ? geminiFlashVersion : geminiProVersion,
+    contents: [{
+      role: "user",
+      parts: [...attachmentsToParts(attachments), { text: prompt }],
+    }],
+  });
+  return result.text ?? "";
+};
 
 type UploadResult = { geminiUri: string; mimeType: string };
 

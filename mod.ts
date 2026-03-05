@@ -8,6 +8,7 @@ export {
   ensureGeminiAttachmentIsLink,
   geminiGenJson,
   geminiGenJsonFromConvo,
+  geminiGenText,
   injectGeminiToken,
 } from "./src/gemini.ts";
 export { injectGeminiErrorLogger } from "./src/geminiAgent.ts";

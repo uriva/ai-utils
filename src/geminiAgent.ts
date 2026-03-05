@@ -38,6 +38,7 @@ import {
 } from "./agent.ts";
 import {
   accessGeminiToken,
+  attachmentsToParts,
   geminiFlashImageVersion,
   geminiFlashVersion,
   geminiProImageVersion,
@@ -205,17 +206,8 @@ const formatTimestamp = (ts: number, timezoneIANA: string): string =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const attachmentsToParts = (attachments?: MediaAttachment[]): Part[] =>
-  (attachments ?? []).flatMap((a): Part[] => {
-    const mediaPart: Part = a.kind === "inline"
-      ? { inlineData: { data: a.dataBase64, mimeType: a.mimeType } }
-      : { fileData: { fileUri: a.fileUri, mimeType: a.mimeType } };
-    const parts: Part[] = [mediaPart];
-    if (a.caption && a.caption.trim()) {
-      parts.push({ text: a.caption });
-    }
-    return parts;
-  });
+const attachmentsToPartsOrEmpty = (attachments?: MediaAttachment[]): Part[] =>
+  attachmentsToParts(attachments ?? []);
 
 const referencedMessageText =
   (eventById: (id: string) => GeminiHistoryEvent | undefined) =>
@@ -249,7 +241,7 @@ const historyEventToContent = (
           text: stampText(text),
         }
         : undefined,
-      ...attachmentsToParts(e.attachments),
+      ...attachmentsToPartsOrEmpty(e.attachments),
     ].filter((x): x is Part => !!x));
   }
   if (e.type === "own_utterance" || e.type === "own_edit_message") {
@@ -294,7 +286,7 @@ const historyEventToContent = (
           },
         },
       },
-      ...attachmentsToParts(e.attachments),
+      ...attachmentsToPartsOrEmpty(e.attachments),
     ];
     return wrapUserContent(parts);
   }
