@@ -41,6 +41,7 @@ const runAgentInner = (spec: AgentSpec): Promise<void> =>
     // @ts-expect-error the caller has gemini metadata
     : runAbstractAgent(spec, geminiAgentCaller(spec));
 
+export { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
 export const runAgent = (spec: AgentSpec): Promise<void> =>
   spec.onOutputEvent
     ? injectOutputEvent(spec.onOutputEvent)(() => runAgentInner(spec))()
