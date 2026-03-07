@@ -210,6 +210,7 @@ const modelOutput: Injection<(event: HistoryEvent) => Promise<void>> = context(
 
 const outputEvent = modelOutput.access;
 export const injectOutputEvent = modelOutput.inject;
+export const accessOutputEvent = modelOutput.access;
 
 const historyInjection: Injection<() => Promise<HistoryEvent[]>> = context(
   (): Promise<HistoryEvent[]> => {
@@ -219,6 +220,7 @@ const historyInjection: Injection<() => Promise<HistoryEvent[]>> = context(
 
 const getHistory = historyInjection.access;
 export const injectAccessHistory = historyInjection.inject;
+export const accessHistory = historyInjection.access;
 
 const parseWithCatch = <T extends ZodType>(
   parameters: T,
@@ -540,6 +542,7 @@ export type AgentSpec = {
   tools: Tool<any>[];
   skills?: Skill[];
   prompt: string;
+  onOutputEvent?: (event: HistoryEvent) => Promise<void>;
   maxIterations: number;
   // deno-lint-ignore no-explicit-any
   onMaxIterationsReached: () => any;
@@ -549,6 +552,12 @@ export type AgentSpec = {
   rewriteHistory: (replacements: Record<string, HistoryEvent>) => Promise<void>;
   timezoneIANA: string;
   maxOutputTokens?: number;
+  transport?: {
+    kind: "audio";
+    endpoint: import("./duplex.ts").DuplexEndpoint;
+    voiceName: string;
+    participantName: string;
+  };
 };
 
 export const runAbstractAgent = async (

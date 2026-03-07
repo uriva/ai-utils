@@ -13,7 +13,8 @@
   },
   "tasks": {
     "check": "deno fmt --check && deno lint && deno check *.ts src/**/*.ts tests/**/*.ts",
-    "test": "deno test --allow-env --allow-net --allow-read --env=.env --parallel tests/"
+    "test": "deno test --allow-env --allow-net --allow-read --env=.env --parallel tests/",
+    "talk-to-bob": "deno run --allow-env --allow-run --allow-read --allow-write --allow-net --env=.env scripts/talk_to_bob.ts"
   },
   "githooks": {
     "$schema": "https://deno.land/x/githooks/schema.json",

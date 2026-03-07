@@ -1,0 +1,374 @@
+import { zodToGeminiParameters } from "./gemini.ts";
+import type { Tool } from "./agent.ts";
+
+export type LiveAudioChunk = {
+  mimeType: string;
+  dataBase64: string;
+};
+
+export type AudioSessionEvent =
+  | { type: "input_transcript"; text: string; finished: boolean }
+  | { type: "output_transcript"; text: string; finished: boolean }
+  | { type: "audio"; chunk: LiveAudioChunk }
+  | {
+    type: "tool_call";
+    id: string;
+    name: string;
+    args: Record<string, unknown>;
+  }
+  | { type: "turn_complete" }
+  | { type: "interrupted" };
+
+export type AudioSessionDebugEvent = {
+  type: "debug";
+  message: string;
+};
+
+export type AudioSessionConfig = {
+  apiKey: string;
+  prompt: string;
+  voiceName: string;
+  model?: string;
+  turnTimeoutMs?: number;
+  // deno-lint-ignore no-explicit-any
+  tools?: Tool<any>[];
+  onDebug?: (event: AudioSessionDebugEvent) => void;
+};
+
+type LiveFunctionDeclaration = {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+};
+
+type PendingTurn = {
+  resolve: (events: AudioSessionEvent[]) => void;
+  reject: (error: Error) => void;
+  timeout: number;
+};
+
+const defaultModel = "models/gemini-2.5-flash-native-audio-preview-12-2025";
+const defaultTurnTimeoutMs = 45_000;
+
+const decodeWsData = async (data: string | Blob): Promise<string> =>
+  data instanceof Blob ? await data.text() : data;
+
+const mergeTranscript = (current: string, incoming: string) => {
+  if (!incoming) return current;
+  if (!current) return incoming;
+  if (incoming.startsWith(current)) return incoming;
+  if (current.startsWith(incoming)) return current;
+  if (current.includes(incoming)) return current;
+  return `${current}${incoming}`;
+};
+
+const toolsToDeclarations = (
+  // deno-lint-ignore no-explicit-any
+  tools: Tool<any>[] | undefined,
+): Array<{ functionDeclarations: LiveFunctionDeclaration[] }> =>
+  !tools || tools.length === 0 ? [] : [{
+    functionDeclarations: tools.map((
+      { name, description, parameters },
+    ): LiveFunctionDeclaration => ({
+      name,
+      description,
+      parameters: zodToGeminiParameters(parameters) as unknown as Record<
+        string,
+        unknown
+      >,
+    })),
+  }];
+
+const consumeTranscriptEvent = (
+  events: AudioSessionEvent[],
+  type: "input_transcript" | "output_transcript",
+  text: string,
+  finished: boolean,
+) => {
+  const existing = [...events].reverse().find((event) => event.type === type);
+  if (!existing || existing.type !== type) {
+    events.push({ type, text, finished });
+    return;
+  }
+  existing.text = mergeTranscript(existing.text, text);
+  existing.finished = finished;
+};
+
+export type AudioSession = {
+  sendText: (text: string) => Promise<AudioSessionEvent[]>;
+  sendAudio: (chunk: LiveAudioChunk) => Promise<AudioSessionEvent[]>;
+  sendAudioChunks: (chunks: LiveAudioChunk[]) => Promise<AudioSessionEvent[]>;
+  continueTurn: () => Promise<AudioSessionEvent[]>;
+  respondToToolCall: (params: {
+    id: string;
+    name: string;
+    response: Record<string, unknown>;
+  }) => void;
+  close: () => Promise<void>;
+};
+
+export const createAudioSession = async ({
+  apiKey,
+  prompt,
+  voiceName,
+  model = defaultModel,
+  turnTimeoutMs = defaultTurnTimeoutMs,
+  tools,
+  onDebug,
+}: AudioSessionConfig): Promise<AudioSession> => {
+  const ws = new WebSocket(
+    `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`,
+  );
+  let pendingTurn: PendingTurn | undefined;
+  let activeTurn = false;
+  let bufferedEvents: AudioSessionEvent[] = [];
+  const debug = (message: string) => {
+    console.log(message);
+    onDebug?.({ type: "debug", message });
+  };
+
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("Gemini Live setup timed out"));
+    }, turnTimeoutMs);
+    ws.onopen = () => {
+      debug("websocket open");
+      ws.send(JSON.stringify({
+        setup: {
+          model,
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName },
+              },
+            },
+          },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
+          systemInstruction: {
+            parts: [{ text: prompt }],
+          },
+          tools: toolsToDeclarations(tools),
+        },
+      }));
+    };
+    ws.onerror = (error) => {
+      console.error("ws error", error);
+      clearTimeout(timeout);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+    ws.onclose = (e) => {
+      console.error(`close: code=${e.code} reason=${e.reason}`);
+      debug(`close: code=${e.code} reason=${e.reason}`);
+      clearTimeout(timeout);
+      reject(new Error("Gemini Live closed before setupComplete"));
+    };
+    ws.onmessage = async (event) => {
+      const msg = JSON.parse(await decodeWsData(event.data));
+      if (msg.error) {
+        console.error("msg.error", msg.error);
+        debug(`setup error: ${JSON.stringify(msg.error)}`);
+        clearTimeout(timeout);
+        reject(new Error(JSON.stringify(msg.error)));
+        return;
+      }
+      if (msg.setupComplete) {
+        debug("setup complete");
+        clearTimeout(timeout);
+        resolve();
+      }
+    };
+  });
+
+  const flushEvents = () => {
+    if (!pendingTurn || bufferedEvents.length === 0) return;
+    clearTimeout(pendingTurn.timeout);
+    const events = bufferedEvents;
+    bufferedEvents = [];
+    pendingTurn.resolve(events);
+    pendingTurn = undefined;
+  };
+
+  const rejectPendingTurn = (error: Error) => {
+    if (!pendingTurn) return;
+    clearTimeout(pendingTurn.timeout);
+    pendingTurn.reject(error);
+    pendingTurn = undefined;
+  };
+
+  ws.onmessage = async (event) => {
+    const msg = JSON.parse(await decodeWsData(event.data));
+    if (msg.error) {
+      console.error("msg.error", msg.error);
+      debug(`message error: ${JSON.stringify(msg.error)}`);
+      rejectPendingTurn(new Error(JSON.stringify(msg.error)));
+      activeTurn = false;
+      bufferedEvents = [];
+      return;
+    }
+    if (!activeTurn) return;
+    const content = msg.serverContent;
+    if (content?.inputTranscription?.text) {
+      debug(`input transcription: ${content.inputTranscription.text}`);
+      consumeTranscriptEvent(
+        bufferedEvents,
+        "input_transcript",
+        content.inputTranscription.text,
+        !!content.inputTranscription.finished,
+      );
+    }
+    if (content?.outputTranscription?.text) {
+      debug(`output transcription: ${content.outputTranscription.text}`);
+      consumeTranscriptEvent(
+        bufferedEvents,
+        "output_transcript",
+        content.outputTranscription.text,
+        !!content.outputTranscription.finished,
+      );
+    }
+    const parts = content?.modelTurn?.parts ?? [];
+    for (const part of parts) {
+      if (part.inlineData?.data) {
+        debug(
+          `audio chunk from model: ${part.inlineData.mimeType ?? "audio/pcm"}`,
+        );
+        bufferedEvents.push({
+          type: "audio",
+          chunk: {
+            mimeType: part.inlineData.mimeType ?? "audio/pcm;rate=24000",
+            dataBase64: part.inlineData.data,
+          },
+        });
+      }
+      if (part.text) {
+        consumeTranscriptEvent(
+          bufferedEvents,
+          "output_transcript",
+          part.text,
+          false,
+        );
+      }
+    }
+    const functionCalls = msg.toolCall?.functionCalls ?? [];
+    for (const functionCall of functionCalls) {
+      if (!functionCall.id || !functionCall.name) continue;
+      debug(`tool call: ${functionCall.name}`);
+      bufferedEvents.push({
+        type: "tool_call",
+        id: functionCall.id,
+        name: functionCall.name,
+        args: functionCall.args ?? {},
+      });
+    }
+    if (functionCalls.length > 0) {
+      flushEvents();
+      return;
+    }
+    if (content?.interrupted) {
+      debug("turn interrupted");
+      bufferedEvents.push({ type: "interrupted" });
+      flushEvents();
+      return;
+    }
+    if (content?.turnComplete) {
+      debug("turn complete");
+      activeTurn = false;
+      bufferedEvents.push({ type: "turn_complete" });
+      flushEvents();
+    }
+  };
+
+  const waitForEvents = () => {
+    if (
+      ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING
+    ) {
+      return Promise.reject(new Error("WebSocket is closed"));
+    }
+    return new Promise<AudioSessionEvent[]>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        debug("turn timed out");
+        reject(new Error("Gemini Live turn timed out"));
+      }, turnTimeoutMs);
+      pendingTurn = { resolve, reject, timeout };
+      flushEvents();
+    });
+  };
+
+  return {
+    sendText: async (text: string) => {
+      debug(`sendText: ${text}`);
+      activeTurn = true;
+      const wait = waitForEvents();
+      ws.send(JSON.stringify({
+        clientContent: {
+          turns: [{ role: "user", parts: [{ text }] }],
+          turnComplete: true,
+        },
+      }));
+      return await wait;
+    },
+    sendAudio: async ({ mimeType, dataBase64 }: LiveAudioChunk) => {
+      debug(`sendAudio: ${mimeType} bytes=${dataBase64.length}`);
+      activeTurn = true;
+      const wait = waitForEvents();
+      ws.send(JSON.stringify({
+        realtimeInput: {
+          mediaChunks: [{ mimeType, data: dataBase64 }],
+        },
+      }));
+      return await wait;
+    },
+    sendAudioChunks: async (chunks: LiveAudioChunk[]) => {
+      debug(
+        `sendAudioChunks: count=${chunks.length} firstMime=${
+          chunks[0]?.mimeType ?? "none"
+        }`,
+      );
+      activeTurn = true;
+      const wait = waitForEvents();
+      for (const chunk of chunks) {
+        ws.send(JSON.stringify({
+          realtimeInput: {
+            mediaChunks: [{ mimeType: chunk.mimeType, data: chunk.dataBase64 }],
+          },
+        }));
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      }
+      ws.send(JSON.stringify({
+        clientContent: {
+          turns: [{ role: "user", parts: [] }],
+          turnComplete: true,
+        },
+      }));
+      return await wait;
+    },
+    continueTurn: async () => {
+      if (!activeTurn) return [];
+      return await waitForEvents();
+    },
+    respondToToolCall: ({ id, name, response }: {
+      id: string;
+      name: string;
+      response: Record<string, unknown>;
+    }) => {
+      ws.send(JSON.stringify({
+        toolResponse: {
+          functionResponses: [{ id, name, response }],
+        },
+      }));
+    },
+    close: async () => {
+      if (ws.readyState === WebSocket.CLOSED) return;
+      if (pendingTurn) {
+        clearTimeout(pendingTurn.timeout);
+        pendingTurn.resolve(bufferedEvents);
+        pendingTurn = undefined;
+      }
+      await new Promise<void>((resolve) => {
+        ws.onclose = () => resolve();
+        ws.close();
+      });
+    },
+  };
+};
