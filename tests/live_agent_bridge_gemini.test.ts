@@ -7,9 +7,10 @@ import {
 } from "../src/audioArtifacts.ts";
 import { injectSecrets } from "../test_helpers.ts";
 
-Deno.test(
-  "two Gemini Live bots exchange and store a code over audio",
-  injectSecrets(async () => {
+Deno.test({
+  name: "two Gemini Live bots exchange and store a code over audio",
+  ignore: !Deno.env.get("GEMINI_API_KEY"),
+  fn: injectSecrets(async () => {
     const fetchedCode = "ALPHA TANGO";
     const storedCodes: string[] = [];
 
@@ -171,4 +172,4 @@ Deno.test(
     assertEquals(storedCodes.at(-1)?.toUpperCase(), fetchedCode);
     assert(hangups.size === 2 || Date.now() >= deadline);
   }),
-);
+});

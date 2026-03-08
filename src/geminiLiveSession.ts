@@ -180,8 +180,11 @@ export const createAudioSession = async ({
       reject(new Error("Gemini Live closed before setupComplete"));
     };
     ws.onmessage = async (event) => {
-      console.log("[geminiLive] Received message from Gemini");
       const msg = JSON.parse(await decodeWsData(event.data));
+      console.log(
+        "[geminiLive] Received WS setup message from model:",
+        JSON.stringify(msg).substring(0, 500),
+      );
       if (msg.error) {
         console.error("msg.error", msg.error);
         debug(`setup error: ${JSON.stringify(msg.error)}`);
@@ -215,6 +218,10 @@ export const createAudioSession = async ({
 
   ws.onmessage = async (event) => {
     const msg = JSON.parse(await decodeWsData(event.data));
+    console.log(
+      "[geminiLive] Received WS message from model:",
+      JSON.stringify(msg).substring(0, 500),
+    );
     if (msg.error) {
       console.error("msg.error", msg.error);
       debug(`message error: ${JSON.stringify(msg.error)}`);
