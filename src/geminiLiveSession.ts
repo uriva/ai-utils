@@ -33,6 +33,7 @@ export type AudioSessionConfig = {
   // deno-lint-ignore no-explicit-any
   tools?: Tool<any>[];
   onDebug?: (event: AudioSessionDebugEvent) => void;
+  onSessionEvent?: (event: AudioSessionEvent) => void;
 };
 
 type LiveFunctionDeclaration = {
@@ -84,20 +85,25 @@ const consumeTranscriptEvent = (
   type: "input_transcript" | "output_transcript",
   text: string,
   finished: boolean,
+  onSessionEvent?: (event: AudioSessionEvent) => void,
 ) => {
   const existing = [...events].reverse().find((event) => event.type === type);
   if (!existing || existing.type !== type) {
-    events.push({ type, text, finished });
+    const event: AudioSessionEvent = { type, text, finished };
+    events.push(event);
+    onSessionEvent?.(event);
     return;
   }
   existing.text = mergeTranscript(existing.text, text);
   existing.finished = finished;
+  onSessionEvent?.({ type, text: existing.text, finished });
 };
 
 export type AudioSession = {
   sendText: (text: string) => Promise<AudioSessionEvent[]>;
   sendAudio: (chunk: LiveAudioChunk) => Promise<AudioSessionEvent[]>;
   sendAudioChunks: (chunks: LiveAudioChunk[]) => Promise<AudioSessionEvent[]>;
+  streamAudioChunks: (chunks: LiveAudioChunk[]) => void;
   continueTurn: () => Promise<AudioSessionEvent[]>;
   respondToToolCall: (params: {
     id: string;
@@ -115,6 +121,7 @@ export const createAudioSession = async ({
   turnTimeoutMs = defaultTurnTimeoutMs,
   tools,
   onDebug,
+  onSessionEvent,
 }: AudioSessionConfig): Promise<AudioSession> => {
   const ws = new WebSocket(
     `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`,
@@ -125,6 +132,11 @@ export const createAudioSession = async ({
   const debug = (message: string) => {
     console.log(message);
     onDebug?.({ type: "debug", message });
+  };
+
+  const addEvent = (event: AudioSessionEvent) => {
+    bufferedEvents.push(event);
+    onSessionEvent?.(event);
   };
 
   await new Promise<void>((resolve, reject) => {
@@ -207,7 +219,6 @@ export const createAudioSession = async ({
       bufferedEvents = [];
       return;
     }
-    if (!activeTurn) return;
     const content = msg.serverContent;
     if (content?.inputTranscription?.text) {
       debug(`input transcription: ${content.inputTranscription.text}`);
@@ -216,6 +227,7 @@ export const createAudioSession = async ({
         "input_transcript",
         content.inputTranscription.text,
         !!content.inputTranscription.finished,
+        onSessionEvent,
       );
     }
     if (content?.outputTranscription?.text) {
@@ -225,6 +237,7 @@ export const createAudioSession = async ({
         "output_transcript",
         content.outputTranscription.text,
         !!content.outputTranscription.finished,
+        onSessionEvent,
       );
     }
     const parts = content?.modelTurn?.parts ?? [];
@@ -233,7 +246,7 @@ export const createAudioSession = async ({
         debug(
           `audio chunk from model: ${part.inlineData.mimeType ?? "audio/pcm"}`,
         );
-        bufferedEvents.push({
+        addEvent({
           type: "audio",
           chunk: {
             mimeType: part.inlineData.mimeType ?? "audio/pcm;rate=24000",
@@ -247,6 +260,7 @@ export const createAudioSession = async ({
           "output_transcript",
           part.text,
           false,
+          onSessionEvent,
         );
       }
     }
@@ -254,7 +268,7 @@ export const createAudioSession = async ({
     for (const functionCall of functionCalls) {
       if (!functionCall.id || !functionCall.name) continue;
       debug(`tool call: ${functionCall.name}`);
-      bufferedEvents.push({
+      addEvent({
         type: "tool_call",
         id: functionCall.id,
         name: functionCall.name,
@@ -267,14 +281,14 @@ export const createAudioSession = async ({
     }
     if (content?.interrupted) {
       debug("turn interrupted");
-      bufferedEvents.push({ type: "interrupted" });
+      addEvent({ type: "interrupted" });
       flushEvents();
       return;
     }
     if (content?.turnComplete) {
       debug("turn complete");
       activeTurn = false;
-      bufferedEvents.push({ type: "turn_complete" });
+      addEvent({ type: "turn_complete" });
       flushEvents();
     }
   };
@@ -286,6 +300,10 @@ export const createAudioSession = async ({
       return Promise.reject(new Error("WebSocket is closed"));
     }
     return new Promise<AudioSessionEvent[]>((resolve, reject) => {
+      if (pendingTurn) {
+        clearTimeout(pendingTurn.timeout);
+        pendingTurn.reject(new Error("Overwritten by new turn"));
+      }
       const timeout = setTimeout(() => {
         debug("turn timed out");
         reject(new Error("Gemini Live turn timed out"));
@@ -342,6 +360,16 @@ export const createAudioSession = async ({
         },
       }));
       return await wait;
+    },
+    streamAudioChunks: (chunks: LiveAudioChunk[]) => {
+      activeTurn = true;
+      for (const chunk of chunks) {
+        ws.send(JSON.stringify({
+          realtimeInput: {
+            mediaChunks: [{ mimeType: chunk.mimeType, data: chunk.dataBase64 }],
+          },
+        }));
+      }
     },
     continueTurn: async () => {
       if (!activeTurn) return [];

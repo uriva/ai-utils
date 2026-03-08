@@ -190,8 +190,6 @@ const resolveToolCalls = async (
   outputEvent: (event: HistoryEvent) => Promise<void>,
   session: Awaited<ReturnType<typeof createAudioSession>>,
   tools: ReturnType<typeof regularTools>,
-  from: string,
-  endpoint: DuplexEndpoint,
   sessionOutput: AudioSessionEvent[],
 ) => {
   for (const event of sessionOutput) {
@@ -213,21 +211,6 @@ const resolveToolCalls = async (
       name: event.name,
       response: { result: rendered.result },
     });
-    const continuation = await session.continueTurn();
-    await emitModelEvents(outputEvent, "participant", continuation);
-    await Promise.all(
-      sessionOutputToMessages(from, continuation).map(endpoint.sendData),
-    );
-    if (continuation.some((next) => next.type === "tool_call")) {
-      await resolveToolCalls(
-        outputEvent,
-        session,
-        tools,
-        from,
-        endpoint,
-        continuation,
-      );
-    }
   }
 };
 
@@ -235,17 +218,7 @@ const sessionOutputToMessages = (
   from: string,
   sessionOutput: AudioSessionEvent[],
 ): DuplexMessage[] => {
-  const audioChunks = sessionOutput.filter((
-    event,
-  ): event is Extract<AudioSessionEvent, { type: "audio" }> =>
-    event.type === "audio"
-  ).map((event) => ({
-    mimeType: event.chunk.mimeType,
-    dataBase64: event.chunk.dataBase64,
-  }));
-  if (!empty(audioChunks)) {
-    return [{ type: "audio" as const, chunks: audioChunks, from }];
-  }
+  // We no longer send audio here because audio is streamed instantly via onSessionEvent.
   const textMessages = sessionOutput.filter((
     event,
   ): event is Extract<AudioSessionEvent, { type: "output_transcript" }> =>
@@ -271,6 +244,10 @@ export const runAudioAgentLoop = async (
     throw new Error("audio transport required");
   }
   const transport = spec.transport;
+  let isClosed = false;
+
+  let turnEvents: AudioSessionEvent[] = [];
+
   const session = await createAudioSession({
     apiKey: accessGeminiToken(),
     prompt: spec.prompt,
@@ -281,13 +258,70 @@ export const runAudioAgentLoop = async (
         ownThoughtTurn(`audio-debug ${transport.participantName}: ${message}`),
       );
     },
+    onSessionEvent: (event) => {
+      if (event.type === "audio") {
+        void endpoint.sendData({
+          type: "audio",
+          chunks: [
+            {
+              mimeType: event.chunk.mimeType,
+              dataBase64: event.chunk.dataBase64,
+            },
+          ],
+          from: transport.participantName,
+        });
+      }
+      turnEvents.push(event);
+      if (
+        event.type === "turn_complete" ||
+        event.type === "interrupted" ||
+        event.type === "tool_call"
+      ) {
+        const sessionOutput = turnEvents;
+        turnEvents = [];
+        void processTurnOutput(sessionOutput);
+      }
+    },
   });
   const tools = regularTools(spec.tools);
-  let isClosed = false;
+
+  const processTurnOutput = async (sessionOutput: AudioSessionEvent[]) => {
+    // We already sent audio instantly via onSessionEvent, so filter it out here
+    // for emitModelEvents to avoid duplicate logs, or just let emitModelEvents
+    // log it (emitModelEvents currently handles transcript and tool_call logging).
+    // Actually emitModelEvents builds attachments from audio.
+    const heard = transcriptOf(sessionOutput, "input_transcript");
+    if (heard.length > 0) {
+      await outputEvent(participantEditMessageTurn({
+        name: transport.participantName,
+        text: heard,
+        onMessage: crypto.randomUUID(),
+      }));
+    }
+
+    // For emitModelEvents, we still pass the output to get text / tool_calls / audio logged
+    await emitModelEvents(
+      outputEvent,
+      transport.participantName,
+      sessionOutput,
+    );
+    await resolveToolCalls(
+      outputEvent,
+      session,
+      tools,
+      sessionOutput,
+    );
+
+    const outgoingMessages = sessionOutputToMessages(
+      transport.participantName,
+      sessionOutput,
+    );
+    await Promise.all(outgoingMessages.map(endpoint.sendData));
+  };
+
   await new Promise<void>((resolve) => {
     endpoint.onData(async (message) => {
       if (isClosed) return;
-      console.log(`${transport.participantName} endpoint got ${message.type}`);
       if (message.type === "close") {
         isClosed = true;
         await session.close();
@@ -295,75 +329,16 @@ export const runAudioAgentLoop = async (
         return;
       }
       try {
-        console.log(`${transport.participantName} sending to Gemini Live`);
-        const sessionOutput = message.type === "text"
-          ? await session.sendText(message.text)
-          : await session.sendAudioChunks(
+        if (message.type === "text") {
+          // sendText resolves with the output, but we already process it via onSessionEvent
+          // so we just catch errors if any
+          session.sendText(message.text).catch((error) => {
+            console.log(`Error sending text: ${error}`);
+          });
+        } else if (message.type === "audio") {
+          session.streamAudioChunks(
             normalizeAudioChunksForInput(message.chunks),
           );
-        console.log(
-          `${transport.participantName} got ${sessionOutput.length} events from Gemini Live`,
-        );
-        if (message.type === "audio") {
-          const heard = transcriptOf(sessionOutput, "input_transcript");
-          if (heard.length > 0) {
-            await outputEvent(participantEditMessageTurn({
-              name: transport.participantName,
-              text: heard,
-              onMessage: crypto.randomUUID(),
-            }));
-          }
-        }
-        await emitModelEvents(
-          outputEvent,
-          transport.participantName,
-          sessionOutput,
-        );
-        await resolveToolCalls(
-          outputEvent,
-          session,
-          tools,
-          transport.participantName,
-          endpoint,
-          sessionOutput,
-        );
-        const outgoingMessages = sessionOutputToMessages(
-          transport.participantName,
-          sessionOutput,
-        );
-        if (
-          outgoingMessages.length === 0 &&
-          !sessionOutput.some((e) => e.type === "tool_call")
-        ) {
-          console.log(
-            `${transport.participantName} generated no output, sending fallback to prompt it`,
-          );
-          const retryOutput = await session.sendText(
-            "Please continue your thought or respond to the previous message if you haven't.",
-          );
-          console.log(
-            `${transport.participantName} got ${retryOutput.length} events from fallback`,
-          );
-          await emitModelEvents(
-            outputEvent,
-            transport.participantName,
-            retryOutput,
-          );
-          await resolveToolCalls(
-            outputEvent,
-            session,
-            tools,
-            transport.participantName,
-            endpoint,
-            retryOutput,
-          );
-          await Promise.all(
-            sessionOutputToMessages(transport.participantName, retryOutput).map(
-              endpoint.sendData,
-            ),
-          );
-        } else {
-          await Promise.all(outgoingMessages.map(endpoint.sendData));
         }
       } catch (error) {
         console.log(`Error in transport agent: ${error}`);
@@ -372,34 +347,6 @@ export const runAudioAgentLoop = async (
             error instanceof Error ? error.message : String(error)
           }`,
         ));
-        console.log(
-          `${transport.participantName} generated no output due to error, sending fallback to prompt it`,
-        );
-        try {
-          const retryOutput = await session.sendText(
-            "There was an error processing your audio. Please continue your thought or respond to the previous message.",
-          );
-          await emitModelEvents(
-            outputEvent,
-            transport.participantName,
-            retryOutput,
-          );
-          await resolveToolCalls(
-            outputEvent,
-            session,
-            tools,
-            transport.participantName,
-            endpoint,
-            retryOutput,
-          );
-          await Promise.all(
-            sessionOutputToMessages(transport.participantName, retryOutput).map(
-              endpoint.sendData,
-            ),
-          );
-        } catch (retryError) {
-          console.log(`Retry also failed: ${retryError}`);
-        }
       }
     });
   });
