@@ -83,9 +83,6 @@ const splitBytes = (bytes: Uint8Array, chunkSize: number) => {
   return chunks;
 };
 
-const silence16k = (ms: number) =>
-  new Uint8Array(Math.floor((16000 * 2 * ms) / 1000));
-
 const resample24kTo16k = (pcm24k: Uint8Array) => {
   const input = new Int16Array(
     pcm24k.buffer,
@@ -105,13 +102,11 @@ const normalizeAudioChunksForInput = (
 ) =>
   splitBytes(
     concatBytes([
-      silence16k(20),
       ...chunks.map(({ mimeType, dataBase64 }) =>
         mimeType.includes("24000")
           ? resample24kTo16k(base64ToBytes(dataBase64))
           : base64ToBytes(dataBase64)
       ),
-      silence16k(1000),
     ]),
     3200,
   ).map((piece) => ({
