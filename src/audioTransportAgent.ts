@@ -260,6 +260,9 @@ export const runAudioAgentLoop = async (
     },
     onSessionEvent: (event) => {
       if (event.type === "audio") {
+        console.log(
+          "[runAudioAgentLoop] Received audio from Gemini, forwarding to endpoint",
+        );
         void endpoint.sendData({
           type: "audio",
           chunks: [
