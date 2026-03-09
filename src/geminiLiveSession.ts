@@ -130,6 +130,7 @@ export const createAudioSession = async ({
   let pendingTurn: PendingTurn | undefined;
   let activeTurn = false;
   let bufferedEvents: AudioSessionEvent[] = [];
+  const isNative = model.includes("native");
   const debug = (message: string) => {
     onDebug?.({ type: "debug", message });
   };
@@ -145,7 +146,6 @@ export const createAudioSession = async ({
     }, turnTimeoutMs);
     ws.onopen = () => {
       debug("websocket open");
-      const isNative = model.includes("native");
       const setupMsg = JSON.stringify({
         setup: {
           model,
@@ -159,10 +159,10 @@ export const createAudioSession = async ({
               },
             }),
           },
-          ...(!isNative && prompt
+          ...(prompt
             ? { systemInstruction: { parts: [{ text: prompt }] } }
             : {}),
-          ...(!isNative && tools && tools.length > 0
+          ...(tools && tools.length > 0
             ? { tools: toolsToDeclarations(tools) }
             : {}),
         },
@@ -359,9 +359,11 @@ export const createAudioSession = async ({
         }));
         await new Promise((resolve) => setTimeout(resolve, 40));
       }
-      ws.send(JSON.stringify({
-        clientContent: { turns: [], turnComplete: true },
-      }));
+      if (!isNative) {
+        ws.send(JSON.stringify({
+          clientContent: { turns: [], turnComplete: true },
+        }));
+      }
       return await wait;
     },
     streamAudioChunks: (chunks: LiveAudioChunk[]) => {
@@ -377,6 +379,7 @@ export const createAudioSession = async ({
       }
     },
     commitTurn: () => {
+      if (isNative) return;
       debug("commitTurn manually triggered");
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
