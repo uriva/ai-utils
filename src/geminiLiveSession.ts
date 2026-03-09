@@ -124,8 +124,6 @@ export const createAudioSession = async ({
   onDebug,
   onSessionEvent,
 }: AudioSessionConfig): Promise<AudioSession> => {
-  console.log("[geminiLive] Creating WebSocket to Gemini Live");
-  console.log("[geminiLive] Creating WebSocket to Gemini Live");
   const ws = new WebSocket(
     `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`,
   );
@@ -133,7 +131,6 @@ export const createAudioSession = async ({
   let activeTurn = false;
   let bufferedEvents: AudioSessionEvent[] = [];
   const debug = (message: string) => {
-    console.log(message);
     onDebug?.({ type: "debug", message });
   };
 
@@ -147,7 +144,6 @@ export const createAudioSession = async ({
       reject(new Error("Gemini Live setup timed out"));
     }, turnTimeoutMs);
     ws.onopen = () => {
-      console.log("[geminiLive] WebSocket open");
       debug("websocket open");
       ws.send(JSON.stringify({
         setup: {
@@ -182,10 +178,6 @@ export const createAudioSession = async ({
     };
     ws.onmessage = async (event) => {
       const msg = JSON.parse(await decodeWsData(event.data));
-      console.log(
-        "[geminiLive] Received WS setup message from model:",
-        JSON.stringify(msg).substring(0, 500),
-      );
       if (msg.error) {
         console.error("msg.error", msg.error);
         debug(`setup error: ${JSON.stringify(msg.error)}`);
@@ -219,10 +211,6 @@ export const createAudioSession = async ({
 
   ws.onmessage = async (event) => {
     const msg = JSON.parse(await decodeWsData(event.data));
-    console.log(
-      "[geminiLive] Received WS message from model:",
-      JSON.stringify(msg).substring(0, 500),
-    );
     if (msg.error) {
       console.error("msg.error", msg.error);
       debug(`message error: ${JSON.stringify(msg.error)}`);

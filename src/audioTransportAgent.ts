@@ -233,9 +233,6 @@ export const runAudioAgentLoop = async (
     },
     onSessionEvent: (event) => {
       if (event.type === "audio") {
-        console.log(
-          "[runAudioAgentLoop] Received audio from Gemini, forwarding to endpoint",
-        );
         void endpoint.sendData({
           type: "audio",
           chunks: [
@@ -311,9 +308,8 @@ export const runAudioAgentLoop = async (
         if (message.type === "text") {
           // sendText resolves with the output, but we already process it via onSessionEvent
           // so we just catch errors if any
-          console.log("[audioTransportAgent] Forwarding text to session");
           session.sendText(message.text).catch((error) => {
-            console.log(`Error sending text: ${error}`);
+            console.error(`[audioTransportAgent] Error sending text: ${error}`);
           });
         } else if (message.type === "audio") {
           // Buffer incoming audio to send in 3200-byte chunks
@@ -346,30 +342,15 @@ export const runAudioAgentLoop = async (
             }
             const rms = Math.sqrt(sumSq / testBuf.length);
 
-            // Log less frequently to avoid Deno Deploy rate limits
-            if (Math.random() < 0.1 || rms > 250) {
-              console.log(
-                `[audioTransportAgent] Streaming ${chunksToStream.length} chunk(s) to Gemini. RMS: ${
-                  Math.floor(rms)
-                }`,
-              );
-            }
-
             if (rms > 250) {
               // Reset VAD timeout only if there is ACTUAL audio (RMS > 250)
               clearTimeout(vadTimeout);
               vadTimeout = globalThis.setTimeout(() => {
-                console.log(
-                  "[audioTransportAgent] VAD timeout fired after 1.5s of audio silence, committing turn manually",
-                );
                 session.commitTurn();
               }, 1500) as unknown as number;
             } else if (!vadTimeout) {
               // If no timeout is running, start one just in case we never see loud audio again
               vadTimeout = globalThis.setTimeout(() => {
-                console.log(
-                  "[audioTransportAgent] VAD timeout fired after 1.5s of pure silence, committing turn manually",
-                );
                 session.commitTurn();
               }, 1500) as unknown as number;
             }
