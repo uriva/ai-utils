@@ -345,10 +345,18 @@ export const runAudioAgentLoop = async (
               sumSq += testBuf[i] * testBuf[i];
             }
             const rms = Math.sqrt(sumSq / testBuf.length);
-            // console.log("[audioTransportAgent] Streaming", chunksToStream.length, "chunks. RMS:", rms);
+
+            // Log less frequently to avoid Deno Deploy rate limits
+            if (Math.random() < 0.1 || rms > 250) {
+              console.log(
+                `[audioTransportAgent] Streaming ${chunksToStream.length} chunk(s) to Gemini. RMS: ${
+                  Math.floor(rms)
+                }`,
+              );
+            }
 
             if (rms > 250) {
-              // Reset VAD timeout only if there is ACTUAL audio (RMS > 100)
+              // Reset VAD timeout only if there is ACTUAL audio (RMS > 250)
               clearTimeout(vadTimeout);
               vadTimeout = globalThis.setTimeout(() => {
                 console.log(
@@ -366,11 +374,6 @@ export const runAudioAgentLoop = async (
               }, 1500) as unknown as number;
             }
 
-            console.log(
-              `[audioTransportAgent] Streaming ${chunksToStream.length} chunk(s) to Gemini. RMS: ${
-                Math.floor(rms)
-              }`,
-            );
             session.streamAudioChunks(chunksToStream);
           }
         }

@@ -226,10 +226,9 @@ const parseWithCatch = <T extends ZodType>(
   parameters: T,
   // deno-lint-ignore no-explicit-any
   args: any,
-  strict = false,
 ): { ok: false; error: Error } | { ok: true; result: z.infer<T> } => {
   try {
-    const p = strict && "strict" in parameters &&
+    const p = "strict" in parameters &&
         typeof (parameters as unknown as { strict?: () => ZodType }).strict ===
           "function"
       ? (parameters as unknown as { strict: () => ZodType }).strict()
@@ -264,7 +263,7 @@ const callToResult =
       return { toolCallId, name, result: `Function ${name} not found` };
     }
     const { handler, parameters } = action;
-    const parseResult = parseWithCatch(parameters, effectiveArgs, true);
+    const parseResult = parseWithCatch(parameters, effectiveArgs);
     if (!parseResult.ok) {
       return {
         toolCallId,
@@ -448,7 +447,7 @@ const handleFunctionCalls =
         n === fc.name
       );
       if (action?.isDeferred) {
-        const parseResult = parseWithCatch(action.parameters, fc.args, true);
+        const parseResult = parseWithCatch(action.parameters, fc.args);
         if (parseResult.ok) await action.handler(parseResult.result, fc.id!);
         hadDeferred = true;
         return;
@@ -503,7 +502,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         if (!tool) {
           return `Tool "${toolName}" not found in skill "${skillName}". Please call ${learnSkillToolName}.`;
         }
-        const parseResult = parseWithCatch(tool.parameters.strict(), params);
+        const parseResult = parseWithCatch(tool.parameters, params);
         if (!parseResult.ok) {
           return `Invalid parameters for ${fullToolName}: ${parseResult.error.message}`;
         }
