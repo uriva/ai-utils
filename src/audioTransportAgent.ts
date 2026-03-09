@@ -347,7 +347,7 @@ export const runAudioAgentLoop = async (
             const rms = Math.sqrt(sumSq / testBuf.length);
             // console.log("[audioTransportAgent] Streaming", chunksToStream.length, "chunks. RMS:", rms);
 
-            if (rms > 100) {
+            if (rms > 250) {
               // Reset VAD timeout only if there is ACTUAL audio (RMS > 100)
               clearTimeout(vadTimeout);
               vadTimeout = globalThis.setTimeout(() => {
