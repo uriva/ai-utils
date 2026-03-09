@@ -333,18 +333,18 @@ export const runAudioAgentLoop = async (
         if (message.type === "text") {
           // sendText resolves with the output, but we already process it via onSessionEvent
           // so we just catch errors if any
+          console.log("[audioTransportAgent] Forwarding text to session");
           session.sendText(message.text).catch((error) => {
             console.log(`Error sending text: ${error}`);
           });
         } else if (message.type === "audio") {
-          session.streamAudioChunks(
-            normalizeAudioChunksForInput(message.chunks),
-          );
+          const chunksForInput = normalizeAudioChunksForInput(message.chunks);
+          session.streamAudioChunks(chunksForInput);
 
           clearTimeout(vadTimeout);
           vadTimeout = globalThis.setTimeout(() => {
             console.log(
-              "[audioTransportAgent] VAD timeout fired, committing turn manually",
+              "[audioTransportAgent] VAD timeout fired after 1.5s of audio silence, committing turn manually",
             );
             session.commitTurn();
           }, 1500) as unknown as number;
