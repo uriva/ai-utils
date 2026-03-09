@@ -23,6 +23,7 @@ import { accessGeminiToken } from "./gemini.ts";
 
 export const runAudioTransportAgent = async (
   spec: AgentSpec,
+  customOutputEvent?: (event: HistoryEvent) => Promise<void>,
 ): Promise<void> => {
   if (!spec.transport || spec.transport.kind !== "audio") {
     throw new Error("audio transport required");
@@ -30,7 +31,7 @@ export const runAudioTransportAgent = async (
   return await runAudioAgentLoop(
     spec,
     spec.transport.endpoint,
-    accessOutputEvent,
+    customOutputEvent ?? accessOutputEvent,
   );
 };
 
