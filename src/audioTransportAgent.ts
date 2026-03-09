@@ -327,7 +327,7 @@ export const runAudioAgentLoop = async (
             const piece = audioInputBuffer.slice(0, 3200);
             audioInputBuffer = audioInputBuffer.slice(3200);
             chunksToStream.push({
-              mimeType: "audio/pcm;rate=16000",
+              mimeType: "audio/pcm",
               dataBase64: bytesToBase64(piece),
             });
           }
