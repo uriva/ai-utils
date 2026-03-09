@@ -283,6 +283,11 @@ export const runAudioAgentLoop = async (
   });
   const tools = regularTools(spec.tools);
 
+  // Send initial greeting to verify the connection and audio output
+  session.sendText("Please introduce yourself briefly and say hello!").catch(
+    (e) => console.error("Initial greeting failed", e),
+  );
+
   const processTurnOutput = async (sessionOutput: AudioSessionEvent[]) => {
     // We already sent audio instantly via onSessionEvent, so filter it out here
     // for emitModelEvents to avoid duplicate logs, or just let emitModelEvents
