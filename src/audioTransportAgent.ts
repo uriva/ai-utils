@@ -17,6 +17,7 @@ import type { DuplexEndpoint, DuplexMessage } from "./duplex.ts";
 import {
   type AudioSessionEvent,
   createAudioSession,
+  type LiveAudioChunk,
 } from "./geminiLiveSession.ts";
 import { accessGeminiToken } from "./gemini.ts";
 
@@ -75,14 +76,6 @@ const concatBytes = (chunks: Uint8Array[]) => {
   return merged;
 };
 
-const splitBytes = (bytes: Uint8Array, chunkSize: number) => {
-  const chunks: Uint8Array[] = [];
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    chunks.push(bytes.slice(i, i + chunkSize));
-  }
-  return chunks;
-};
-
 const resample24kTo16k = (pcm24k: Uint8Array) => {
   const input = new Int16Array(
     pcm24k.buffer,
@@ -96,23 +89,6 @@ const resample24kTo16k = (pcm24k: Uint8Array) => {
   }
   return new Uint8Array(output.buffer.slice(0));
 };
-
-const normalizeAudioChunksForInput = (
-  chunks: Array<{ mimeType: string; dataBase64: string }>,
-) =>
-  splitBytes(
-    concatBytes([
-      ...chunks.map(({ mimeType, dataBase64 }) =>
-        mimeType.includes("24000")
-          ? resample24kTo16k(base64ToBytes(dataBase64))
-          : base64ToBytes(dataBase64)
-      ),
-    ]),
-    3200,
-  ).map((piece) => ({
-    mimeType: "audio/pcm;rate=16000",
-    dataBase64: bytesToBase64(piece),
-  }));
 
 const spokenReplyOnly = (text: string) => {
   const stripped = stripReasoningPreamble(text);
@@ -242,6 +218,7 @@ export const runAudioAgentLoop = async (
   let isClosed = false;
 
   let turnEvents: AudioSessionEvent[] = [];
+  let audioInputBuffer = new Uint8Array(0);
 
   const session = await createAudioSession({
     apiKey: accessGeminiToken(),
@@ -338,16 +315,63 @@ export const runAudioAgentLoop = async (
             console.log(`Error sending text: ${error}`);
           });
         } else if (message.type === "audio") {
-          const chunksForInput = normalizeAudioChunksForInput(message.chunks);
-          session.streamAudioChunks(chunksForInput);
+          // Buffer incoming audio to send in 3200-byte chunks
+          const incomingBytes = concatBytes([
+            ...message.chunks.map(({ mimeType, dataBase64 }) =>
+              mimeType.includes("24000")
+                ? resample24kTo16k(base64ToBytes(dataBase64))
+                : base64ToBytes(dataBase64)
+            ),
+          ]);
+          audioInputBuffer = concatBytes([audioInputBuffer, incomingBytes]);
 
-          clearTimeout(vadTimeout);
-          vadTimeout = globalThis.setTimeout(() => {
-            console.log(
-              "[audioTransportAgent] VAD timeout fired after 1.5s of audio silence, committing turn manually",
+          const chunksToStream: LiveAudioChunk[] = [];
+          while (audioInputBuffer.length >= 3200) {
+            const piece = audioInputBuffer.slice(0, 3200);
+            audioInputBuffer = audioInputBuffer.slice(3200);
+            chunksToStream.push({
+              mimeType: "audio/pcm;rate=16000",
+              dataBase64: bytesToBase64(piece),
+            });
+          }
+          if (chunksToStream.length > 0) {
+            // Check volume of first chunk to see if it's silence
+            const testBuf = new Int16Array(
+              base64ToBytes(chunksToStream[0].dataBase64).buffer,
             );
-            session.commitTurn();
-          }, 1500) as unknown as number;
+            let sumSq = 0;
+            for (let i = 0; i < testBuf.length; i++) {
+              sumSq += testBuf[i] * testBuf[i];
+            }
+            const rms = Math.sqrt(sumSq / testBuf.length);
+            // console.log("[audioTransportAgent] Streaming", chunksToStream.length, "chunks. RMS:", rms);
+
+            if (rms > 100) {
+              // Reset VAD timeout only if there is ACTUAL audio (RMS > 100)
+              clearTimeout(vadTimeout);
+              vadTimeout = globalThis.setTimeout(() => {
+                console.log(
+                  "[audioTransportAgent] VAD timeout fired after 1.5s of audio silence, committing turn manually",
+                );
+                session.commitTurn();
+              }, 1500) as unknown as number;
+            } else if (!vadTimeout) {
+              // If no timeout is running, start one just in case we never see loud audio again
+              vadTimeout = globalThis.setTimeout(() => {
+                console.log(
+                  "[audioTransportAgent] VAD timeout fired after 1.5s of pure silence, committing turn manually",
+                );
+                session.commitTurn();
+              }, 1500) as unknown as number;
+            }
+
+            console.log(
+              `[audioTransportAgent] Streaming ${chunksToStream.length} chunk(s) to Gemini. RMS: ${
+                Math.floor(rms)
+              }`,
+            );
+            session.streamAudioChunks(chunksToStream);
+          }
         }
       } catch (error) {
         console.log(`Error in transport agent: ${error}`);
