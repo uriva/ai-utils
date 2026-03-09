@@ -145,12 +145,13 @@ export const createAudioSession = async ({
     }, turnTimeoutMs);
     ws.onopen = () => {
       debug("websocket open");
+      const isNative = model.includes("native");
       const setupMsg = JSON.stringify({
         setup: {
           model,
           generationConfig: {
             responseModalities: ["AUDIO"],
-            ...(model.includes("native") ? {} : {
+            ...(isNative ? {} : {
               speechConfig: {
                 voiceConfig: {
                   prebuiltVoiceConfig: { voiceName },
@@ -158,10 +159,10 @@ export const createAudioSession = async ({
               },
             }),
           },
-          ...(prompt
+          ...(!isNative && prompt
             ? { systemInstruction: { parts: [{ text: prompt }] } }
             : {}),
-          ...(tools && tools.length > 0
+          ...(!isNative && tools && tools.length > 0
             ? { tools: toolsToDeclarations(tools) }
             : {}),
         },
