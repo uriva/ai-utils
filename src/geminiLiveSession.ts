@@ -156,12 +156,13 @@ export const createAudioSession = async ({
               },
             },
           },
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
+
           systemInstruction: {
             parts: [{ text: prompt }],
           },
-          tools: toolsToDeclarations(tools),
+          ...(tools && tools.length > 0
+            ? { tools: toolsToDeclarations(tools) }
+            : {}),
         },
       }));
     };
@@ -355,7 +356,6 @@ export const createAudioSession = async ({
       }
       ws.send(JSON.stringify({
         clientContent: {
-          turns: [{ role: "user", parts: [] }],
           turnComplete: true,
         },
       }));
@@ -364,11 +364,13 @@ export const createAudioSession = async ({
     streamAudioChunks: (chunks: LiveAudioChunk[]) => {
       activeTurn = true;
       for (const chunk of chunks) {
-        ws.send(JSON.stringify({
+        const payload = {
           realtimeInput: {
             mediaChunks: [{ mimeType: chunk.mimeType, data: chunk.dataBase64 }],
           },
-        }));
+        };
+        // debug(`Sending realtimeInput chunk, length: ${chunk.dataBase64.length}`);
+        ws.send(JSON.stringify(payload));
       }
     },
     commitTurn: () => {
