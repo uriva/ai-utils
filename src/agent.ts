@@ -239,10 +239,15 @@ const parseWithCatch = <T extends ZodType>(
   }
 };
 
-const callToResult =
+export const callToResult =
   // deno-lint-ignore no-explicit-any
   (actions: RegularTool<any>[]) =>
-  async <T extends ZodType>(fc: FunctionCall) => {
+  async <T extends ZodType>(fc: FunctionCall): Promise<{
+    toolCallId: string | undefined;
+    name: string;
+    result: string;
+    attachments?: MediaAttachment[];
+  }> => {
     const { name, args, id } = fc;
     const toolCallId = id;
     if (!name) throw new Error("Function call name is missing");
@@ -431,9 +436,10 @@ export const generateId = idGeneration.access;
 // deno-lint-ignore no-explicit-any
 const isRegularTool = (t: Tool<any>): t is RegularTool<any> => !t.isDeferred;
 
-const handleFunctionCalls =
+export const handleFunctionCalls =
   // deno-lint-ignore no-explicit-any
-  (tools: Tool<any>[]) => async (output: HistoryEvent[]): Promise<boolean> => {
+  (tools: Tool<any>[], onToolResult?: (event: HistoryEvent) => void) =>
+  async (output: HistoryEvent[]): Promise<boolean> => {
     // deno-lint-ignore no-explicit-any
     const toolCalls = filter((p: HistoryEvent): p is ToolUse<any> =>
       p.type === "tool_call"
@@ -452,7 +458,9 @@ const handleFunctionCalls =
         hadDeferred = true;
         return;
       }
-      await pipe(callToResult(regularTools), toolResultTurn, outputEvent)(fc);
+      const result = toolResultTurn(await callToResult(regularTools)(fc));
+      await outputEvent(result);
+      onToolResult?.(result);
     })(toolCalls);
     return hadDeferred;
   };

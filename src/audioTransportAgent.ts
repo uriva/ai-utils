@@ -2,15 +2,13 @@ import { empty } from "gamla";
 import {
   accessOutputEvent,
   type AgentSpec,
+  handleFunctionCalls,
   type HistoryEvent,
   ownThoughtTurn,
   ownUtteranceTurn,
   participantEditMessageTurn,
   participantUtteranceTurn,
-  type RegularTool,
   type Tool,
-  toolResultTurn,
-  type ToolReturn,
   toolUseTurnWithMetadata,
 } from "./agent.ts";
 import type { DuplexEndpoint, DuplexMessage } from "./duplex.ts";
@@ -105,19 +103,32 @@ const spokenReplyOnly = (text: string) => {
   return stripped;
 };
 
-const regularTools = (
+const resolveToolCalls = async (
+  session: Awaited<ReturnType<typeof createAudioSession>>,
   // deno-lint-ignore no-explicit-any
   tools: Tool<any>[],
-  // deno-lint-ignore no-explicit-any
-): RegularTool<any>[] =>
-  // deno-lint-ignore no-explicit-any
-  tools.filter((tool): tool is RegularTool<any> => !tool.isDeferred);
-
-const findRegularTool = (
-  tools: ReturnType<typeof regularTools>,
-  name: string,
-) => tools.find((tool) => tool.name === name);
-
+  sessionOutput: AudioSessionEvent[],
+) => {
+  const toolCallEvents = sessionOutput
+    .filter((e): e is Extract<AudioSessionEvent, { type: "tool_call" }> =>
+      e.type === "tool_call"
+    )
+    .map((e) =>
+      toolUseTurnWithMetadata(
+        { id: e.id, name: e.name, args: e.args },
+        undefined,
+      )
+    );
+  await handleFunctionCalls(tools, (event) => {
+    if (event.type === "tool_result") {
+      session.respondToToolCall({
+        id: event.toolCallId!,
+        name: event.name,
+        response: { result: event.result },
+      });
+    }
+  })(toolCallEvents);
+};
 const emitModelEvents = async (
   outputEvent: (event: HistoryEvent) => Promise<void>,
   participantName: string,
@@ -155,34 +166,6 @@ const emitModelEvents = async (
       name: event.name,
       args: event.args,
     }, undefined));
-  }
-};
-
-const resolveToolCalls = async (
-  outputEvent: (event: HistoryEvent) => Promise<void>,
-  session: Awaited<ReturnType<typeof createAudioSession>>,
-  tools: ReturnType<typeof regularTools>,
-  sessionOutput: AudioSessionEvent[],
-) => {
-  for (const event of sessionOutput) {
-    if (event.type !== "tool_call") continue;
-    const tool = findRegularTool(tools, event.name);
-    if (!tool) continue;
-    const result: string | ToolReturn = await tool.handler(event.args);
-    const rendered = typeof result === "string"
-      ? { result, attachments: undefined }
-      : { result: result.result, attachments: result.attachments };
-    await outputEvent(toolResultTurn({
-      name: event.name,
-      result: rendered.result,
-      attachments: rendered.attachments,
-      toolCallId: event.id,
-    }));
-    session.respondToToolCall({
-      id: event.id,
-      name: event.name,
-      response: { result: rendered.result },
-    });
   }
 };
 
@@ -256,7 +239,6 @@ export const runAudioAgentLoop = async (
       }
     },
   });
-  const tools = regularTools(spec.tools);
 
   const processTurnOutput = async (sessionOutput: AudioSessionEvent[]) => {
     // We already sent audio instantly via onSessionEvent, so filter it out here
@@ -279,9 +261,8 @@ export const runAudioAgentLoop = async (
       sessionOutput,
     );
     await resolveToolCalls(
-      outputEvent,
       session,
-      tools,
+      spec.tools,
       sessionOutput,
     );
 
