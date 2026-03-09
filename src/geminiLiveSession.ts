@@ -150,11 +150,13 @@ export const createAudioSession = async ({
           model,
           generationConfig: {
             responseModalities: ["AUDIO"],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName },
+            ...(model.includes("native") ? {} : {
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName },
+                },
               },
-            },
+            }),
           },
           ...(prompt
             ? { systemInstruction: { parts: [{ text: prompt }] } }
