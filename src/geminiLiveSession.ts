@@ -157,9 +157,9 @@ export const createAudioSession = async ({
             },
           },
 
-          systemInstruction: {
-            parts: [{ text: prompt }],
-          },
+          ...(prompt
+            ? { systemInstruction: { parts: [{ text: prompt }] } }
+            : {}),
           ...(tools && tools.length > 0
             ? { tools: toolsToDeclarations(tools) }
             : {}),
@@ -355,9 +355,7 @@ export const createAudioSession = async ({
         await new Promise((resolve) => setTimeout(resolve, 40));
       }
       ws.send(JSON.stringify({
-        clientContent: {
-          turnComplete: true,
-        },
+        clientContent: { turns: [], turnComplete: true },
       }));
       return await wait;
     },
@@ -377,9 +375,7 @@ export const createAudioSession = async ({
       debug("commitTurn manually triggered");
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
-          clientContent: {
-            turnComplete: true,
-          },
+          clientContent: { turns: [], turnComplete: true },
         }));
       }
     },
