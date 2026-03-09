@@ -36,9 +36,12 @@ const removeAdditionalProperties = <T>(obj: Record<string, any>) => {
       }
       newObj.type = obj.type.find((x) => x !== "null");
     }
-    if ("additionalProperties" in newObj) {
-      newObj.additionalProperties = undefined;
-    }
+
+    // Explicitly delete unsupported keys instead of setting to undefined
+    delete newObj.additionalProperties;
+    delete newObj.default;
+    delete newObj.$schema;
+
     for (const key in newObj) {
       if (key in newObj) {
         if (Array.isArray(newObj[key])) {
@@ -57,9 +60,7 @@ const removeAdditionalProperties = <T>(obj: Record<string, any>) => {
 
 export const zodToGeminiParameters = (zodObj: ZodType): FunctionDeclaration => {
   const jsonSchema = removeAdditionalProperties(z.toJSONSchema(zodObj));
-  // deno-lint-ignore no-unused-vars
-  const { $schema, ...rest } = jsonSchema;
-  return rest;
+  return jsonSchema as unknown as FunctionDeclaration;
 };
 
 const tokenInjection: Injection<() => string> = context((): string => {
