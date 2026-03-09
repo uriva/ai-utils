@@ -7,6 +7,17 @@ This is a Deno project published to JSR. CI publishes on push to main. Do not
 attempt `deno publish` locally. Bump the version in `deno.json` before pushing
 if the previous version was already published.
 
+### Workflow for Updating this Package
+
+When modifying this library to use in another project like `prompt2bot`:
+
+1. Make your changes in this repo.
+2. Bump the version in `deno.json`.
+3. Commit and push your changes to GitHub. CI will automatically publish to JSR.
+   **Do not run `deno publish` yourself**.
+4. Go to the consumer project (`prompt2bot`), bump the version of `ai-utils` in
+   its `deno.json`, commit and push to deploy the consumer project.
+
 Pre-commit hook runs
 `deno fmt --check && deno lint && deno check *.ts src/**/*.ts tests/**/*.ts`.
 
