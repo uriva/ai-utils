@@ -337,12 +337,29 @@ export const runAudioAgentLoop = async (
               base64ToBytes(chunksToStream[0].dataBase64).buffer,
             );
             let sumSq = 0;
+            let zeroCrossings = 0;
+            let peak = 0;
             for (let i = 0; i < testBuf.length; i++) {
-              sumSq += testBuf[i] * testBuf[i];
+              const val = testBuf[i];
+              sumSq += val * val;
+              if (Math.abs(val) > peak) peak = Math.abs(val);
+              if (
+                i > 0 &&
+                ((val >= 0 && testBuf[i - 1] < 0) ||
+                  (val < 0 && testBuf[i - 1] >= 0))
+              ) {
+                zeroCrossings++;
+              }
             }
             const rms = Math.sqrt(sumSq / testBuf.length);
+            const zcr = zeroCrossings / testBuf.length;
 
             if (rms > 250) {
+              console.log(
+                `[Audio Debug] RMS: ${Math.floor(rms)}, Peak: ${peak}, ZCR: ${
+                  zcr.toFixed(3)
+                } (0.5=noise, <0.2=speech)`,
+              );
               // Reset VAD timeout only if there is ACTUAL audio (RMS > 250)
               clearTimeout(vadTimeout);
               vadTimeout = globalThis.setTimeout(() => {
