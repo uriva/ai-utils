@@ -308,9 +308,7 @@ export const runAudioAgentLoop = async (
         if (message.type === "text") {
           // sendText resolves with the output, but we already process it via onSessionEvent
           // so we just catch errors if any
-          session.sendText(message.text).catch((error) => {
-            console.error(`[audioTransportAgent] Error sending text: ${error}`);
-          });
+          session.sendText(message.text).catch(() => {});
         } else if (message.type === "audio") {
           // Buffer incoming audio to send in 3200-byte chunks
           const incomingBytes = concatBytes([
@@ -337,29 +335,12 @@ export const runAudioAgentLoop = async (
               base64ToBytes(chunksToStream[0].dataBase64).buffer,
             );
             let sumSq = 0;
-            let zeroCrossings = 0;
-            let peak = 0;
             for (let i = 0; i < testBuf.length; i++) {
-              const val = testBuf[i];
-              sumSq += val * val;
-              if (Math.abs(val) > peak) peak = Math.abs(val);
-              if (
-                i > 0 &&
-                ((val >= 0 && testBuf[i - 1] < 0) ||
-                  (val < 0 && testBuf[i - 1] >= 0))
-              ) {
-                zeroCrossings++;
-              }
+              sumSq += testBuf[i] * testBuf[i];
             }
             const rms = Math.sqrt(sumSq / testBuf.length);
-            const zcr = zeroCrossings / testBuf.length;
 
             if (rms > 250) {
-              console.log(
-                `[Audio Debug] RMS: ${Math.floor(rms)}, Peak: ${peak}, ZCR: ${
-                  zcr.toFixed(3)
-                } (0.5=noise, <0.2=speech)`,
-              );
               // Reset VAD timeout only if there is ACTUAL audio (RMS > 250)
               clearTimeout(vadTimeout);
               vadTimeout = globalThis.setTimeout(() => {
@@ -376,7 +357,6 @@ export const runAudioAgentLoop = async (
           }
         }
       } catch (error) {
-        console.log(`Error in transport agent: ${error}`);
         await outputEvent(ownThoughtTurn(
           `Audio transport error for ${transport.participantName}: ${
             error instanceof Error ? error.message : String(error)

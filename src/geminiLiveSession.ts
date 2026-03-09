@@ -167,17 +167,14 @@ export const createAudioSession = async ({
             : {}),
         },
       });
-      console.log("[setup payload]", setupMsg);
       ws.send(setupMsg);
       //
     };
     ws.onerror = (error) => {
-      console.error("[geminiLive] ws error", error);
       clearTimeout(timeout);
       reject(error instanceof Error ? error : new Error(String(error)));
     };
     ws.onclose = (e) => {
-      console.error(`close: code=${e.code} reason=${e.reason}`);
       debug(`close: code=${e.code} reason=${e.reason}`);
       clearTimeout(timeout);
       reject(new Error("Gemini Live closed before setupComplete"));
@@ -185,7 +182,6 @@ export const createAudioSession = async ({
     ws.onmessage = async (event) => {
       const msg = JSON.parse(await decodeWsData(event.data));
       if (msg.error) {
-        console.error("msg.error", msg.error);
         debug(`setup error: ${JSON.stringify(msg.error)}`);
         clearTimeout(timeout);
         reject(new Error(JSON.stringify(msg.error)));
@@ -218,7 +214,6 @@ export const createAudioSession = async ({
   ws.onmessage = async (event) => {
     const msg = JSON.parse(await decodeWsData(event.data));
     if (msg.error) {
-      console.error("msg.error", msg.error);
       debug(`message error: ${JSON.stringify(msg.error)}`);
       rejectPendingTurn(new Error(JSON.stringify(msg.error)));
       activeTurn = false;
