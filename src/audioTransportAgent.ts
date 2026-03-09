@@ -283,11 +283,6 @@ export const runAudioAgentLoop = async (
   });
   const tools = regularTools(spec.tools);
 
-  // Send initial greeting to verify the connection and audio output
-  session.sendText("Please introduce yourself briefly and say hello!").catch(
-    (e) => console.error("Initial greeting failed", e),
-  );
-
   const processTurnOutput = async (sessionOutput: AudioSessionEvent[]) => {
     // We already sent audio instantly via onSessionEvent, so filter it out here
     // for emitModelEvents to avoid duplicate logs, or just let emitModelEvents
@@ -322,11 +317,14 @@ export const runAudioAgentLoop = async (
     await Promise.all(outgoingMessages.map(endpoint.sendData));
   };
 
+  let vadTimeout: number | undefined;
+
   await new Promise<void>((resolve) => {
     endpoint.onData(async (message) => {
       if (isClosed) return;
       if (message.type === "close") {
         isClosed = true;
+        clearTimeout(vadTimeout);
         await session.close();
         resolve();
         return;
@@ -342,6 +340,14 @@ export const runAudioAgentLoop = async (
           session.streamAudioChunks(
             normalizeAudioChunksForInput(message.chunks),
           );
+
+          clearTimeout(vadTimeout);
+          vadTimeout = globalThis.setTimeout(() => {
+            console.log(
+              "[audioTransportAgent] VAD timeout fired, committing turn manually",
+            );
+            session.commitTurn();
+          }, 1500) as unknown as number;
         }
       } catch (error) {
         console.log(`Error in transport agent: ${error}`);

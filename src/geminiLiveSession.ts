@@ -104,6 +104,7 @@ export type AudioSession = {
   sendAudio: (chunk: LiveAudioChunk) => Promise<AudioSessionEvent[]>;
   sendAudioChunks: (chunks: LiveAudioChunk[]) => Promise<AudioSessionEvent[]>;
   streamAudioChunks: (chunks: LiveAudioChunk[]) => void;
+  commitTurn: () => void;
   continueTurn: () => Promise<AudioSessionEvent[]>;
   respondToToolCall: (params: {
     id: string;
@@ -378,6 +379,16 @@ export const createAudioSession = async ({
         ws.send(JSON.stringify({
           realtimeInput: {
             mediaChunks: [{ mimeType: chunk.mimeType, data: chunk.dataBase64 }],
+          },
+        }));
+      }
+    },
+    commitTurn: () => {
+      debug("commitTurn manually triggered");
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          clientContent: {
+            turnComplete: true,
           },
         }));
       }
