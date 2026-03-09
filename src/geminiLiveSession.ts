@@ -145,7 +145,7 @@ export const createAudioSession = async ({
     }, turnTimeoutMs);
     ws.onopen = () => {
       debug("websocket open");
-      ws.send(JSON.stringify({
+      const setupMsg = JSON.stringify({
         setup: {
           model,
           generationConfig: {
@@ -156,7 +156,6 @@ export const createAudioSession = async ({
               },
             },
           },
-
           ...(prompt
             ? { systemInstruction: { parts: [{ text: prompt }] } }
             : {}),
@@ -164,7 +163,10 @@ export const createAudioSession = async ({
             ? { tools: toolsToDeclarations(tools) }
             : {}),
         },
-      }));
+      });
+      console.log("[setup payload]", setupMsg);
+      ws.send(setupMsg);
+      //
     };
     ws.onerror = (error) => {
       console.error("[geminiLive] ws error", error);
