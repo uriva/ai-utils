@@ -48,7 +48,7 @@ type PendingTurn = {
   timeout: number;
 };
 
-const defaultModel = "models/gemini-2.0-flash-exp";
+const defaultModel = "models/gemini-2.0-flash";
 const defaultTurnTimeoutMs = 45_000;
 
 const decodeWsData = async (data: string | Blob): Promise<string> =>
