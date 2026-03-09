@@ -226,9 +226,15 @@ const parseWithCatch = <T extends ZodType>(
   parameters: T,
   // deno-lint-ignore no-explicit-any
   args: any,
+  strict = false,
 ): { ok: false; error: Error } | { ok: true; result: z.infer<T> } => {
   try {
-    return { ok: true, result: parameters.parse(args) };
+    const p = strict && "strict" in parameters &&
+        typeof (parameters as unknown as { strict?: () => ZodType }).strict ===
+          "function"
+      ? (parameters as unknown as { strict: () => ZodType }).strict()
+      : parameters;
+    return { ok: true, result: p.parse(args) as z.infer<T> };
   } catch (error) {
     return { ok: false, error: error as Error };
   }
@@ -258,7 +264,7 @@ const callToResult =
       return { toolCallId, name, result: `Function ${name} not found` };
     }
     const { handler, parameters } = action;
-    const parseResult = parseWithCatch(parameters, effectiveArgs);
+    const parseResult = parseWithCatch(parameters, effectiveArgs, true);
     if (!parseResult.ok) {
       return {
         toolCallId,
@@ -442,7 +448,7 @@ const handleFunctionCalls =
         n === fc.name
       );
       if (action?.isDeferred) {
-        const parseResult = parseWithCatch(action.parameters, fc.args);
+        const parseResult = parseWithCatch(action.parameters, fc.args, true);
         if (parseResult.ok) await action.handler(parseResult.result, fc.id!);
         hadDeferred = true;
         return;
