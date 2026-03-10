@@ -9,6 +9,7 @@ export type LiveAudioChunk = {
 export type AudioSessionEvent =
   | { type: "input_transcript"; text: string; finished: boolean }
   | { type: "output_transcript"; text: string; finished: boolean }
+  | { type: "thought"; text: string }
   | { type: "audio"; chunk: LiveAudioChunk }
   | {
     type: "tool_call";
@@ -256,13 +257,17 @@ export const createAudioSession = async ({
         });
       }
       if (part.text) {
-        consumeTranscriptEvent(
-          bufferedEvents,
-          "output_transcript",
-          part.text,
-          false,
-          onSessionEvent,
-        );
+        if (part.thought) {
+          addEvent({ type: "thought", text: part.text });
+        } else {
+          consumeTranscriptEvent(
+            bufferedEvents,
+            "output_transcript",
+            part.text,
+            false,
+            onSessionEvent,
+          );
+        }
       }
     }
     const functionCalls = msg.toolCall?.functionCalls ?? [];

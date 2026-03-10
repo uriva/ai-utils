@@ -160,6 +160,9 @@ const emitModelEvents = async (
     ));
   }
   for (const event of sessionOutput) {
+    if (event.type === "thought") {
+      await outputEvent(ownThoughtTurn(event.text));
+    }
     if (event.type !== "tool_call") continue;
     await outputEvent(toolUseTurnWithMetadata({
       id: event.id,
