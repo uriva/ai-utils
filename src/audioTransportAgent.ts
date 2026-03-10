@@ -218,17 +218,19 @@ export const runAudioAgentLoop = async (
         event.type === "tool_call"
       ) {
         const sessionOutput = turnEvents;
+        const wasInterrupted = event.type === "interrupted";
         turnEvents = [];
-        void processTurnOutput(sessionOutput);
+        processTurnOutput(sessionOutput, wasInterrupted).catch((e) =>
+          console.error("processTurnOutput error:", e)
+        );
       }
     },
   });
 
-  const processTurnOutput = async (sessionOutput: AudioSessionEvent[]) => {
-    // We already sent audio instantly via onSessionEvent, so filter it out here
-    // for emitModelEvents to avoid duplicate logs, or just let emitModelEvents
-    // log it (emitModelEvents currently handles transcript and tool_call logging).
-    // Actually emitModelEvents builds attachments from audio.
+  const processTurnOutput = async (
+    sessionOutput: AudioSessionEvent[],
+    wasInterrupted: boolean,
+  ) => {
     const heard = transcriptOf(sessionOutput, "input_transcript");
     if (heard.length > 0) {
       await outputEvent(participantEditMessageTurn({
@@ -238,23 +240,26 @@ export const runAudioAgentLoop = async (
       }));
     }
 
-    // For emitModelEvents, we still pass the output to get text / tool_calls / audio logged
-    await emitModelEvents(
-      outputEvent,
-      transport.participantName,
-      sessionOutput,
-    );
+    if (!wasInterrupted) {
+      await emitModelEvents(
+        outputEvent,
+        transport.participantName,
+        sessionOutput,
+      );
+    }
     await resolveToolCalls(
       session,
       spec.tools,
       sessionOutput,
     );
 
-    const outgoingMessages = sessionOutputToMessages(
-      transport.participantName,
-      sessionOutput,
-    );
-    await Promise.all(outgoingMessages.map(endpoint.sendData));
+    if (!wasInterrupted) {
+      const outgoingMessages = sessionOutputToMessages(
+        transport.participantName,
+        sessionOutput,
+      );
+      await Promise.all(outgoingMessages.map(endpoint.sendData));
+    }
   };
 
   let vadTimeout: number | undefined;
