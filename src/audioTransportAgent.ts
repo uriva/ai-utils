@@ -6,7 +6,6 @@ import {
   ownThoughtTurn,
   ownUtteranceTurn,
   participantEditMessageTurn,
-  participantUtteranceTurn,
   type Tool,
   toolUseTurnWithMetadata,
 } from "./agent.ts";
@@ -130,15 +129,8 @@ const resolveToolCalls = async (
 };
 const emitModelEvents = async (
   outputEvent: (event: HistoryEvent) => Promise<void>,
-  participantName: string,
   sessionOutput: AudioSessionEvent[],
 ) => {
-  const heard = transcriptOf(sessionOutput, "input_transcript");
-  if (heard.length > 0) {
-    await outputEvent(
-      participantUtteranceTurn({ name: participantName, text: heard }),
-    );
-  }
   const spoken = spokenReplyOnly(
     transcriptOf(sessionOutput, "output_transcript"),
   );
@@ -243,7 +235,6 @@ export const runAudioAgentLoop = async (
     if (!wasInterrupted) {
       await emitModelEvents(
         outputEvent,
-        transport.participantName,
         sessionOutput,
       );
     }
