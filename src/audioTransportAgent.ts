@@ -1,4 +1,3 @@
-import { empty } from "gamla";
 import {
   accessOutputEvent,
   type AgentSpec,
@@ -143,21 +142,8 @@ const emitModelEvents = async (
   const spoken = spokenReplyOnly(
     transcriptOf(sessionOutput, "output_transcript"),
   );
-  const audioEvents = sessionOutput.filter((
-    event,
-  ): event is Extract<AudioSessionEvent, { type: "audio" }> =>
-    event.type === "audio"
-  );
-  const attachments = audioEvents.map((event) => ({
-    kind: "inline" as const,
-    mimeType: event.chunk.mimeType,
-    dataBase64: event.chunk.dataBase64,
-  }));
-  if (spoken.length > 0 || !empty(attachments)) {
-    await outputEvent(ownUtteranceTurn(
-      spoken,
-      empty(attachments) ? undefined : attachments,
-    ));
+  if (spoken.length > 0) {
+    await outputEvent(ownUtteranceTurn(spoken));
   }
   for (const event of sessionOutput) {
     if (event.type === "thought") {
@@ -212,11 +198,6 @@ export const runAudioAgentLoop = async (
     prompt: spec.prompt,
     voiceName: transport.voiceName,
     tools: spec.tools,
-    onDebug: ({ message }) => {
-      void outputEvent(
-        ownThoughtTurn(`audio-debug ${transport.participantName}: ${message}`),
-      );
-    },
     onSessionEvent: (event) => {
       if (event.type === "audio") {
         void endpoint.sendData({
