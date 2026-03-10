@@ -5,7 +5,8 @@ export type DuplexMessage =
     chunks: Array<{ mimeType: string; dataBase64: string }>;
     from: string;
   }
-  | { type: "close"; from: string };
+  | { type: "close"; from: string }
+  | { type: "flush"; from: string };
 
 export type DuplexEndpoint = {
   sendData: (message: DuplexMessage) => Promise<void>;

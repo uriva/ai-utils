@@ -208,6 +208,12 @@ export const runAudioAgentLoop = async (
         });
       }
       turnEvents.push(event);
+      if (event.type === "interrupted") {
+        void endpoint.sendData({
+          type: "flush",
+          from: transport.participantName,
+        });
+      }
       if (
         event.type === "turn_complete" ||
         event.type === "interrupted" ||
