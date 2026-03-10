@@ -3,6 +3,7 @@ import {
   type AgentSpec,
   handleFunctionCalls,
   type HistoryEvent,
+  injectOutputEvent,
   ownThoughtTurn,
   ownUtteranceTurn,
   participantEditMessageTurn,
@@ -106,6 +107,7 @@ const resolveToolCalls = async (
   // deno-lint-ignore no-explicit-any
   tools: Tool<any>[],
   sessionOutput: AudioSessionEvent[],
+  outputEvent: (event: HistoryEvent) => Promise<void>,
 ) => {
   const toolCallEvents = sessionOutput
     .filter((e): e is Extract<AudioSessionEvent, { type: "tool_call" }> =>
@@ -117,15 +119,17 @@ const resolveToolCalls = async (
         undefined,
       )
     );
-  await handleFunctionCalls(tools, (event) => {
-    if (event.type === "tool_result") {
-      session.respondToToolCall({
-        id: event.toolCallId!,
-        name: event.name,
-        response: { result: event.result },
-      });
-    }
-  })(toolCallEvents);
+  await injectOutputEvent(outputEvent)(() =>
+    handleFunctionCalls(tools, (event) => {
+      if (event.type === "tool_result") {
+        session.respondToToolCall({
+          id: event.toolCallId!,
+          name: event.name,
+          response: { result: event.result },
+        });
+      }
+    })(toolCallEvents)
+  )();
 };
 const emitModelEvents = async (
   outputEvent: (event: HistoryEvent) => Promise<void>,
@@ -242,6 +246,7 @@ export const runAudioAgentLoop = async (
       session,
       spec.tools,
       sessionOutput,
+      outputEvent,
     );
 
     if (!wasInterrupted) {
