@@ -159,6 +159,7 @@ export const runAudioAgentLoop = async (
   const transport = spec.transport;
   let isClosed = false;
   let interrupted = false;
+  let latestOutputTranscript = "";
 
   let turnEvents: AudioSessionEvent[] = [];
   let audioInputBuffer = new Uint8Array(0);
@@ -193,23 +194,32 @@ export const runAudioAgentLoop = async (
         });
       }
       turnEvents.push(event);
+      if (event.type === "output_transcript") {
+        latestOutputTranscript = event.text;
+        if (event.finished && !interrupted) {
+          emitUtterance(event.text);
+          latestOutputTranscript = "";
+        }
+      }
       if (event.type === "interrupted") {
         interrupted = true;
+        latestOutputTranscript = "";
         void endpoint.sendData({
           type: "flush",
           from: transport.participantName,
         });
       }
       if (
-        event.type === "output_transcript" && event.finished && !interrupted
-      ) {
-        emitUtterance(event.text);
-      }
-      if (
         event.type === "turn_complete" ||
         event.type === "interrupted" ||
         event.type === "tool_call"
       ) {
+        if (
+          event.type === "turn_complete" && !interrupted &&
+          latestOutputTranscript
+        ) {
+          emitUtterance(latestOutputTranscript);
+        }
         const sessionOutput = turnEvents;
         turnEvents = [];
         processTurnOutput(sessionOutput, interrupted).catch((e) =>
@@ -217,6 +227,7 @@ export const runAudioAgentLoop = async (
         );
         if (event.type !== "tool_call") {
           interrupted = false;
+          latestOutputTranscript = "";
         }
       }
     },
