@@ -77,9 +77,13 @@ Deno.test({
         outputEvents.map((e) => e.type).join(", ")
       }`,
     );
+    const fullText = utterances
+      .map((e) => e.type === "own_utterance" ? e.text : "")
+      .join(" ")
+      .trim();
     assert(
-      utterances[0].type === "own_utterance" && utterances[0].text.length > 0,
-      "Utterance text should be non-empty",
+      fullText.split(/\s+/).length >= 2,
+      `Expected utterance to contain at least 2 words, got: "${fullText}"`,
     );
   }),
 });
@@ -283,8 +287,19 @@ Deno.test({
       ...bobEvents.filter((e) => e.type === "participant_edit_message"),
     ];
 
+    assert(
+      allEditMessages.length > 0,
+      `Expected at least one participant_edit_message, got event types: ${
+        [...aliceEvents, ...bobEvents].map((e) => e.type).join(", ")
+      }`,
+    );
+
     for (const event of allEditMessages) {
       if (event.type !== "participant_edit_message") continue;
+      assert(
+        event.text.trim().split(/\s+/).length >= 2,
+        `Expected participant_edit_message to contain at least 2 words, got: "${event.text}"`,
+      );
       const words = event.text.split(/\s+/);
       const uniqueThreeGrams = new Set<string>();
       let duplicateCount = 0;
