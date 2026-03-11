@@ -31,15 +31,13 @@ export const runAudioTransportAgent = async (
   );
 };
 
-const transcriptOf = (
+export const transcriptOf = (
   events: AudioSessionEvent[],
   type: "input_transcript" | "output_transcript",
 ) =>
-  events.filter((
-    event,
-  ): event is Extract<AudioSessionEvent, { type: typeof type }> =>
-    event.type === type
-  ).map((event) => event.text).join(" ").trim();
+  (events.findLast((event) => event.type === type) as
+    | Extract<AudioSessionEvent, { type: typeof type }>
+    | undefined)?.text?.trim() ?? "";
 
 const stripReasoningPreamble = (text: string) => {
   const withoutMarkdownHeading = text.replace(/^\*\*[^*]+\*\*\s*/s, "");
