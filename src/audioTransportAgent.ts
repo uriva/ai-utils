@@ -9,7 +9,7 @@ import {
   type Tool,
   toolUseTurnWithMetadata,
 } from "./agent.ts";
-import type { DuplexEndpoint, DuplexMessage } from "./duplex.ts";
+import type { DuplexEndpoint } from "./duplex.ts";
 import {
   type AudioSessionEvent,
   createAudioSession,
@@ -107,36 +107,34 @@ const resolveToolCalls = async (
   tools: Tool<any>[],
   sessionOutput: AudioSessionEvent[],
 ) => {
+  const geminiIdByHistoryId = new Map<string, string>();
   const toolCallEvents = sessionOutput
     .filter((e): e is Extract<AudioSessionEvent, { type: "tool_call" }> =>
       e.type === "tool_call"
     )
-    .map((e) =>
-      toolUseTurnWithMetadata(
+    .map((e) => {
+      const event = toolUseTurnWithMetadata(
         { id: e.id, name: e.name, args: e.args },
         undefined,
-      )
-    );
+      );
+      geminiIdByHistoryId.set(event.id, e.id);
+      return event;
+    });
   await handleFunctionCalls(tools, (event) => {
     if (event.type === "tool_result") {
+      const geminiId = geminiIdByHistoryId.get(event.toolCallId!);
       session.respondToToolCall({
-        id: event.toolCallId!,
+        id: geminiId ?? event.toolCallId!,
         name: event.name,
         response: { result: event.result },
       });
     }
   })(toolCallEvents);
 };
-const emitModelEvents = async (
+const emitNonUtteranceEvents = async (
   outputEvent: (event: HistoryEvent) => Promise<void>,
   sessionOutput: AudioSessionEvent[],
 ) => {
-  const spoken = spokenReplyOnly(
-    transcriptOf(sessionOutput, "output_transcript"),
-  );
-  if (spoken.length > 0) {
-    await outputEvent(ownUtteranceTurn(spoken));
-  }
   for (const event of sessionOutput) {
     if (event.type === "thought") {
       await outputEvent(ownThoughtTurn(event.text));
@@ -150,27 +148,6 @@ const emitModelEvents = async (
   }
 };
 
-const sessionOutputToMessages = (
-  from: string,
-  sessionOutput: AudioSessionEvent[],
-): DuplexMessage[] => {
-  // We no longer send audio here because audio is streamed instantly via onSessionEvent.
-  const textMessages = sessionOutput.filter((
-    event,
-  ): event is Extract<AudioSessionEvent, { type: "output_transcript" }> =>
-    event.type === "output_transcript"
-  ).map((event) => spokenReplyOnly(event.text)).filter((text) =>
-    text.length > 0
-  ).map((text) => ({
-    type: "text" as const,
-    text,
-    from,
-  }));
-  return [
-    ...textMessages,
-  ];
-};
-
 export const runAudioAgentLoop = async (
   spec: AgentSpec,
   endpoint: DuplexEndpoint,
@@ -181,9 +158,21 @@ export const runAudioAgentLoop = async (
   }
   const transport = spec.transport;
   let isClosed = false;
+  let interrupted = false;
 
   let turnEvents: AudioSessionEvent[] = [];
   let audioInputBuffer = new Uint8Array(0);
+
+  const emitUtterance = (text: string) => {
+    const spoken = spokenReplyOnly(text);
+    if (spoken.length === 0) return;
+    void outputEvent(ownUtteranceTurn(spoken));
+    void endpoint.sendData({
+      type: "text" as const,
+      text: spoken,
+      from: transport.participantName,
+    });
+  };
 
   const session = await createAudioSession({
     apiKey: accessGeminiToken(),
@@ -205,10 +194,16 @@ export const runAudioAgentLoop = async (
       }
       turnEvents.push(event);
       if (event.type === "interrupted") {
+        interrupted = true;
         void endpoint.sendData({
           type: "flush",
           from: transport.participantName,
         });
+      }
+      if (
+        event.type === "output_transcript" && event.finished && !interrupted
+      ) {
+        emitUtterance(event.text);
       }
       if (
         event.type === "turn_complete" ||
@@ -216,11 +211,13 @@ export const runAudioAgentLoop = async (
         event.type === "tool_call"
       ) {
         const sessionOutput = turnEvents;
-        const wasInterrupted = event.type === "interrupted";
         turnEvents = [];
-        processTurnOutput(sessionOutput, wasInterrupted).catch((e) =>
+        processTurnOutput(sessionOutput, interrupted).catch((e) =>
           console.error("processTurnOutput error:", e)
         );
+        if (event.type !== "tool_call") {
+          interrupted = false;
+        }
       }
     },
   });
@@ -239,7 +236,7 @@ export const runAudioAgentLoop = async (
     }
 
     if (!wasInterrupted) {
-      await emitModelEvents(
+      await emitNonUtteranceEvents(
         outputEvent,
         sessionOutput,
       );
@@ -249,14 +246,6 @@ export const runAudioAgentLoop = async (
       spec.tools,
       sessionOutput,
     );
-
-    if (!wasInterrupted) {
-      const outgoingMessages = sessionOutputToMessages(
-        transport.participantName,
-        sessionOutput,
-      );
-      await Promise.all(outgoingMessages.map(endpoint.sendData));
-    }
   };
 
   let vadTimeout: number | undefined;
