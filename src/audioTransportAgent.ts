@@ -101,6 +101,28 @@ const spokenReplyOnly = (text: string) => {
   return stripped;
 };
 
+const audioToolTimeoutMs = 60_000;
+
+const respondWithError = (
+  session: Awaited<ReturnType<typeof createAudioSession>>,
+  sessionOutput: AudioSessionEvent[],
+  respondedGeminiIds: Set<string>,
+  errorMsg: string,
+) => {
+  for (const tc of sessionOutput.filter(
+    (ev): ev is Extract<AudioSessionEvent, { type: "tool_call" }> =>
+      ev.type === "tool_call",
+  )) {
+    if (!respondedGeminiIds.has(tc.id)) {
+      session.respondToToolCall({
+        id: tc.id,
+        name: tc.name,
+        response: { result: errorMsg },
+      });
+    }
+  }
+};
+
 const resolveToolCalls = async (
   session: Awaited<ReturnType<typeof createAudioSession>>,
   // deno-lint-ignore no-explicit-any
@@ -108,6 +130,7 @@ const resolveToolCalls = async (
   sessionOutput: AudioSessionEvent[],
 ) => {
   const geminiIdByHistoryId = new Map<string, string>();
+  const respondedGeminiIds = new Set<string>();
   const toolCallEvents = sessionOutput
     .filter((e): e is Extract<AudioSessionEvent, { type: "tool_call" }> =>
       e.type === "tool_call"
@@ -120,16 +143,35 @@ const resolveToolCalls = async (
       geminiIdByHistoryId.set(event.id, e.id);
       return event;
     });
-  await handleFunctionCalls(tools, (event) => {
-    if (event.type === "tool_result") {
-      const geminiId = geminiIdByHistoryId.get(event.toolCallId!);
-      session.respondToToolCall({
-        id: geminiId ?? event.toolCallId!,
-        name: event.name,
-        response: { result: event.result },
-      });
-    }
-  })(toolCallEvents);
+  try {
+    await Promise.race([
+      handleFunctionCalls(tools, (event) => {
+        if (event.type === "tool_result") {
+          const geminiId = geminiIdByHistoryId.get(event.toolCallId!);
+          const id = geminiId ?? event.toolCallId!;
+          respondedGeminiIds.add(id);
+          session.respondToToolCall({
+            id,
+            name: event.name,
+            response: { result: event.result },
+          });
+        }
+      })(toolCallEvents),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("Tool execution timed out")),
+          audioToolTimeoutMs,
+        )
+      ),
+    ]);
+  } catch (e) {
+    respondWithError(
+      session,
+      sessionOutput,
+      respondedGeminiIds,
+      `Error: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
 };
 const emitNonUtteranceEvents = async (
   outputEvent: (event: HistoryEvent) => Promise<void>,
