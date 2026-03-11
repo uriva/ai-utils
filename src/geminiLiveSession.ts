@@ -160,6 +160,7 @@ export const createAudioSession = async ({
               },
             }),
           },
+          outputAudioTranscription: {},
           ...(prompt
             ? { systemInstruction: { parts: [{ text: prompt }] } }
             : {}),

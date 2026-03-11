@@ -87,7 +87,7 @@ const resample24kTo16k = (pcm24k: Uint8Array) => {
   return new Uint8Array(output.buffer.slice(0));
 };
 
-const spokenReplyOnly = (text: string) => {
+export const spokenReplyOnly = (text: string) => {
   const stripped = stripReasoningPreamble(text);
   if (
     stripped.includes("triggering the immediate use of") &&
@@ -101,6 +101,61 @@ const spokenReplyOnly = (text: string) => {
   return stripped;
 };
 
+type SessionEventCallbacks = {
+  onAudio: (chunk: LiveAudioChunk) => void;
+  onUtterance: (text: string) => void;
+  onFlush: () => void;
+  onTurnOutput: (
+    sessionOutput: AudioSessionEvent[],
+    wasInterrupted: boolean,
+  ) => void;
+};
+
+const makeSessionEventHandler = (
+  callbacks: SessionEventCallbacks,
+) => {
+  let interrupted = false;
+  let latestOutputTranscript = "";
+  let turnEvents: AudioSessionEvent[] = [];
+  return (event: AudioSessionEvent) => {
+    if (event.type === "audio") {
+      callbacks.onAudio(event.chunk);
+    }
+    turnEvents.push(event);
+    if (event.type === "output_transcript") {
+      latestOutputTranscript = event.text;
+      if (event.finished && !interrupted) {
+        callbacks.onUtterance(event.text);
+        latestOutputTranscript = "";
+      }
+    }
+    if (event.type === "interrupted") {
+      interrupted = true;
+      latestOutputTranscript = "";
+      callbacks.onFlush();
+    }
+    if (
+      event.type === "turn_complete" ||
+      event.type === "interrupted" ||
+      event.type === "tool_call"
+    ) {
+      if (
+        event.type === "turn_complete" && !interrupted &&
+        latestOutputTranscript
+      ) {
+        callbacks.onUtterance(latestOutputTranscript);
+      }
+      const sessionOutput = turnEvents;
+      turnEvents = [];
+      callbacks.onTurnOutput(sessionOutput, interrupted);
+      if (event.type !== "tool_call") {
+        interrupted = false;
+        latestOutputTranscript = "";
+      }
+    }
+  };
+};
+
 const audioToolTimeoutMs = 60_000;
 
 const respondWithError = (
@@ -109,10 +164,12 @@ const respondWithError = (
   respondedGeminiIds: Set<string>,
   errorMsg: string,
 ) => {
-  for (const tc of sessionOutput.filter(
-    (ev): ev is Extract<AudioSessionEvent, { type: "tool_call" }> =>
-      ev.type === "tool_call",
-  )) {
+  for (
+    const tc of sessionOutput.filter(
+      (ev): ev is Extract<AudioSessionEvent, { type: "tool_call" }> =>
+        ev.type === "tool_call",
+    )
+  ) {
     if (!respondedGeminiIds.has(tc.id)) {
       session.respondToToolCall({
         id: tc.id,
@@ -200,10 +257,6 @@ export const runAudioAgentLoop = async (
   }
   const transport = spec.transport;
   let isClosed = false;
-  let interrupted = false;
-  let latestOutputTranscript = "";
-
-  let turnEvents: AudioSessionEvent[] = [];
   let audioInputBuffer = new Uint8Array(0);
 
   const emitUtterance = (text: string) => {
@@ -222,57 +275,27 @@ export const runAudioAgentLoop = async (
     prompt: spec.prompt,
     voiceName: transport.voiceName,
     tools: spec.tools,
-    onSessionEvent: (event) => {
-      if (event.type === "audio") {
+    onSessionEvent: makeSessionEventHandler({
+      onAudio: (chunk) => {
         void endpoint.sendData({
           type: "audio",
-          chunks: [
-            {
-              mimeType: event.chunk.mimeType,
-              dataBase64: event.chunk.dataBase64,
-            },
-          ],
+          chunks: [{ mimeType: chunk.mimeType, dataBase64: chunk.dataBase64 }],
           from: transport.participantName,
         });
-      }
-      turnEvents.push(event);
-      if (event.type === "output_transcript") {
-        latestOutputTranscript = event.text;
-        if (event.finished && !interrupted) {
-          emitUtterance(event.text);
-          latestOutputTranscript = "";
-        }
-      }
-      if (event.type === "interrupted") {
-        interrupted = true;
-        latestOutputTranscript = "";
+      },
+      onUtterance: emitUtterance,
+      onFlush: () => {
         void endpoint.sendData({
           type: "flush",
           from: transport.participantName,
         });
-      }
-      if (
-        event.type === "turn_complete" ||
-        event.type === "interrupted" ||
-        event.type === "tool_call"
-      ) {
-        if (
-          event.type === "turn_complete" && !interrupted &&
-          latestOutputTranscript
-        ) {
-          emitUtterance(latestOutputTranscript);
-        }
-        const sessionOutput = turnEvents;
-        turnEvents = [];
-        processTurnOutput(sessionOutput, interrupted).catch((e) =>
+      },
+      onTurnOutput: (sessionOutput, wasInterrupted) => {
+        processTurnOutput(sessionOutput, wasInterrupted).catch((e) =>
           console.error("processTurnOutput error:", e)
         );
-        if (event.type !== "tool_call") {
-          interrupted = false;
-          latestOutputTranscript = "";
-        }
-      }
-    },
+      },
+    }),
   });
 
   const processTurnOutput = async (
