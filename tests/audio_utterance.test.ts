@@ -6,7 +6,11 @@ import {
   runAgent,
   tool,
 } from "../mod.ts";
-import { spokenReplyOnly, transcriptOf } from "../src/audioTransportAgent.ts";
+import {
+  makeSessionEventHandler,
+  spokenReplyOnly,
+  transcriptOf,
+} from "../src/audioTransportAgent.ts";
 import { injectSecrets } from "../test_helpers.ts";
 import { z } from "zod/v4";
 
@@ -315,3 +319,35 @@ Deno.test({
     }
   }),
 });
+
+Deno.test(
+  "makeSessionEventHandler: tool_call after interrupted passes wasInterrupted=false",
+  () => {
+    const turnOutputCalls: { wasInterrupted: boolean }[] = [];
+    const handler = makeSessionEventHandler({
+      onAudio: () => {},
+      onUtterance: () => {},
+      onFlush: () => {},
+      onTurnOutput: (_sessionOutput, wasInterrupted) => {
+        turnOutputCalls.push({ wasInterrupted });
+      },
+    });
+
+    handler({ type: "output_transcript", text: "Hello", finished: false });
+    handler({ type: "interrupted" });
+    handler({
+      type: "tool_call",
+      id: "tc1",
+      name: "get_weather",
+      args: { city: "Paris" },
+    });
+
+    assertEquals(turnOutputCalls.length, 2);
+    assertEquals(turnOutputCalls[0].wasInterrupted, true);
+    assertEquals(
+      turnOutputCalls[1].wasInterrupted,
+      false,
+      "tool_call after interrupted should pass wasInterrupted=false so tool_call events are emitted to view-chat",
+    );
+  },
+);

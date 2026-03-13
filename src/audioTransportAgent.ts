@@ -109,7 +109,7 @@ type SessionEventCallbacks = {
   ) => void;
 };
 
-const makeSessionEventHandler = (
+export const makeSessionEventHandler = (
   callbacks: SessionEventCallbacks,
 ) => {
   let interrupted = false;
