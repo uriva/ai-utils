@@ -214,6 +214,23 @@ export const createAudioSession = async ({
     pendingTurn = undefined;
   };
 
+  ws.onclose = (e) => {
+    console.log(
+      `[audio-tool] Gemini WS closed: code=${e.code} reason=${e.reason}`,
+    );
+    rejectPendingTurn(
+      new Error(`Gemini WS closed: code=${e.code} reason=${e.reason}`),
+    );
+  };
+
+  ws.onerror = (e) => {
+    console.error(
+      `[audio-tool] Gemini WS error: ${
+        e instanceof Error ? e.message : "unknown"
+      }`,
+    );
+  };
+
   ws.onmessage = async (event) => {
     const msg = JSON.parse(await decodeWsData(event.data));
     if (msg.error) {
@@ -398,6 +415,12 @@ export const createAudioSession = async ({
       name: string;
       response: Record<string, unknown>;
     }) => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        console.error(
+          `[audio-tool] respondToToolCall(${name}): WebSocket not open (readyState=${ws.readyState})`,
+        );
+        return;
+      }
       ws.send(JSON.stringify({
         toolResponse: {
           functionResponses: [{ id, name, response }],

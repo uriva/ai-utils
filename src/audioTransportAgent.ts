@@ -198,6 +198,18 @@ const resolveToolCalls = async (
       geminiIdByHistoryId.set(event.id, e.id);
       return event;
     });
+  if (toolCallEvents.length === 0) return;
+  const toolNames = sessionOutput
+    .filter((e): e is Extract<AudioSessionEvent, { type: "tool_call" }> =>
+      e.type === "tool_call"
+    )
+    .map((e) => e.name);
+  console.log(
+    `[audio-tool] resolveToolCalls start: ${toolCallEvents.length} calls: ${
+      toolNames.join(", ")
+    }`,
+  );
+  const startTime = Date.now();
   try {
     await Promise.race([
       handleFunctionCalls(tools, (event) => {
@@ -205,6 +217,11 @@ const resolveToolCalls = async (
           const geminiId = geminiIdByHistoryId.get(event.toolCallId!);
           const id = geminiId ?? event.toolCallId!;
           respondedGeminiIds.add(id);
+          console.log(
+            `[audio-tool] tool result for ${event.name} after ${
+              Date.now() - startTime
+            }ms, responding to Gemini`,
+          );
           session.respondToToolCall({
             id,
             name: event.name,
@@ -219,7 +236,15 @@ const resolveToolCalls = async (
         )
       ),
     ]);
+    console.log(
+      `[audio-tool] resolveToolCalls completed in ${Date.now() - startTime}ms`,
+    );
   } catch (e) {
+    console.error(
+      `[audio-tool] resolveToolCalls error after ${Date.now() - startTime}ms: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
     respondWithError(
       session,
       sessionOutput,
