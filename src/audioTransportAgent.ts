@@ -295,12 +295,26 @@ export const runAudioAgentLoop = async (
 
   let loggedFirstAudioIn = false;
   let loggedFirstAudioOut = false;
+  let resolveLoop: (() => void) | undefined;
 
   const session = await createAudioSession({
     apiKey: accessGeminiToken(),
     prompt: spec.prompt,
     voiceName: transport.voiceName,
     tools: spec.tools,
+    onClose: (code, reason) => {
+      if (isClosed) return;
+      console.log(
+        `[audio] Gemini WS died unexpectedly (code=${code} reason=${reason}), closing call`,
+      );
+      isClosed = true;
+      clearTimeout(vadTimeout);
+      void endpoint.sendData({
+        type: "close",
+        from: transport.participantName,
+      });
+      resolveLoop?.();
+    },
     onSessionEvent: makeSessionEventHandler({
       onAudio: (chunk) => {
         if (!loggedFirstAudioOut) {
@@ -358,6 +372,7 @@ export const runAudioAgentLoop = async (
   let vadTimeout: number | undefined;
 
   await new Promise<void>((resolve) => {
+    resolveLoop = resolve;
     endpoint.onData(async (message) => {
       if (isClosed) return;
       if (message.type === "close") {

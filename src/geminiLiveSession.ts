@@ -35,6 +35,7 @@ export type AudioSessionConfig = {
   tools?: Tool<any>[];
   onDebug?: (event: AudioSessionDebugEvent) => void;
   onSessionEvent?: (event: AudioSessionEvent) => void;
+  onClose?: (code: number, reason: string) => void;
 };
 
 type LiveFunctionDeclaration = {
@@ -124,6 +125,7 @@ export const createAudioSession = async ({
   tools,
   onDebug,
   onSessionEvent,
+  onClose,
 }: AudioSessionConfig): Promise<AudioSession> => {
   const ws = new WebSocket(
     `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`,
@@ -131,6 +133,8 @@ export const createAudioSession = async ({
   let pendingTurn: PendingTurn | undefined;
   let activeTurn = false;
   let bufferedEvents: AudioSessionEvent[] = [];
+  let toolCallPending = false;
+  let pendingToolCount = 0;
   const isNative = model.includes("native");
   const debug = (message: string) => {
     onDebug?.({ type: "debug", message });
@@ -221,6 +225,7 @@ export const createAudioSession = async ({
     rejectPendingTurn(
       new Error(`Gemini WS closed: code=${e.code} reason=${e.reason}`),
     );
+    onClose?.(e.code, e.reason);
   };
 
   ws.onerror = (e) => {
@@ -301,6 +306,8 @@ export const createAudioSession = async ({
       });
     }
     if (functionCalls.length > 0) {
+      toolCallPending = true;
+      pendingToolCount = functionCalls.length;
       flushEvents();
       return;
     }
@@ -386,6 +393,7 @@ export const createAudioSession = async ({
       return await wait;
     },
     streamAudioChunks: (chunks: LiveAudioChunk[]) => {
+      if (toolCallPending) return;
       activeTurn = true;
       for (const chunk of chunks) {
         const payload = {
@@ -399,6 +407,7 @@ export const createAudioSession = async ({
     },
     commitTurn: () => {
       if (isNative) return;
+      if (toolCallPending) return;
       debug("commitTurn manually triggered");
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
@@ -426,6 +435,8 @@ export const createAudioSession = async ({
           functionResponses: [{ id, name, response }],
         },
       }));
+      pendingToolCount = Math.max(0, pendingToolCount - 1);
+      if (pendingToolCount === 0) toolCallPending = false;
     },
     close: async () => {
       if (ws.readyState === WebSocket.CLOSED) return;
