@@ -268,6 +268,9 @@ export const runAudioAgentLoop = async (
     });
   };
 
+  let loggedFirstAudioIn = false;
+  let loggedFirstAudioOut = false;
+
   const session = await createAudioSession({
     apiKey: accessGeminiToken(),
     prompt: spec.prompt,
@@ -275,6 +278,10 @@ export const runAudioAgentLoop = async (
     tools: spec.tools,
     onSessionEvent: makeSessionEventHandler({
       onAudio: (chunk) => {
+        if (!loggedFirstAudioOut) {
+          loggedFirstAudioOut = true;
+          console.log("[audio] first output audio from Gemini");
+        }
         void endpoint.sendData({
           type: "audio",
           chunks: [{ mimeType: chunk.mimeType, dataBase64: chunk.dataBase64 }],
@@ -295,6 +302,7 @@ export const runAudioAgentLoop = async (
       },
     }),
   });
+  console.log("[audio] session created");
 
   const processTurnOutput = async (
     sessionOutput: AudioSessionEvent[],
@@ -328,6 +336,7 @@ export const runAudioAgentLoop = async (
     endpoint.onData(async (message) => {
       if (isClosed) return;
       if (message.type === "close") {
+        console.log("[audio] session closed");
         isClosed = true;
         clearTimeout(vadTimeout);
         await session.close();
@@ -340,6 +349,10 @@ export const runAudioAgentLoop = async (
           // so we just catch errors if any
           session.sendText(message.text).catch(() => {});
         } else if (message.type === "audio") {
+          if (!loggedFirstAudioIn) {
+            loggedFirstAudioIn = true;
+            console.log("[audio] first input audio received");
+          }
           // Buffer incoming audio to send in 3200-byte chunks
           const incomingBytes = concatBytes([
             ...message.chunks.map(({ mimeType, dataBase64 }) =>
