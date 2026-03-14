@@ -11,6 +11,7 @@ import {
 } from "./agent.ts";
 import type { DuplexEndpoint } from "./duplex.ts";
 import {
+  type AudioSessionConfig,
   type AudioSessionEvent,
   createAudioSession,
   type LiveAudioChunk,
@@ -270,6 +271,102 @@ const emitNonUtteranceEvents = async (
   }
 };
 
+const maxReconnectAttempts = 3;
+
+const createSessionConfig = (
+  spec: AgentSpec & { transport: { kind: "audio" } },
+  endpoint: DuplexEndpoint,
+  outputEvent: (event: HistoryEvent) => Promise<void>,
+  state: {
+    isClosed: boolean;
+    isReconnecting: boolean;
+    reconnectAttempts: number;
+    loggedFirstAudioOut: boolean;
+    vadTimeout: number | undefined;
+    session: Awaited<ReturnType<typeof createAudioSession>> | undefined;
+    resolveLoop: (() => void) | undefined;
+    reconnect: () => void;
+  },
+): AudioSessionConfig => ({
+  apiKey: accessGeminiToken(),
+  prompt: spec.prompt,
+  voiceName: spec.transport.voiceName,
+  tools: spec.tools,
+  onClose: (code, reason) => {
+    if (state.isClosed) return;
+    console.log(
+      `[audio] Gemini WS died unexpectedly (code=${code} reason=${reason})`,
+    );
+    state.reconnect();
+  },
+  onSessionEvent: makeSessionEventHandler({
+    onAudio: (chunk) => {
+      if (state.isReconnecting) return;
+      if (!state.loggedFirstAudioOut) {
+        state.loggedFirstAudioOut = true;
+        console.log("[audio] first output audio from Gemini");
+      }
+      void endpoint.sendData({
+        type: "audio",
+        chunks: [{ mimeType: chunk.mimeType, dataBase64: chunk.dataBase64 }],
+        from: spec.transport.participantName,
+      });
+    },
+    onUtterance: (text) => {
+      if (state.isReconnecting) return;
+      const spoken = spokenReplyOnly(text);
+      if (spoken.length === 0) return;
+      void outputEvent(ownUtteranceTurn(spoken));
+      void endpoint.sendData({
+        type: "text" as const,
+        text: spoken,
+        from: spec.transport.participantName,
+      });
+    },
+    onFlush: () => {
+      if (state.isReconnecting) return;
+      void endpoint.sendData({
+        type: "flush",
+        from: spec.transport.participantName,
+      });
+    },
+    onTurnOutput: (sessionOutput, wasInterrupted) => {
+      if (state.isReconnecting) return;
+      const currentSession = state.session;
+      if (!currentSession) return;
+      processTurnOutput(
+        currentSession,
+        spec,
+        outputEvent,
+        sessionOutput,
+        wasInterrupted,
+      ).catch((e) => console.error("processTurnOutput error:", e));
+    },
+  }),
+});
+
+const processTurnOutput = async (
+  session: Awaited<ReturnType<typeof createAudioSession>>,
+  spec: AgentSpec & { transport: { kind: "audio" } },
+  outputEvent: (event: HistoryEvent) => Promise<void>,
+  sessionOutput: AudioSessionEvent[],
+  wasInterrupted: boolean,
+) => {
+  const heard = transcriptOf(sessionOutput, "input_transcript");
+  if (heard.length > 0) {
+    await outputEvent(participantEditMessageTurn({
+      name: spec.transport.participantName,
+      text: heard,
+      onMessage: crypto.randomUUID(),
+    }));
+  }
+
+  if (!wasInterrupted) {
+    await emitNonUtteranceEvents(outputEvent, sessionOutput);
+  }
+  await resolveToolCalls(session, spec.tools, sessionOutput);
+};
+
 export const runAudioAgentLoop = async (
   spec: AgentSpec,
   endpoint: DuplexEndpoint,
@@ -278,122 +375,91 @@ export const runAudioAgentLoop = async (
   if (!spec.transport || spec.transport.kind !== "audio") {
     throw new Error("audio transport required");
   }
-  const transport = spec.transport;
-  let isClosed = false;
+  const typedSpec = spec as AgentSpec & { transport: { kind: "audio" } };
   let audioInputBuffer = new Uint8Array(0);
+  let loggedFirstAudioIn = false;
 
-  const emitUtterance = (text: string) => {
-    const spoken = spokenReplyOnly(text);
-    if (spoken.length === 0) return;
-    void outputEvent(ownUtteranceTurn(spoken));
-    void endpoint.sendData({
-      type: "text" as const,
-      text: spoken,
-      from: transport.participantName,
-    });
+  const state = {
+    isClosed: false,
+    isReconnecting: false,
+    reconnectAttempts: 0,
+    loggedFirstAudioOut: false,
+    vadTimeout: undefined as number | undefined,
+    session: undefined as
+      | Awaited<ReturnType<typeof createAudioSession>>
+      | undefined,
+    resolveLoop: undefined as (() => void) | undefined,
+    reconnect: () => {
+      if (state.isClosed || state.isReconnecting) return;
+      if (state.reconnectAttempts >= maxReconnectAttempts) {
+        console.log(
+          `[audio] max reconnect attempts (${maxReconnectAttempts}) reached, closing call`,
+        );
+        state.isClosed = true;
+        clearTimeout(state.vadTimeout);
+        void endpoint.sendData({
+          type: "close",
+          from: typedSpec.transport.participantName,
+        });
+        state.resolveLoop?.();
+        return;
+      }
+      state.isReconnecting = true;
+      state.reconnectAttempts++;
+      clearTimeout(state.vadTimeout);
+      state.vadTimeout = undefined;
+      console.log(
+        `[audio] reconnecting (attempt ${state.reconnectAttempts}/${maxReconnectAttempts})`,
+      );
+      createAudioSession(
+        createSessionConfig(typedSpec, endpoint, outputEvent, state),
+      )
+        .then((newSession) => {
+          state.session = newSession;
+          state.isReconnecting = false;
+          audioInputBuffer = new Uint8Array(0);
+          console.log(
+            `[audio] reconnected successfully (attempt ${state.reconnectAttempts})`,
+          );
+        })
+        .catch((e) => {
+          console.error(
+            `[audio] reconnect failed: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+          );
+          state.isReconnecting = false;
+          state.reconnect();
+        });
+    },
   };
 
-  let loggedFirstAudioIn = false;
-  let loggedFirstAudioOut = false;
-  let resolveLoop: (() => void) | undefined;
-
-  const session = await createAudioSession({
-    apiKey: accessGeminiToken(),
-    prompt: spec.prompt,
-    voiceName: transport.voiceName,
-    tools: spec.tools,
-    onClose: (code, reason) => {
-      if (isClosed) return;
-      console.log(
-        `[audio] Gemini WS died unexpectedly (code=${code} reason=${reason}), closing call`,
-      );
-      isClosed = true;
-      clearTimeout(vadTimeout);
-      void endpoint.sendData({
-        type: "close",
-        from: transport.participantName,
-      });
-      resolveLoop?.();
-    },
-    onSessionEvent: makeSessionEventHandler({
-      onAudio: (chunk) => {
-        if (!loggedFirstAudioOut) {
-          loggedFirstAudioOut = true;
-          console.log("[audio] first output audio from Gemini");
-        }
-        void endpoint.sendData({
-          type: "audio",
-          chunks: [{ mimeType: chunk.mimeType, dataBase64: chunk.dataBase64 }],
-          from: transport.participantName,
-        });
-      },
-      onUtterance: emitUtterance,
-      onFlush: () => {
-        void endpoint.sendData({
-          type: "flush",
-          from: transport.participantName,
-        });
-      },
-      onTurnOutput: (sessionOutput, wasInterrupted) => {
-        processTurnOutput(sessionOutput, wasInterrupted).catch((e) =>
-          console.error("processTurnOutput error:", e)
-        );
-      },
-    }),
-  });
+  state.session = await createAudioSession(
+    createSessionConfig(typedSpec, endpoint, outputEvent, state),
+  );
   console.log("[audio] session created");
 
-  const processTurnOutput = async (
-    sessionOutput: AudioSessionEvent[],
-    wasInterrupted: boolean,
-  ) => {
-    const heard = transcriptOf(sessionOutput, "input_transcript");
-    if (heard.length > 0) {
-      await outputEvent(participantEditMessageTurn({
-        name: transport.participantName,
-        text: heard,
-        onMessage: crypto.randomUUID(),
-      }));
-    }
-
-    if (!wasInterrupted) {
-      await emitNonUtteranceEvents(
-        outputEvent,
-        sessionOutput,
-      );
-    }
-    await resolveToolCalls(
-      session,
-      spec.tools,
-      sessionOutput,
-    );
-  };
-
-  let vadTimeout: number | undefined;
-
   await new Promise<void>((resolve) => {
-    resolveLoop = resolve;
+    state.resolveLoop = resolve;
     endpoint.onData(async (message) => {
-      if (isClosed) return;
+      if (state.isClosed) return;
       if (message.type === "close") {
         console.log("[audio] session closed");
-        isClosed = true;
-        clearTimeout(vadTimeout);
-        await session.close();
+        state.isClosed = true;
+        clearTimeout(state.vadTimeout);
+        await state.session?.close();
         resolve();
         return;
       }
+      if (state.isReconnecting || !state.session) return;
       try {
         if (message.type === "text") {
-          // sendText resolves with the output, but we already process it via onSessionEvent
-          // so we just catch errors if any
-          session.sendText(message.text).catch(() => {});
+          state.session.sendText(message.text).catch(() => {});
         } else if (message.type === "audio") {
           if (!loggedFirstAudioIn) {
             loggedFirstAudioIn = true;
             console.log("[audio] first input audio received");
           }
-          // Buffer incoming audio to send in 3200-byte chunks
           const incomingBytes = concatBytes([
             ...message.chunks.map(({ mimeType, dataBase64 }) =>
               mimeType.includes("24000")
@@ -413,7 +479,6 @@ export const runAudioAgentLoop = async (
             });
           }
           if (chunksToStream.length > 0) {
-            // Check volume of first chunk to see if it's silence
             const testBuf = new Int16Array(
               base64ToBytes(chunksToStream[0].dataBase64).buffer,
             );
@@ -424,24 +489,22 @@ export const runAudioAgentLoop = async (
             const rms = Math.sqrt(sumSq / testBuf.length);
 
             if (rms > 250) {
-              // Reset VAD timeout only if there is ACTUAL audio (RMS > 250)
-              clearTimeout(vadTimeout);
-              vadTimeout = globalThis.setTimeout(() => {
-                session.commitTurn();
+              clearTimeout(state.vadTimeout);
+              state.vadTimeout = globalThis.setTimeout(() => {
+                state.session?.commitTurn();
               }, 1500) as unknown as number;
-            } else if (!vadTimeout) {
-              // If no timeout is running, start one just in case we never see loud audio again
-              vadTimeout = globalThis.setTimeout(() => {
-                session.commitTurn();
+            } else if (!state.vadTimeout) {
+              state.vadTimeout = globalThis.setTimeout(() => {
+                state.session?.commitTurn();
               }, 1500) as unknown as number;
             }
 
-            session.streamAudioChunks(chunksToStream);
+            state.session.streamAudioChunks(chunksToStream);
           }
         }
       } catch (error) {
         await outputEvent(ownThoughtTurn(
-          `Audio transport error for ${transport.participantName}: ${
+          `Audio transport error for ${typedSpec.transport.participantName}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         ));
