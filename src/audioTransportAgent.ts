@@ -271,7 +271,10 @@ const emitNonUtteranceEvents = async (
   }
 };
 
-const maxReconnectAttempts = 3;
+const maxReconnectsPerWindow = 5;
+const reconnectWindowMs = 60_000;
+const reconnectBaseDelayMs = 500;
+const reconnectMaxDelayMs = 8_000;
 
 const createSessionConfig = (
   spec: AgentSpec & { transport: { kind: "audio" } },
@@ -280,70 +283,79 @@ const createSessionConfig = (
   state: {
     isClosed: boolean;
     isReconnecting: boolean;
-    reconnectAttempts: number;
+    reconnectTimestamps: number[];
     loggedFirstAudioOut: boolean;
     vadTimeout: number | undefined;
     session: Awaited<ReturnType<typeof createAudioSession>> | undefined;
     resolveLoop: (() => void) | undefined;
     reconnect: () => void;
+    sessionGeneration: number;
   },
-): AudioSessionConfig => ({
-  apiKey: accessGeminiToken(),
-  prompt: spec.prompt,
-  voiceName: spec.transport.voiceName,
-  tools: spec.tools,
-  onClose: (code, reason) => {
-    if (state.isClosed) return;
-    console.log(
-      `[audio] Gemini WS died unexpectedly (code=${code} reason=${reason})`,
-    );
-    state.reconnect();
-  },
-  onSessionEvent: makeSessionEventHandler({
-    onAudio: (chunk) => {
-      if (state.isReconnecting) return;
-      if (!state.loggedFirstAudioOut) {
-        state.loggedFirstAudioOut = true;
-        console.log("[audio] first output audio from Gemini");
-      }
-      void endpoint.sendData({
-        type: "audio",
-        chunks: [{ mimeType: chunk.mimeType, dataBase64: chunk.dataBase64 }],
-        from: spec.transport.participantName,
-      });
+): AudioSessionConfig => {
+  const generation = state.sessionGeneration;
+  return {
+    apiKey: accessGeminiToken(),
+    prompt: spec.prompt,
+    voiceName: spec.transport.voiceName,
+    tools: spec.tools,
+    onClose: (code, reason) => {
+      if (state.isClosed) return;
+      if (generation !== state.sessionGeneration) return;
+      console.log(
+        `[audio] Gemini WS died unexpectedly (code=${code} reason=${reason})`,
+      );
+      state.reconnect();
     },
-    onUtterance: (text) => {
-      if (state.isReconnecting) return;
-      const spoken = spokenReplyOnly(text);
-      if (spoken.length === 0) return;
-      void outputEvent(ownUtteranceTurn(spoken));
-      void endpoint.sendData({
-        type: "text" as const,
-        text: spoken,
-        from: spec.transport.participantName,
-      });
-    },
-    onFlush: () => {
-      if (state.isReconnecting) return;
-      void endpoint.sendData({
-        type: "flush",
-        from: spec.transport.participantName,
-      });
-    },
-    onTurnOutput: (sessionOutput, wasInterrupted) => {
-      if (state.isReconnecting) return;
-      const currentSession = state.session;
-      if (!currentSession) return;
-      processTurnOutput(
-        currentSession,
-        spec,
-        outputEvent,
-        sessionOutput,
-        wasInterrupted,
-      ).catch((e) => console.error("processTurnOutput error:", e));
-    },
-  }),
-});
+    onSessionEvent: makeSessionEventHandler({
+      onAudio: (chunk) => {
+        if (state.isReconnecting) return;
+        if (!state.loggedFirstAudioOut) {
+          state.loggedFirstAudioOut = true;
+          state.reconnectTimestamps = [];
+          console.log("[audio] first output audio, reconnect window reset");
+        }
+        void endpoint.sendData({
+          type: "audio",
+          chunks: [{
+            mimeType: chunk.mimeType,
+            dataBase64: chunk.dataBase64,
+          }],
+          from: spec.transport.participantName,
+        });
+      },
+      onUtterance: (text) => {
+        if (state.isReconnecting) return;
+        const spoken = spokenReplyOnly(text);
+        if (spoken.length === 0) return;
+        void outputEvent(ownUtteranceTurn(spoken));
+        void endpoint.sendData({
+          type: "text" as const,
+          text: spoken,
+          from: spec.transport.participantName,
+        });
+      },
+      onFlush: () => {
+        if (state.isReconnecting) return;
+        void endpoint.sendData({
+          type: "flush",
+          from: spec.transport.participantName,
+        });
+      },
+      onTurnOutput: (sessionOutput, wasInterrupted) => {
+        if (state.isReconnecting) return;
+        const currentSession = state.session;
+        if (!currentSession) return;
+        processTurnOutput(
+          currentSession,
+          spec,
+          outputEvent,
+          sessionOutput,
+          wasInterrupted,
+        ).catch((e) => console.error("processTurnOutput error:", e));
+      },
+    }),
+  };
+};
 
 const processTurnOutput = async (
   session: Awaited<ReturnType<typeof createAudioSession>>,
@@ -382,18 +394,25 @@ export const runAudioAgentLoop = async (
   const state = {
     isClosed: false,
     isReconnecting: false,
-    reconnectAttempts: 0,
+    reconnectTimestamps: [] as number[],
     loggedFirstAudioOut: false,
     vadTimeout: undefined as number | undefined,
     session: undefined as
       | Awaited<ReturnType<typeof createAudioSession>>
       | undefined,
     resolveLoop: undefined as (() => void) | undefined,
+    sessionGeneration: 0,
     reconnect: () => {
       if (state.isClosed || state.isReconnecting) return;
-      if (state.reconnectAttempts >= maxReconnectAttempts) {
+      const now = Date.now();
+      state.reconnectTimestamps = state.reconnectTimestamps.filter((t) =>
+        now - t < reconnectWindowMs
+      );
+      if (state.reconnectTimestamps.length >= maxReconnectsPerWindow) {
         console.log(
-          `[audio] max reconnect attempts (${maxReconnectAttempts}) reached, closing call`,
+          `[audio] max reconnects (${maxReconnectsPerWindow} per ${
+            reconnectWindowMs / 1000
+          }s) reached, closing call`,
         );
         state.isClosed = true;
         clearTimeout(state.vadTimeout);
@@ -405,32 +424,45 @@ export const runAudioAgentLoop = async (
         return;
       }
       state.isReconnecting = true;
-      state.reconnectAttempts++;
+      state.reconnectTimestamps.push(now);
+      state.loggedFirstAudioOut = false;
       clearTimeout(state.vadTimeout);
       state.vadTimeout = undefined;
-      console.log(
-        `[audio] reconnecting (attempt ${state.reconnectAttempts}/${maxReconnectAttempts})`,
+      const attemptsInWindow = state.reconnectTimestamps.length;
+      const delay = Math.min(
+        reconnectBaseDelayMs * Math.pow(2, attemptsInWindow - 1),
+        reconnectMaxDelayMs,
       );
-      createAudioSession(
-        createSessionConfig(typedSpec, endpoint, outputEvent, state),
-      )
-        .then((newSession) => {
-          state.session = newSession;
+      console.log(
+        `[audio] reconnecting in ${delay}ms (${attemptsInWindow}/${maxReconnectsPerWindow} in window)`,
+      );
+      globalThis.setTimeout(() => {
+        if (state.isClosed) {
           state.isReconnecting = false;
-          audioInputBuffer = new Uint8Array(0);
-          console.log(
-            `[audio] reconnected successfully (attempt ${state.reconnectAttempts})`,
-          );
-        })
-        .catch((e) => {
-          console.error(
-            `[audio] reconnect failed: ${
-              e instanceof Error ? e.message : String(e)
-            }`,
-          );
-          state.isReconnecting = false;
-          state.reconnect();
-        });
+          return;
+        }
+        state.sessionGeneration++;
+        createAudioSession(
+          createSessionConfig(typedSpec, endpoint, outputEvent, state),
+        )
+          .then((newSession) => {
+            state.session = newSession;
+            state.isReconnecting = false;
+            audioInputBuffer = new Uint8Array(0);
+            console.log(
+              `[audio] reconnected successfully (${attemptsInWindow}/${maxReconnectsPerWindow} in window)`,
+            );
+          })
+          .catch((e) => {
+            console.error(
+              `[audio] reconnect failed: ${
+                e instanceof Error ? e.message : String(e)
+              }`,
+            );
+            state.isReconnecting = false;
+            state.reconnect();
+          });
+      }, delay);
     },
   };
 

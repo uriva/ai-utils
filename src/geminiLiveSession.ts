@@ -401,7 +401,6 @@ export const createAudioSession = async ({
             mediaChunks: [{ mimeType: chunk.mimeType, data: chunk.dataBase64 }],
           },
         };
-        // debug(`Sending realtimeInput chunk, length: ${chunk.dataBase64.length}`);
         ws.send(JSON.stringify(payload));
       }
     },

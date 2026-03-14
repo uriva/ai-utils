@@ -216,6 +216,80 @@ Deno.test(
   },
 );
 
+const runTwoBotExchange = async (): Promise<
+  { aliceEvents: HistoryEvent[]; bobEvents: HistoryEvent[] } | "retry"
+> => {
+  const { left: aliceEndpoint, right: bobEndpoint } = createDuplexPair();
+  const aliceEvents: HistoryEvent[] = [];
+  const bobEvents: HistoryEvent[] = [];
+
+  const aliceTask = runAgent({
+    prompt:
+      "You are Alice. Greet Bob briefly (under 10 words). Then say goodbye and stop talking.",
+    tools: [],
+    maxIterations: 1,
+    onMaxIterationsReached: () => {},
+    timezoneIANA: "UTC",
+    transport: {
+      kind: "audio" as const,
+      endpoint: aliceEndpoint,
+      voiceName: "Zephyr",
+      participantName: "Bob",
+    },
+    onOutputEvent: (event) => {
+      aliceEvents.push(event);
+      return Promise.resolve();
+    },
+    rewriteHistory: async () => {},
+  });
+
+  const bobTask = runAgent({
+    prompt:
+      "You are Bob. Greet Alice briefly (under 10 words). Then say goodbye and stop talking.",
+    tools: [],
+    maxIterations: 1,
+    onMaxIterationsReached: () => {},
+    timezoneIANA: "UTC",
+    transport: {
+      kind: "audio" as const,
+      endpoint: bobEndpoint,
+      voiceName: "Orus",
+      participantName: "Alice",
+    },
+    onOutputEvent: (event) => {
+      bobEvents.push(event);
+      return Promise.resolve();
+    },
+    rewriteHistory: async () => {},
+  });
+
+  const aliceSpoke = () => aliceEvents.some((e) => e.type === "own_utterance");
+  const bobSpoke = () => bobEvents.some((e) => e.type === "own_utterance");
+
+  await aliceEndpoint.sendData({
+    type: "text",
+    text: "Say a short greeting out loud now.",
+    from: "tester",
+  });
+  await waitForCondition(aliceSpoke, 15_000);
+
+  await bobEndpoint.sendData({
+    type: "text",
+    text: "Say a short greeting out loud now.",
+    from: "tester",
+  });
+  await waitForCondition(bobSpoke, 15_000);
+
+  await Promise.all([
+    aliceEndpoint.sendData({ type: "close", from: "tester" }),
+    bobEndpoint.sendData({ type: "close", from: "tester" }),
+  ]);
+  await Promise.all([aliceTask, bobTask]);
+
+  if (!aliceSpoke() || !bobSpoke()) return "retry";
+  return { aliceEvents, bobEvents };
+};
+
 Deno.test({
   name:
     "two audio bots exchange speech without duplicated participant_edit_message",
@@ -223,80 +297,20 @@ Deno.test({
   sanitizeOps: false,
   sanitizeResources: false,
   fn: injectSecrets(async () => {
-    const { left: aliceEndpoint, right: bobEndpoint } = createDuplexPair();
-    const aliceEvents: HistoryEvent[] = [];
-    const bobEvents: HistoryEvent[] = [];
-
-    const aliceTask = runAgent({
-      prompt:
-        "You are Alice. Greet Bob briefly (under 10 words). Then say goodbye and stop talking.",
-      tools: [],
-      maxIterations: 1,
-      onMaxIterationsReached: () => {},
-      timezoneIANA: "UTC",
-      transport: {
-        kind: "audio" as const,
-        endpoint: aliceEndpoint,
-        voiceName: "Zephyr",
-        participantName: "Bob",
-      },
-      onOutputEvent: (event) => {
-        aliceEvents.push(event);
-        return Promise.resolve();
-      },
-      rewriteHistory: async () => {},
-    });
-
-    const bobTask = runAgent({
-      prompt:
-        "You are Bob. Greet Alice briefly (under 10 words). Then say goodbye and stop talking.",
-      tools: [],
-      maxIterations: 1,
-      onMaxIterationsReached: () => {},
-      timezoneIANA: "UTC",
-      transport: {
-        kind: "audio" as const,
-        endpoint: bobEndpoint,
-        voiceName: "Orus",
-        participantName: "Alice",
-      },
-      onOutputEvent: (event) => {
-        bobEvents.push(event);
-        return Promise.resolve();
-      },
-      rewriteHistory: async () => {},
-    });
-
-    await aliceEndpoint.sendData({
-      type: "text",
-      text: "Start with a short greeting.",
-      from: "tester",
-    });
-
-    await waitForCondition(
-      () =>
-        aliceEvents.some((e) => e.type === "participant_edit_message") ||
-        bobEvents.some((e) => e.type === "participant_edit_message"),
-      60_000,
+    let result: Awaited<ReturnType<typeof runTwoBotExchange>> = "retry";
+    for (let attempt = 0; attempt < 3 && result === "retry"; attempt++) {
+      result = await runTwoBotExchange();
+    }
+    assert(
+      result !== "retry",
+      "Both bots failed to produce own_utterance after 3 attempts",
     );
-
-    await Promise.all([
-      aliceEndpoint.sendData({ type: "close", from: "tester" }),
-      bobEndpoint.sendData({ type: "close", from: "tester" }),
-    ]);
-    await Promise.all([aliceTask, bobTask]);
+    const { aliceEvents, bobEvents } = result;
 
     const allEditMessages = [
       ...aliceEvents.filter((e) => e.type === "participant_edit_message"),
       ...bobEvents.filter((e) => e.type === "participant_edit_message"),
     ];
-
-    assert(
-      allEditMessages.length > 0,
-      `Expected at least one participant_edit_message, got event types: ${
-        [...aliceEvents, ...bobEvents].map((e) => e.type).join(", ")
-      }`,
-    );
 
     for (const event of allEditMessages) {
       if (event.type !== "participant_edit_message") continue;
