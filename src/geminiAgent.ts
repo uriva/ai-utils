@@ -71,8 +71,8 @@ export const injectGeminiErrorLogger = geminiError.inject;
 export type TokenUsage = GenerateContentResponseUsageMetadata;
 
 const tokenUsage: Injection<
-  (usage: TokenUsage) => void | Promise<void>
-> = context((_: TokenUsage) => {});
+  (usage: TokenUsage, model: string) => void | Promise<void>
+> = context((_: TokenUsage, _2: string) => {});
 
 export const injectTokenUsage = tokenUsage.inject;
 
@@ -151,7 +151,7 @@ const rawCallGemini = (
 ): Promise<GeminiOutput> =>
   new GoogleGenAI({ apiKey: accessGeminiToken() }).models.generateContent(req)
     .then((resp: GenerateContentResponse): GeminiOutput => {
-      if (resp.usageMetadata) tokenUsage.access(resp.usageMetadata);
+      if (resp.usageMetadata) tokenUsage.access(resp.usageMetadata, req.model);
       return (resp.candidates?.[0]?.content?.parts ?? [])
         .flatMap((part: Part): GeminiOutput => {
           const {
