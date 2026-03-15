@@ -16,7 +16,11 @@ export {
   geminiGenText,
   injectGeminiToken,
 } from "./src/gemini.ts";
-export { injectGeminiErrorLogger } from "./src/geminiAgent.ts";
+export {
+  injectGeminiErrorLogger,
+  injectTokenUsage,
+  type TokenUsage,
+} from "./src/geminiAgent.ts";
 export {
   injectOpenAiToken,
   openAiGenJson,

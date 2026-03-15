@@ -3,6 +3,7 @@ import {
   type FunctionCall,
   type GenerateContentParameters,
   type GenerateContentResponse,
+  type GenerateContentResponseUsageMetadata,
   GoogleGenAI,
   type Part,
 } from "@google/genai";
@@ -66,6 +67,14 @@ const geminiError: Injection<
 > = context((_1: Error, _2: GenerateContentParameters) => {});
 
 export const injectGeminiErrorLogger = geminiError.inject;
+
+export type TokenUsage = GenerateContentResponseUsageMetadata;
+
+const tokenUsage: Injection<
+  (usage: TokenUsage) => void | Promise<void>
+> = context((_: TokenUsage) => {});
+
+export const injectTokenUsage = tokenUsage.inject;
 
 type GeminiOutput = GeminiPartOfInterest[];
 
@@ -141,8 +150,9 @@ const rawCallGemini = (
   req: GenerateContentParameters,
 ): Promise<GeminiOutput> =>
   new GoogleGenAI({ apiKey: accessGeminiToken() }).models.generateContent(req)
-    .then((resp: GenerateContentResponse): GeminiOutput =>
-      (resp.candidates?.[0]?.content?.parts ?? [])
+    .then((resp: GenerateContentResponse): GeminiOutput => {
+      if (resp.usageMetadata) tokenUsage.access(resp.usageMetadata);
+      return (resp.candidates?.[0]?.content?.parts ?? [])
         .flatMap((part: Part): GeminiOutput => {
           const {
             text,
@@ -165,8 +175,8 @@ const rawCallGemini = (
             return [{ type: "text", text, thoughtSignature, thought }];
           }
           return [];
-        })
-    );
+        });
+    });
 
 const callGeminiWithRetry = conditionalRetry(isServerError)(
   1000,
