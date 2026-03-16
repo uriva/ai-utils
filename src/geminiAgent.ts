@@ -301,17 +301,13 @@ const historyEventToContent = (
     return wrapUserContent(parts);
   }
   if (e.type === "own_thought") {
-    return e.modelMetadata?.thoughtSignature
-      ? wrapModelContent([{
-        text: e.text,
-        thought: true,
-        thoughtSignature: e.modelMetadata.thoughtSignature,
-      }])
-      : wrapModelContent([{
-        text: stampText(
-          `[Internal thought, visible only to you: ${e.text}]`,
-        ),
-      }]);
+    return wrapModelContent([{
+      text: e.text,
+      thought: true,
+      ...(e.modelMetadata?.thoughtSignature
+        ? { thoughtSignature: e.modelMetadata.thoughtSignature }
+        : {}),
+    }]);
   }
   if (e.type === "own_reaction") {
     return wrapModelContent([{
