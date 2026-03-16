@@ -895,6 +895,15 @@ const geminiOutputPartToHistoryEvent =
         thoughtSignature: p.thoughtSignature ?? "",
       };
       const text = typeof p.text === "string" ? p.text : "";
+
+      const thoughtRegex =
+        /^\[Internal thought, visible only to you: ([\s\S]*?)\]$/;
+      const match = text.match(thoughtRegex);
+
+      if (match) {
+        return ownThoughtTurnWithMetadata<GeminiMetadata>(match[1], metadata);
+      }
+
       return p.thought
         ? ownThoughtTurnWithMetadata<GeminiMetadata>(text, metadata)
         : ownUtteranceTurnWithMetadata<GeminiMetadata>(text, metadata);
