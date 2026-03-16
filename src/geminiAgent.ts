@@ -307,7 +307,7 @@ const historyEventToContent = (
         thought: true,
         thoughtSignature: e.modelMetadata.thoughtSignature,
       }])
-      : wrapUserContent([{
+      : wrapModelContent([{
         text: stampText(
           `[Internal thought, visible only to you: ${e.text}]`,
         ),
