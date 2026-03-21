@@ -429,15 +429,32 @@ export const overrideTime = timestampGeneration.inject;
 export const overrideIdGenerator = idGeneration.inject;
 export const generateId = idGeneration.access;
 
-const novelOpaqueIdentifierThought =
+export const novelOpaqueIdentifierThought =
   "I should reply without inventing IDs or links that depend on them. I should only use IDs that appeared in the prompt, history, or tool results. If I need a real ID, I should get it from a tool result or ask the user.";
 
-const alreadyCorrectedNovelOpaqueIdentifier = (
+export const maxNovelOpaqueIdentifierCorrections = 5;
+
+const isNovelOpaqueIdentifierCorrection = (event: HistoryEvent) =>
+  event.type === "own_thought" && event.text === novelOpaqueIdentifierThought;
+
+const trailingConsecutiveCount = <T>(
+  predicate: (x: T) => boolean,
+  xs: T[],
+): number =>
+  xs.reduceRight<[boolean, number]>(
+    ([stopped, count], x): [boolean, number] =>
+      stopped
+        ? [true, count]
+        : predicate(x)
+        ? [false, count + 1]
+        : [true, count],
+    [false, 0],
+  )[1];
+
+const novelOpaqueIdentifierCorrectionCount = (
   history: HistoryEvent[],
-): boolean =>
-  history.some((event) =>
-    event.type === "own_thought" && event.text === novelOpaqueIdentifierThought
-  );
+): number =>
+  trailingConsecutiveCount(isNovelOpaqueIdentifierCorrection, history);
 
 const isDefined = <T>(value: T | undefined): value is T => value !== undefined;
 
@@ -487,14 +504,15 @@ const sanitizeInternalSentTimestampLeak = (
       : event
   );
 
-const guardNovelOpaqueIdentifiers = (
+export const guardNovelOpaqueIdentifiers = (
   prompt: string,
   history: HistoryEvent[],
   output: HistoryEvent[],
-) =>
+): HistoryEvent[] =>
   modelOutputHasNovelOpaqueIdentifiers(prompt, history, output)
-    ? alreadyCorrectedNovelOpaqueIdentifier(history)
-      ? output
+    ? novelOpaqueIdentifierCorrectionCount(history) >=
+        maxNovelOpaqueIdentifierCorrections
+      ? [doNothingEvent()]
       : [ownThoughtTurn(novelOpaqueIdentifierThought)]
     : modelOutputLeaksInternalSentTimestamp(output)
     ? sanitizeInternalSentTimestampLeak(output)

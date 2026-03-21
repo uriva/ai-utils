@@ -3,11 +3,14 @@ import { z } from "zod/v4";
 import { tool } from "../mod.ts";
 import {
   createSkillTools,
+  guardNovelOpaqueIdentifiers,
   type HistoryEvent,
   injectAccessHistory,
   injectOutputEvent,
   learnSkillToolName,
-  modelOutputHasNovelOpaqueIdentifiers,
+  maxNovelOpaqueIdentifierCorrections,
+  novelOpaqueIdentifierThought,
+  ownThoughtTurn,
   ownUtteranceTurn,
   participantUtteranceTurn,
   runAbstractAgent,
@@ -227,19 +230,87 @@ Deno.test(
   },
 );
 
-Deno.test("novel opaque id is corrected at most once", () => {
+Deno.test("novel opaque id guard corrects then emits do_nothing", () => {
   const prompt = "No URL is available until the async notification arrives.";
   const offendingOutput = [
     ownUtteranceTurn(
-      '<video controls><source src="https://api.find-scene.com/s/e53b21" type="video/mp4" /></video>',
+      '<video controls><source src="https://api.example-fake.com/s/e53b21" type="video/mp4" /></video>',
     ),
   ];
-  assertEquals(
-    modelOutputHasNovelOpaqueIdentifiers(
-      prompt,
-      [participantUtteranceTurn({ name: "user", text: "wait" })],
-      offendingOutput,
+  const baseHistory = [
+    participantUtteranceTurn({ name: "user", text: "wait" }),
+  ];
+
+  // First offense: returns correction thought
+  const firstResult = guardNovelOpaqueIdentifiers(
+    prompt,
+    baseHistory,
+    offendingOutput,
+  );
+  assertEquals(firstResult.length, 1);
+  assertEquals(firstResult[0].type, "own_thought");
+  assert(
+    "text" in firstResult[0] && firstResult[0].text ===
+        novelOpaqueIdentifierThought,
+  );
+
+  // After max corrections: returns do_nothing
+  const historyWithMaxCorrections = [
+    ...baseHistory,
+    ...Array.from(
+      { length: maxNovelOpaqueIdentifierCorrections },
+      () => ownThoughtTurn(novelOpaqueIdentifierThought),
     ),
-    true,
+  ];
+  const exhaustedResult = guardNovelOpaqueIdentifiers(
+    prompt,
+    historyWithMaxCorrections,
+    offendingOutput,
+  );
+  assertEquals(exhaustedResult.length, 1);
+  assertEquals(exhaustedResult[0].type, "do_nothing");
+
+  // Non-novel output: passes through unchanged
+  const legitimateOutput = [
+    ownUtteranceTurn("I'll wait for the download to complete."),
+  ];
+  const passthroughResult = guardNovelOpaqueIdentifiers(
+    prompt,
+    baseHistory,
+    legitimateOutput,
+  );
+  assertEquals(passthroughResult, legitimateOutput);
+});
+
+Deno.test("novel opaque id correction count resets after non-correction event", () => {
+  const prompt = "No URL is available until the async notification arrives.";
+  const offendingOutput = [
+    ownUtteranceTurn(
+      '<video controls><source src="https://api.example-fake.com/s/e53b21" type="video/mp4" /></video>',
+    ),
+  ];
+  // History with old corrections interrupted by a non-correction event, then fewer trailing corrections
+  const historyWithResetCount = [
+    participantUtteranceTurn({ name: "user", text: "wait" }),
+    ...Array.from(
+      { length: maxNovelOpaqueIdentifierCorrections - 1 },
+      () => ownThoughtTurn(novelOpaqueIdentifierThought),
+    ),
+    participantUtteranceTurn({ name: "user", text: "try again" }),
+    ...Array.from(
+      { length: maxNovelOpaqueIdentifierCorrections - 1 },
+      () => ownThoughtTurn(novelOpaqueIdentifierThought),
+    ),
+  ];
+  // Should still correct (not do_nothing) because only trailing consecutive count matters
+  const result = guardNovelOpaqueIdentifiers(
+    prompt,
+    historyWithResetCount,
+    offendingOutput,
+  );
+  assertEquals(result.length, 1);
+  assertEquals(result[0].type, "own_thought");
+  assert(
+    "text" in result[0] && result[0].text === novelOpaqueIdentifierThought,
   );
 });
