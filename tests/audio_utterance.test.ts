@@ -265,6 +265,10 @@ const runTwoBotExchange = async (): Promise<
 
   const aliceSpoke = () => aliceEvents.some((e) => e.type === "own_utterance");
   const bobSpoke = () => bobEvents.some((e) => e.type === "own_utterance");
+  const someBotThought = () =>
+    [...aliceEvents, ...bobEvents].some((event) =>
+      event.type === "own_thought"
+    );
 
   await aliceEndpoint.sendData({
     type: "text",
@@ -286,7 +290,8 @@ const runTwoBotExchange = async (): Promise<
   ]);
   await Promise.all([aliceTask, bobTask]);
 
-  if (!aliceSpoke() || !bobSpoke()) return "retry";
+  if ((!aliceSpoke() || !bobSpoke()) && someBotThought()) return "retry";
+  if (!aliceSpoke() || !bobSpoke()) return { aliceEvents, bobEvents };
   return { aliceEvents, bobEvents };
 };
 
@@ -301,11 +306,15 @@ Deno.test({
     for (let attempt = 0; attempt < 3 && result === "retry"; attempt++) {
       result = await runTwoBotExchange();
     }
-    assert(
-      result !== "retry",
-      "Both bots failed to produce own_utterance after 3 attempts",
-    );
+    assert(result !== "retry", "Bots kept retrying after own_thought outputs");
     const { aliceEvents, bobEvents } = result;
+    assert(
+      aliceEvents.some((e) => e.type === "own_utterance") &&
+        bobEvents.some((e) => e.type === "own_utterance"),
+      `Both bots failed to produce own_utterance. Alice: ${
+        aliceEvents.map((e) => e.type).join(", ")
+      }. Bob: ${bobEvents.map((e) => e.type).join(", ")}`,
+    );
 
     const allEditMessages = [
       ...aliceEvents.filter((e) => e.type === "participant_edit_message"),

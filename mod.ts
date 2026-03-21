@@ -5,6 +5,10 @@ import {
 } from "./src/agent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
 import { geminiAgentCaller } from "./src/geminiAgent.ts";
+export {
+  extractOpaqueIdentifiers,
+  findNovelOpaqueIdentifiers,
+} from "./src/opaqueIdentifiers.ts";
 export { z } from "zod/v4";
 export * from "./src/agent.ts";
 export { injectCacher } from "./src/cacher.ts";

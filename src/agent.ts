@@ -1,16 +1,8 @@
 import { context, type Injection } from "@uri/inject";
-import {
-  coerce,
-  each,
-  filter,
-  last,
-  nonempty,
-  pipe,
-  sideEffect,
-  timeit,
-} from "gamla";
+import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
 import { zodToGeminiParameters } from "./gemini.ts";
+import { findNovelOpaqueIdentifiers } from "./opaqueIdentifiers.ts";
 
 export type MediaAttachment =
   | { kind: "inline"; mimeType: string; dataBase64: string; caption?: string }
@@ -433,6 +425,47 @@ export const overrideTime = timestampGeneration.inject;
 export const overrideIdGenerator = idGeneration.inject;
 export const generateId = idGeneration.access;
 
+const novelOpaqueIdentifierThought =
+  "I introduced an opaque identifier that was not present in the prompt, history, or tool results. I should retry without inventing IDs. If I need a real identifier, I should get it from a tool result or ask the user for it.";
+
+const isDefined = <T>(value: T | undefined): value is T => value !== undefined;
+
+const modelAuthoredValue = (event: HistoryEvent): unknown => {
+  if (event.type === "own_utterance") return event.text;
+  if (event.type === "own_edit_message") {
+    return { text: event.text, onMessage: event.onMessage };
+  }
+  if (event.type === "own_thought") return event.text;
+  if (event.type === "own_reaction") {
+    return { reaction: event.reaction, onMessage: event.onMessage };
+  }
+  if (event.type === "tool_call") {
+    return { name: event.name, parameters: event.parameters };
+  }
+  return undefined;
+};
+
+export const modelOutputHasNovelOpaqueIdentifiers = (
+  prompt: string,
+  history: HistoryEvent[],
+  output: HistoryEvent[],
+): boolean =>
+  !empty(
+    findNovelOpaqueIdentifiers(
+      output.map(modelAuthoredValue).filter(isDefined),
+      [prompt, ...history],
+    ),
+  );
+
+const guardNovelOpaqueIdentifiers = (
+  prompt: string,
+  history: HistoryEvent[],
+  output: HistoryEvent[],
+) =>
+  modelOutputHasNovelOpaqueIdentifiers(prompt, history, output)
+    ? [ownThoughtTurn(novelOpaqueIdentifierThought)]
+    : output;
+
 // deno-lint-ignore no-explicit-any
 const isRegularTool = (t: Tool<any>): t is RegularTool<any> => !t.isDeferred;
 
@@ -574,7 +607,7 @@ export type AgentSpec = {
 };
 
 export const runAbstractAgent = async (
-  { maxIterations, tools, skills, onMaxIterationsReached }: AgentSpec,
+  { maxIterations, tools, skills, onMaxIterationsReached, prompt }: AgentSpec,
   callModel: (history: HistoryEvent[]) => Promise<HistoryEvent[]>,
 ) => {
   const allTools = skills && skills.length > 0
@@ -587,19 +620,22 @@ export const runAbstractAgent = async (
       onMaxIterationsReached();
       return;
     }
-    const output = await pipe(
-      getHistory,
-      sideEffect(reportHistoryForDebug),
-      timeit(reportTimeElapsedMs, callModel),
-      sideEffect(each(outputEvent)),
-    )();
+    const history = await getHistory();
+    await reportHistoryForDebug(history);
+    const output = guardNovelOpaqueIdentifiers(
+      prompt,
+      history,
+      await timeit(reportTimeElapsedMs, callModel)(history),
+    );
+    await each(outputEvent)(output);
     const hadDeferred = await handleFunctionCalls(allTools)(output);
     if (hadDeferred) return;
-    const history = await getHistory();
+    const updatedHistory = await getHistory();
     if (
       !(output.some((ev: HistoryEvent) => ev.type === "tool_call")) &&
-      nonempty(history) &&
-      last(history).isOwn
+      nonempty(updatedHistory) &&
+      last(updatedHistory).isOwn &&
+      !output.every((ev: HistoryEvent) => ev.type === "own_thought")
     ) return;
   }
 };

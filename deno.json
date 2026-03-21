@@ -1,6 +1,6 @@
 {
   "name": "@uri/ai-utils",
-  "version": "0.1.163",
+  "version": "0.1.165",
   "license": "MIT",
   "exports": "./mod.ts",
   "imports": {
@@ -13,7 +13,7 @@
   },
   "tasks": {
     "check": "deno fmt --check && deno lint && deno check *.ts src/**/*.ts tests/**/*.ts",
-    "test": "deno test --allow-env --allow-net --allow-read --env=.env --parallel tests/",
+    "test": "deno test --allow-env --allow-net --allow-read --allow-write --env=.env tests/",
     "talk-to-bob": "deno run --allow-env --allow-run --allow-read --allow-write --allow-net --env=.env scripts/talk_to_bob.ts"
   },
   "githooks": {
