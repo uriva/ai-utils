@@ -241,20 +241,21 @@ Deno.test("novel opaque id guard corrects then emits do_nothing", () => {
     participantUtteranceTurn({ name: "user", text: "wait" }),
   ];
 
-  // First offense: returns correction thought
+  // First offense: returns correction thought internally
   const firstResult = guardNovelOpaqueIdentifiers(
     prompt,
     baseHistory,
     offendingOutput,
   );
-  assertEquals(firstResult.length, 1);
-  assertEquals(firstResult[0].type, "own_thought");
+  assertEquals(firstResult.internal.length, 1);
+  assertEquals(firstResult.emit.length, 0);
+  assertEquals(firstResult.internal[0].type, "own_thought");
   assert(
-    "text" in firstResult[0] && firstResult[0].text ===
+    "text" in firstResult.internal[0] && firstResult.internal[0].text ===
         novelOpaqueIdentifierThought,
   );
 
-  // After max corrections: returns do_nothing
+  // After max corrections: returns do_nothing emitted
   const historyWithMaxCorrections = [
     ...baseHistory,
     ...Array.from(
@@ -267,10 +268,11 @@ Deno.test("novel opaque id guard corrects then emits do_nothing", () => {
     historyWithMaxCorrections,
     offendingOutput,
   );
-  assertEquals(exhaustedResult.length, 1);
-  assertEquals(exhaustedResult[0].type, "do_nothing");
+  assertEquals(exhaustedResult.emit.length, 1);
+  assertEquals(exhaustedResult.internal.length, 0);
+  assertEquals(exhaustedResult.emit[0].type, "do_nothing");
 
-  // Non-novel output: passes through unchanged
+  // Non-novel output: passes through unchanged emitted
   const legitimateOutput = [
     ownUtteranceTurn("I'll wait for the download to complete."),
   ];
@@ -279,7 +281,8 @@ Deno.test("novel opaque id guard corrects then emits do_nothing", () => {
     baseHistory,
     legitimateOutput,
   );
-  assertEquals(passthroughResult, legitimateOutput);
+  assertEquals(passthroughResult.emit, legitimateOutput);
+  assertEquals(passthroughResult.internal, legitimateOutput);
 });
 
 Deno.test("novel opaque id correction count resets after non-correction event", () => {
@@ -308,9 +311,11 @@ Deno.test("novel opaque id correction count resets after non-correction event", 
     historyWithResetCount,
     offendingOutput,
   );
-  assertEquals(result.length, 1);
-  assertEquals(result[0].type, "own_thought");
+  assertEquals(result.internal.length, 1);
+  assertEquals(result.emit.length, 0);
+  assertEquals(result.internal[0].type, "own_thought");
   assert(
-    "text" in result[0] && result[0].text === novelOpaqueIdentifierThought,
+    "text" in result.internal[0] &&
+      result.internal[0].text === novelOpaqueIdentifierThought,
   );
 });

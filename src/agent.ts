@@ -508,15 +508,24 @@ export const guardNovelOpaqueIdentifiers = (
   prompt: string,
   history: HistoryEvent[],
   output: HistoryEvent[],
-): HistoryEvent[] =>
+): { emit: HistoryEvent[]; internal: HistoryEvent[] } =>
   modelOutputHasNovelOpaqueIdentifiers(prompt, history, output)
     ? novelOpaqueIdentifierCorrectionCount(history) >=
         maxNovelOpaqueIdentifierCorrections
-      ? [doNothingEvent()]
-      : [ownThoughtTurn(novelOpaqueIdentifierThought)]
+      ? (() => {
+        console.error(
+          "Opaque identifier hallucination completely suppressed:",
+          JSON.stringify(output, null, 2),
+        );
+        return { emit: [doNothingEvent()], internal: [] };
+      })()
+      : { emit: [], internal: [ownThoughtTurn(novelOpaqueIdentifierThought)] }
     : modelOutputLeaksInternalSentTimestamp(output)
-    ? sanitizeInternalSentTimestampLeak(output)
-    : output;
+    ? {
+      emit: sanitizeInternalSentTimestampLeak(output),
+      internal: sanitizeInternalSentTimestampLeak(output),
+    }
+    : { emit: output, internal: output };
 
 // deno-lint-ignore no-explicit-any
 const isRegularTool = (t: Tool<any>): t is RegularTool<any> => !t.isDeferred;
@@ -666,6 +675,7 @@ export const runAbstractAgent = async (
     ? [...tools, ...createSkillTools(skills)]
     : tools;
   let c = 0;
+  let ephemeralHistory: HistoryEvent[] = [];
   while (true) {
     c++;
     if (c > maxIterations) {
@@ -673,22 +683,37 @@ export const runAbstractAgent = async (
       return;
     }
     const history = await getHistory();
-    await reportHistoryForDebug(history);
-    const output = guardNovelOpaqueIdentifiers(
-      prompt,
-      history,
-      await timeit(reportTimeElapsedMs, callModel)(history),
+    const effectiveHistory = [...history, ...ephemeralHistory];
+    await reportHistoryForDebug(effectiveHistory);
+    const modelResponse = await timeit(reportTimeElapsedMs, callModel)(
+      effectiveHistory,
     );
-    await each(outputEvent)(output);
-    const hadDeferred = await handleFunctionCalls(allTools)(output);
-    if (hadDeferred) return;
-    const updatedHistory = await getHistory();
-    if (
-      !(output.some((ev: HistoryEvent) => ev.type === "tool_call")) &&
-      nonempty(updatedHistory) &&
-      last(updatedHistory).isOwn &&
-      !output.every((ev: HistoryEvent) => ev.type === "own_thought")
-    ) return;
+    const { emit, internal } = guardNovelOpaqueIdentifiers(
+      prompt,
+      effectiveHistory,
+      modelResponse,
+    );
+
+    // Process what needs to be emitted
+    if (emit.length > 0) {
+      await each(outputEvent)(emit);
+      const hadDeferred = await handleFunctionCalls(allTools)(emit);
+      if (hadDeferred) return;
+
+      // We actually yielded things to the outside world, reset ephemeral history
+      ephemeralHistory = [];
+
+      const updatedHistory = await getHistory();
+      if (
+        !(emit.some((ev: HistoryEvent) => ev.type === "tool_call")) &&
+        nonempty(updatedHistory) &&
+        last(updatedHistory).isOwn &&
+        !emit.every((ev: HistoryEvent) => ev.type === "own_thought")
+      ) return;
+    } else {
+      // Nothing was emitted to the outside world, accumulate the internal state (e.g., thoughts)
+      ephemeralHistory = [...ephemeralHistory, ...internal];
+    }
   }
 };
 
