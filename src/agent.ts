@@ -2,6 +2,10 @@ import { context, type Injection } from "@uri/inject";
 import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
 import { zodToGeminiParameters } from "./gemini.ts";
+import {
+  hasInternalSentTimestampSuffix,
+  stripInternalSentTimestampSuffix,
+} from "./internalMessageMetadata.ts";
 import { findNovelOpaqueIdentifiers } from "./opaqueIdentifiers.ts";
 
 export type MediaAttachment =
@@ -464,6 +468,25 @@ export const modelOutputHasNovelOpaqueIdentifiers = (
     ),
   );
 
+export const modelOutputLeaksInternalSentTimestamp = (
+  output: HistoryEvent[],
+): boolean =>
+  output.some((event) =>
+    (event.type === "own_utterance" || event.type === "own_edit_message") &&
+    hasInternalSentTimestampSuffix(event.text)
+  );
+
+const sanitizeInternalSentTimestampLeak = (
+  output: HistoryEvent[],
+): HistoryEvent[] =>
+  output.map((event) =>
+    event.type === "own_utterance"
+      ? { ...event, text: stripInternalSentTimestampSuffix(event.text) }
+      : event.type === "own_edit_message"
+      ? { ...event, text: stripInternalSentTimestampSuffix(event.text) }
+      : event
+  );
+
 const guardNovelOpaqueIdentifiers = (
   prompt: string,
   history: HistoryEvent[],
@@ -473,6 +496,8 @@ const guardNovelOpaqueIdentifiers = (
     ? alreadyCorrectedNovelOpaqueIdentifier(history)
       ? output
       : [ownThoughtTurn(novelOpaqueIdentifierThought)]
+    : modelOutputLeaksInternalSentTimestamp(output)
+    ? sanitizeInternalSentTimestampLeak(output)
     : output;
 
 // deno-lint-ignore no-explicit-any

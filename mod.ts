@@ -9,6 +9,12 @@ export {
   extractOpaqueIdentifiers,
   findNovelOpaqueIdentifiers,
 } from "./src/opaqueIdentifiers.ts";
+export {
+  appendInternalSentTimestamp,
+  formatInternalSentTimestamp,
+  hasInternalSentTimestampSuffix,
+  stripInternalSentTimestampSuffix,
+} from "./src/internalMessageMetadata.ts";
 export { z } from "zod/v4";
 export * from "./src/agent.ts";
 export { injectCacher } from "./src/cacher.ts";

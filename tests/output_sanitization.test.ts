@@ -1,10 +1,14 @@
 import { assertEquals } from "@std/assert";
 import {
+  appendInternalSentTimestamp,
   extractOpaqueIdentifiers,
   findNovelOpaqueIdentifiers,
+  hasInternalSentTimestampSuffix,
   modelOutputHasNovelOpaqueIdentifiers,
+  modelOutputLeaksInternalSentTimestamp,
   ownUtteranceTurn,
   participantUtteranceTurn,
+  stripInternalSentTimestampSuffix,
 } from "../mod.ts";
 
 Deno.test("extractOpaqueIdentifiers handles urls and params", () => {
@@ -90,5 +94,46 @@ Deno.test("modelOutputHasNovelOpaqueIdentifiers allows legitimate known ids", ()
       ],
     ),
     false,
+  );
+});
+
+Deno.test("internal sent timestamp suffix matches the exact leaked example", () => {
+  const message =
+    "Here is your magic ball scene from The Prestige! 🎩✨ — sent Mar 21, 2026, 2:16 PM";
+  assertEquals(hasInternalSentTimestampSuffix(message), true);
+  assertEquals(
+    stripInternalSentTimestampSuffix(message),
+    "Here is your magic ball scene from The Prestige! 🎩✨",
+  );
+});
+
+Deno.test("appendInternalSentTimestamp uses the same shape we detect", () => {
+  assertEquals(
+    appendInternalSentTimestamp(
+      "Here is your magic ball scene from The Prestige! 🎩✨",
+      Date.UTC(2026, 2, 21, 14, 16),
+      "UTC",
+    ),
+    "Here is your magic ball scene from The Prestige! 🎩✨ — sent Mar 21, 2026, 2:16 PM",
+  );
+});
+
+Deno.test("modelOutputLeaksInternalSentTimestamp flags leaked internal metadata", () => {
+  assertEquals(
+    modelOutputLeaksInternalSentTimestamp([
+      ownUtteranceTurn(
+        "Here is your magic ball scene from The Prestige! 🎩✨ — sent Mar 21, 2026, 2:16 PM",
+      ),
+    ]),
+    true,
+  );
+});
+
+Deno.test("stripInternalSentTimestampSuffix keeps the rest of the message intact", () => {
+  assertEquals(
+    stripInternalSentTimestampSuffix(
+      "Here is your magic ball scene from The Prestige! 🎩✨\n\n\nIs this the one you were looking for? If you need any more iconic moments or even a frame as a sticker, just let me know! 🪄 — sent Mar 21, 2026, 2:16 PM",
+    ),
+    "Here is your magic ball scene from The Prestige! 🎩✨\n\n\nIs this the one you were looking for? If you need any more iconic moments or even a frame as a sticker, just let me know! 🪄",
   );
 });

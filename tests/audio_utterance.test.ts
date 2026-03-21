@@ -306,7 +306,7 @@ Deno.test({
     for (let attempt = 0; attempt < 3 && result === "retry"; attempt++) {
       result = await runTwoBotExchange();
     }
-    assert(result !== "retry", "Bots kept retrying after own_thought outputs");
+    assert(result !== "retry", "Bots never produced stable speech exchange");
     const { aliceEvents, bobEvents } = result;
     assert(
       aliceEvents.some((e) => e.type === "own_utterance") &&

@@ -46,6 +46,7 @@ import {
   geminiProVersion,
   zodToGeminiParameters,
 } from "./gemini.ts";
+import { appendInternalSentTimestamp } from "./internalMessageMetadata.ts";
 
 const isServerError = (error: unknown) =>
   error instanceof Error && "status" in error &&
@@ -202,17 +203,6 @@ const actionToTool = ({ name, description, parameters }: Tool<ZodType>) => ({
   parameters: zodToGeminiParameters(parameters),
 });
 
-const formatTimestamp = (ts: number, timezoneIANA: string): string =>
-  new Date(ts).toLocaleString("en-US", {
-    timeZone: timezoneIANA,
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -233,7 +223,7 @@ const historyEventToContent = (
 (e: GeminiHistoryEvent): Content => {
   const getRefText = referencedMessageText(eventById);
   const stampText = (text: string) =>
-    `${text} — sent ${formatTimestamp(e.timestamp, timezoneIANA)}`;
+    appendInternalSentTimestamp(text, e.timestamp, timezoneIANA);
   if (
     e.type === "participant_utterance" ||
     e.type === "participant_edit_message"
