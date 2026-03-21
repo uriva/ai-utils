@@ -519,7 +519,16 @@ export const guardNovelOpaqueIdentifiers = (
         );
         return { emit: [doNothingEvent()], internal: [] };
       })()
-      : { emit: [], internal: [ownThoughtTurn(novelOpaqueIdentifierThought)] }
+      : (() => {
+        console.warn(
+          "Opaque identifier hallucination suppressed (internal correction injected):",
+          JSON.stringify(output, null, 2),
+        );
+        return {
+          emit: [],
+          internal: [ownThoughtTurn(novelOpaqueIdentifierThought)],
+        };
+      })()
     : modelOutputLeaksInternalSentTimestamp(output)
     ? {
       emit: sanitizeInternalSentTimestampLeak(output),
