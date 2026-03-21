@@ -659,7 +659,7 @@ export type AgentSpec = {
 };
 
 export const runAbstractAgent = async (
-  { maxIterations, tools, skills, onMaxIterationsReached, prompt }: AgentSpec,
+  { maxIterations, tools, skills, onMaxIterationsReached }: AgentSpec,
   callModel: (history: HistoryEvent[]) => Promise<HistoryEvent[]>,
 ) => {
   const allTools = skills && skills.length > 0
@@ -674,11 +674,7 @@ export const runAbstractAgent = async (
     }
     const history = await getHistory();
     await reportHistoryForDebug(history);
-    const output = guardNovelOpaqueIdentifiers(
-      prompt,
-      history,
-      await timeit(reportTimeElapsedMs, callModel)(history),
-    );
+    const output = await timeit(reportTimeElapsedMs, callModel)(history);
     await each(outputEvent)(output);
     const hadDeferred = await handleFunctionCalls(allTools)(output);
     if (hadDeferred) return;
