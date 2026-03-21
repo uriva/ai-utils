@@ -53,6 +53,21 @@ Deno.test("modelOutputHasNovelOpaqueIdentifiers flags unknown ids inside urls", 
   );
 });
 
+Deno.test("modelOutputHasNovelOpaqueIdentifiers flags find-scene short link ids", () => {
+  assertEquals(
+    modelOutputHasNovelOpaqueIdentifiers(
+      "The download is still processing. No URL is available yet.",
+      [participantUtteranceTurn({ name: "user", text: "wait for it" })],
+      [
+        ownUtteranceTurn(
+          '<video controls><source src="https://api.find-scene.com/s/e53b21" type="video/mp4" /></video>',
+        ),
+      ],
+    ),
+    true,
+  );
+});
+
 Deno.test("modelOutputHasNovelOpaqueIdentifiers allows legitimate known ids", () => {
   assertEquals(
     modelOutputHasNovelOpaqueIdentifiers(

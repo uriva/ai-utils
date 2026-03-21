@@ -426,7 +426,14 @@ export const overrideIdGenerator = idGeneration.inject;
 export const generateId = idGeneration.access;
 
 const novelOpaqueIdentifierThought =
-  "I introduced an opaque identifier that was not present in the prompt, history, or tool results. I should retry without inventing IDs. If I need a real identifier, I should get it from a tool result or ask the user for it.";
+  "I should reply without inventing IDs or links that depend on them. I should only use IDs that appeared in the prompt, history, or tool results. If I need a real ID, I should get it from a tool result or ask the user.";
+
+const alreadyCorrectedNovelOpaqueIdentifier = (
+  history: HistoryEvent[],
+): boolean =>
+  history.some((event) =>
+    event.type === "own_thought" && event.text === novelOpaqueIdentifierThought
+  );
 
 const isDefined = <T>(value: T | undefined): value is T => value !== undefined;
 
@@ -463,7 +470,9 @@ const guardNovelOpaqueIdentifiers = (
   output: HistoryEvent[],
 ) =>
   modelOutputHasNovelOpaqueIdentifiers(prompt, history, output)
-    ? [ownThoughtTurn(novelOpaqueIdentifierThought)]
+    ? alreadyCorrectedNovelOpaqueIdentifier(history)
+      ? output
+      : [ownThoughtTurn(novelOpaqueIdentifierThought)]
     : output;
 
 // deno-lint-ignore no-explicit-any

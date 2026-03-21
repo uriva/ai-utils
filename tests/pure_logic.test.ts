@@ -7,6 +7,9 @@ import {
   injectAccessHistory,
   injectOutputEvent,
   learnSkillToolName,
+  modelOutputHasNovelOpaqueIdentifiers,
+  ownUtteranceTurn,
+  participantUtteranceTurn,
   runAbstractAgent,
   runCommandToolName,
 } from "../src/agent.ts";
@@ -223,3 +226,20 @@ Deno.test(
     assert(toolResult, "Should have tool result with correct output");
   },
 );
+
+Deno.test("novel opaque id is corrected at most once", () => {
+  const prompt = "No URL is available until the async notification arrives.";
+  const offendingOutput = [
+    ownUtteranceTurn(
+      '<video controls><source src="https://api.find-scene.com/s/e53b21" type="video/mp4" /></video>',
+    ),
+  ];
+  assertEquals(
+    modelOutputHasNovelOpaqueIdentifiers(
+      prompt,
+      [participantUtteranceTurn({ name: "user", text: "wait" })],
+      offendingOutput,
+    ),
+    true,
+  );
+});
