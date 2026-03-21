@@ -29,6 +29,16 @@ Deno.test("extractOpaqueIdentifiers ignores regular words", () => {
   );
 });
 
+Deno.test("findNovelOpaqueIdentifiers ignores markdown punctuation in urls", () => {
+  assertEquals(
+    findNovelOpaqueIdentifiers(
+      "Here is the url: https://foo.com/my-super-secret-id-1234.",
+      ["[link](https://foo.com/my-super-secret-id-1234)"],
+    ),
+    [],
+  );
+});
+
 Deno.test("findNovelOpaqueIdentifiers detects ids absent from sources", () => {
   assertEquals(
     findNovelOpaqueIdentifiers(
