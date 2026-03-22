@@ -230,7 +230,7 @@ Deno.test(
   },
 );
 
-Deno.test("novel opaque id guard corrects then emits do_nothing", () => {
+Deno.test("novel opaque id guard logs but passes through in shadow mode", () => {
   const prompt = "No URL is available until the async notification arrives.";
   const offendingOutput = [
     ownUtteranceTurn(
@@ -241,21 +241,16 @@ Deno.test("novel opaque id guard corrects then emits do_nothing", () => {
     participantUtteranceTurn({ name: "user", text: "wait" }),
   ];
 
-  // First offense: returns correction thought internally
+  // Shadow mode: novel IDs are logged but output passes through unchanged
   const firstResult = guardNovelOpaqueIdentifiers(
     prompt,
     baseHistory,
     offendingOutput,
   );
-  assertEquals(firstResult.internal.length, 1);
-  assertEquals(firstResult.emit.length, 0);
-  assertEquals(firstResult.internal[0].type, "own_thought");
-  assert(
-    "text" in firstResult.internal[0] && firstResult.internal[0].text ===
-        novelOpaqueIdentifierThought,
-  );
+  assertEquals(firstResult.emit, offendingOutput);
+  assertEquals(firstResult.internal, offendingOutput);
 
-  // After max corrections: returns do_nothing emitted
+  // Even after many offenses, still passes through (no do_nothing)
   const historyWithMaxCorrections = [
     ...baseHistory,
     ...Array.from(
@@ -268,11 +263,10 @@ Deno.test("novel opaque id guard corrects then emits do_nothing", () => {
     historyWithMaxCorrections,
     offendingOutput,
   );
-  assertEquals(exhaustedResult.emit.length, 1);
-  assertEquals(exhaustedResult.internal.length, 0);
-  assertEquals(exhaustedResult.emit[0].type, "do_nothing");
+  assertEquals(exhaustedResult.emit, offendingOutput);
+  assertEquals(exhaustedResult.internal, offendingOutput);
 
-  // Non-novel output: passes through unchanged emitted
+  // Non-novel output: passes through unchanged
   const legitimateOutput = [
     ownUtteranceTurn("I'll wait for the download to complete."),
   ];
@@ -285,14 +279,14 @@ Deno.test("novel opaque id guard corrects then emits do_nothing", () => {
   assertEquals(passthroughResult.internal, legitimateOutput);
 });
 
-Deno.test("novel opaque id correction count resets after non-correction event", () => {
+Deno.test("novel opaque id guard shadow mode ignores correction count", () => {
   const prompt = "No URL is available until the async notification arrives.";
   const offendingOutput = [
     ownUtteranceTurn(
       '<video controls><source src="https://api.example-fake.com/s/e53b21" type="video/mp4" /></video>',
     ),
   ];
-  // History with old corrections interrupted by a non-correction event, then fewer trailing corrections
+  // History with old corrections interrupted by a non-correction event
   const historyWithResetCount = [
     participantUtteranceTurn({ name: "user", text: "wait" }),
     ...Array.from(
@@ -305,17 +299,12 @@ Deno.test("novel opaque id correction count resets after non-correction event", 
       () => ownThoughtTurn(novelOpaqueIdentifierThought),
     ),
   ];
-  // Should still correct (not do_nothing) because only trailing consecutive count matters
+  // Shadow mode: always passes through regardless of correction count
   const result = guardNovelOpaqueIdentifiers(
     prompt,
     historyWithResetCount,
     offendingOutput,
   );
-  assertEquals(result.internal.length, 1);
-  assertEquals(result.emit.length, 0);
-  assertEquals(result.internal[0].type, "own_thought");
-  assert(
-    "text" in result.internal[0] &&
-      result.internal[0].text === novelOpaqueIdentifierThought,
-  );
+  assertEquals(result.emit, offendingOutput);
+  assertEquals(result.internal, offendingOutput);
 });

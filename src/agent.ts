@@ -6,7 +6,10 @@ import {
   hasInternalSentTimestampSuffix,
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
-import { findNovelOpaqueIdentifiers } from "./opaqueIdentifiers.ts";
+import {
+  extractOpaqueIdentifiers,
+  findNovelOpaqueIdentifiers,
+} from "./opaqueIdentifiers.ts";
 
 export type MediaAttachment =
   | { kind: "inline"; mimeType: string; dataBase64: string; caption?: string }
@@ -505,16 +508,35 @@ const sanitizeInternalSentTimestampLeak = (
   );
 
 export const guardNovelOpaqueIdentifiers = (
-  _prompt: string,
-  _history: HistoryEvent[],
+  prompt: string,
+  history: HistoryEvent[],
   output: HistoryEvent[],
-): { emit: HistoryEvent[]; internal: HistoryEvent[] } =>
-  modelOutputLeaksInternalSentTimestamp(output)
+): { emit: HistoryEvent[]; internal: HistoryEvent[] } => {
+  const candidateValues = output.map(modelAuthoredValue).filter(isDefined);
+  const novelIds = findNovelOpaqueIdentifiers(candidateValues, [
+    prompt,
+    ...history,
+  ]);
+  if (!empty(novelIds)) {
+    const knownIds = extractOpaqueIdentifiers([prompt, ...history]);
+    const candidateIds = extractOpaqueIdentifiers(candidateValues);
+    console.warn("[opaque-id-guard] novel ids detected (shadow mode)", {
+      novelIds,
+      candidateIds,
+      knownIdsCount: knownIds.length,
+      knownIdsSample: knownIds.slice(0, 30),
+      historyLength: history.length,
+      historyTypes: history.map(({ type }) => type),
+      outputTypes: output.map(({ type }) => type),
+    });
+  }
+  return modelOutputLeaksInternalSentTimestamp(output)
     ? {
       emit: sanitizeInternalSentTimestampLeak(output),
       internal: sanitizeInternalSentTimestampLeak(output),
     }
     : { emit: output, internal: output };
+};
 
 // deno-lint-ignore no-explicit-any
 const isRegularTool = (t: Tool<any>): t is RegularTool<any> => !t.isDeferred;
