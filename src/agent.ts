@@ -451,7 +451,7 @@ const trailingConsecutiveCount = <T>(
     [false, 0],
   )[1];
 
-const novelOpaqueIdentifierCorrectionCount = (
+const _novelOpaqueIdentifierCorrectionCount = (
   history: HistoryEvent[],
 ): number =>
   trailingConsecutiveCount(isNovelOpaqueIdentifierCorrection, history);
@@ -505,31 +505,11 @@ const sanitizeInternalSentTimestampLeak = (
   );
 
 export const guardNovelOpaqueIdentifiers = (
-  prompt: string,
-  history: HistoryEvent[],
+  _prompt: string,
+  _history: HistoryEvent[],
   output: HistoryEvent[],
 ): { emit: HistoryEvent[]; internal: HistoryEvent[] } =>
-  modelOutputHasNovelOpaqueIdentifiers(prompt, history, output)
-    ? novelOpaqueIdentifierCorrectionCount(history) >=
-        maxNovelOpaqueIdentifierCorrections
-      ? (() => {
-        console.error(
-          "Opaque identifier hallucination completely suppressed:",
-          JSON.stringify(output, null, 2),
-        );
-        return { emit: [doNothingEvent()], internal: [] };
-      })()
-      : (() => {
-        console.warn(
-          "Opaque identifier hallucination suppressed (internal correction injected):",
-          JSON.stringify(output, null, 2),
-        );
-        return {
-          emit: [],
-          internal: [ownThoughtTurn(novelOpaqueIdentifierThought)],
-        };
-      })()
-    : modelOutputLeaksInternalSentTimestamp(output)
+  modelOutputLeaksInternalSentTimestamp(output)
     ? {
       emit: sanitizeInternalSentTimestampLeak(output),
       internal: sanitizeInternalSentTimestampLeak(output),
