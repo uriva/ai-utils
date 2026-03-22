@@ -883,6 +883,12 @@ export const geminiAgentCaller = ({
     },
   )(events);
 
+const embeddedThoughtPattern =
+  /\[Internal thought, visible only to you: [\s\S]*?\]/g;
+
+export const stripEmbeddedThoughtPatterns = (text: string): string =>
+  text.replace(embeddedThoughtPattern, "").trim();
+
 const geminiOutputPartToHistoryEvent =
   (responseId: string) => (p: GeminiPartOfInterest): GeminiHistoryEvent => {
     if (p.type === "text") {
@@ -893,19 +899,20 @@ const geminiOutputPartToHistoryEvent =
       };
       const text = typeof p.text === "string" ? p.text : "";
 
+      const stripped = stripInternalSentTimestampSuffix(text);
       const thoughtRegex =
         /^\[Internal thought, visible only to you: ([\s\S]*?)\]$/;
-      const match = stripInternalSentTimestampSuffix(text).match(
-        thoughtRegex,
-      );
+      const match = stripped.match(thoughtRegex);
 
       if (match) {
         return ownThoughtTurnWithMetadata<GeminiMetadata>(match[1], metadata);
       }
 
+      const cleanedText = stripEmbeddedThoughtPatterns(stripped);
+
       return p.thought
-        ? ownThoughtTurnWithMetadata<GeminiMetadata>(text, metadata)
-        : ownUtteranceTurnWithMetadata<GeminiMetadata>(text, metadata);
+        ? ownThoughtTurnWithMetadata<GeminiMetadata>(cleanedText, metadata)
+        : ownUtteranceTurnWithMetadata<GeminiMetadata>(cleanedText, metadata);
     }
     if (p.type === "function_call") {
       return toolUseTurnWithMetadata(p.functionCall, {

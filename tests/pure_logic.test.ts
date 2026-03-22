@@ -16,7 +16,10 @@ import {
   runAbstractAgent,
   runCommandToolName,
 } from "../src/agent.ts";
-import { filterOrphanedToolResults } from "../src/geminiAgent.ts";
+import {
+  filterOrphanedToolResults,
+  stripEmbeddedThoughtPatterns,
+} from "../src/geminiAgent.ts";
 
 Deno.test("filterOrphanedToolResults logic", () => {
   const baseAuth = { isOwn: true, id: "msg-id", timestamp: 100 } as const;
@@ -307,4 +310,24 @@ Deno.test("novel opaque id guard shadow mode ignores correction count", () => {
   );
   assertEquals(result.emit, offendingOutput);
   assertEquals(result.internal, offendingOutput);
+});
+
+Deno.test("stripEmbeddedThoughtPatterns removes thoughts from mixed text", () => {
+  const mixed =
+    'Great choice! Here are the scenes:\n<video controls><source src="https://fake-url.com/video" type="video/mp4" /></video>[Internal thought, visible only to you: DOWNLOAD COMPLETE. Confirmed media HTML:\n<video controls><source src="https://api.find-scene.com/s/7c2a10" type="video/mp4" /></video>] [Internal thought, visible only to you: DOWNLOAD COMPLETE. Confirmed media HTML:\n<video controls><source src="https://api.find-scene.com/s/9d4f32" type="video/mp4" /></video>]';
+  assertEquals(
+    stripEmbeddedThoughtPatterns(mixed),
+    'Great choice! Here are the scenes:\n<video controls><source src="https://fake-url.com/video" type="video/mp4" /></video>',
+  );
+});
+
+Deno.test("stripEmbeddedThoughtPatterns preserves text without thoughts", () => {
+  const plain = "Hello! Here is a regular message with no special patterns.";
+  assertEquals(stripEmbeddedThoughtPatterns(plain), plain);
+});
+
+Deno.test("stripEmbeddedThoughtPatterns returns empty for thought-only text", () => {
+  const thoughtOnly =
+    "[Internal thought, visible only to you: some thought content]";
+  assertEquals(stripEmbeddedThoughtPatterns(thoughtOnly), "");
 });
