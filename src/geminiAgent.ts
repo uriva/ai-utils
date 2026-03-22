@@ -291,13 +291,17 @@ const historyEventToContent = (
     return wrapUserContent(parts);
   }
   if (e.type === "own_thought") {
-    return wrapModelContent([{
-      text: e.text,
-      thought: true,
-      ...(e.modelMetadata?.thoughtSignature
-        ? { thoughtSignature: e.modelMetadata.thoughtSignature }
-        : {}),
-    }]);
+    return e.modelMetadata?.thoughtSignature
+      ? wrapModelContent([{
+        text: e.text,
+        thought: true,
+        thoughtSignature: e.modelMetadata.thoughtSignature,
+      }])
+      : wrapModelContent([{
+        text: stampText(
+          `[Internal thought, visible only to you: ${e.text}]`,
+        ),
+      }]);
   }
   if (e.type === "own_reaction") {
     return wrapModelContent([{
