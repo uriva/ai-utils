@@ -147,3 +147,22 @@ Deno.test("stripInternalSentTimestampSuffix keeps the rest of the message intact
     "Here is your magic ball scene from The Prestige! 🎩✨\n\n\nIs this the one you were looking for? If you need any more iconic moments or even a frame as a sticker, just let me know! 🪄",
   );
 });
+
+Deno.test("extractOpaqueIdentifiers rejects dash-separated simple tokens", () => {
+  for (
+    const token of [
+      "7-Cafe",
+      "mar-22",
+      "2024-05-12",
+      "hello-world",
+      "Section-3",
+      "my-super-secret-id",
+    ]
+  ) {
+    assertEquals(
+      extractOpaqueIdentifiers(token),
+      [],
+      `expected [] for ${token}`,
+    );
+  }
+});

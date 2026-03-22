@@ -25,14 +25,15 @@ const canParseUrl = (value: string) => {
 const normalizeToken = (token: string) =>
   token.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, "");
 
-const isOpaqueIdentifier = (token: string) => {
-  // Ignore short date-like strings (e.g. "mar-22", "22-jan", "2024-05-12")
-  const isDateLike = /^[a-zA-Z]{3}-\d{1,2}$/i.test(token) ||
-    /^\d{1,2}-[a-zA-Z]{3}$/i.test(token) ||
-    /^\d{4}-\d{2}-\d{2}$/.test(token);
-  if (isDateLike) return false;
+const pureAlphaOrDigit = /^[A-Za-z]+$|^\d+$/;
 
+const dashSegmentsAreSimple = (token: string) =>
+  token.includes("-") &&
+  token.split("-").every((seg) => pureAlphaOrDigit.test(seg));
+
+const isOpaqueIdentifier = (token: string) => {
   if (uuidPattern.test(token)) return true;
+  if (dashSegmentsAreSimple(token)) return false;
   if (longDigitsPattern.test(token)) return true;
   if (lettersAndDigitsPattern.test(token) && token.length >= 6) return true;
   return encodedLikePattern.test(token) && /[_-]/.test(token);
