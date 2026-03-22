@@ -300,10 +300,14 @@ const historyEventToContent = (
         thought: true,
         thoughtSignature: e.modelMetadata.thoughtSignature,
       }])
-      : wrapModelContent([{
+      : e.modelMetadata
+      ? wrapModelContent([{
         text: stampText(
           `[Internal thought, visible only to you: ${e.text}]`,
         ),
+      }])
+      : wrapUserContent([{
+        text: stampText(`[System notification: ${e.text}]`),
       }]);
   }
   if (e.type === "own_reaction") {
