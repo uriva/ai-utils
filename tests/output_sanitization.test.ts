@@ -3,9 +3,11 @@ import {
   appendInternalSentTimestamp,
   extractOpaqueIdentifiers,
   findNovelOpaqueIdentifiers,
+  guardNovelOpaqueIdentifiers,
   hasInternalSentTimestampSuffix,
   modelOutputHasNovelOpaqueIdentifiers,
   modelOutputLeaksInternalSentTimestamp,
+  ownThoughtTurn,
   ownUtteranceTurn,
   participantUtteranceTurn,
   stripInternalSentTimestampSuffix,
@@ -165,4 +167,130 @@ Deno.test("extractOpaqueIdentifiers rejects dash-separated simple tokens", () =>
       `expected [] for ${token}`,
     );
   }
+});
+
+Deno.test("modelOutputHasNovelOpaqueIdentifiers allows id from own_thought in history", () => {
+  const prompt = "You are a helpful bot.";
+  const history = [
+    participantUtteranceTurn({
+      name: "user",
+      text: "53:56 - 6 seconds gif plz",
+    }),
+    ownUtteranceTurn(
+      "Download started. The video will be sent to the user automatically when ready.",
+    ),
+    ownThoughtTurn(
+      'DOWNLOAD COMPLETE. Confirmed media HTML: <img src="https://api.find-scene.com/s/3aedd2">',
+    ),
+  ];
+  const output = [
+    ownUtteranceTurn(
+      'Here is your GIF! <img src="https://api.find-scene.com/s/3aedd2">',
+    ),
+  ];
+  assertEquals(
+    modelOutputHasNovelOpaqueIdentifiers(prompt, history, output),
+    false,
+  );
+});
+
+Deno.test("BUG: history compaction causes false positive - old ids summarized away are flagged as novel", () => {
+  const prompt = "You are a helpful bot.";
+  const history = [
+    // Older conversation segments have been compacted into a natural-language summary.
+    // The summary describes what happened but does NOT contain the raw opaque IDs
+    // (54ddbe, ce6cef) that were in the original events.
+    ownThoughtTurn(
+      "Past conversation history was compacted. Here is my summary of what happened: " +
+        "The user asked me to find scenes from The Prestige. I searched for several scenes " +
+        "and downloaded video clips for them. The user was happy with the results and asked " +
+        "for more clips from different timestamps.",
+    ),
+    // Recent (non-compacted) events from the current interaction
+    participantUtteranceTurn({
+      name: "user",
+      text: "53:56 - 6 seconds gif plz",
+    }),
+    ownUtteranceTurn(
+      "Download started. The video will be sent to the user automatically when ready.",
+    ),
+    ownThoughtTurn(
+      'DOWNLOAD COMPLETE. Confirmed media HTML: <img src="https://api.find-scene.com/s/3aedd2">',
+    ),
+  ];
+  // The model references the new URL (3aedd2, present in history) AND old URLs
+  // (54ddbe, ce6cef) from earlier in the conversation that were compacted away.
+  // The model remembers these from its broader context window, but they no longer
+  // appear as raw identifiers in the history events.
+  const output = [
+    ownUtteranceTurn(
+      "Here is your GIF! Here are all the clips from our session:\n" +
+        '<img src="https://api.find-scene.com/s/3aedd2">\n' +
+        '<img src="https://api.find-scene.com/s/54ddbe">\n' +
+        '<img src="https://api.find-scene.com/s/ce6cef">',
+    ),
+  ];
+  // BUG: This returns true (flags 54ddbe and ce6cef as novel) even though
+  // the model is correctly recalling real URLs from the conversation.
+  // The guard would suppress this response, causing "Oops something went wrong".
+  // Expected behavior: should return false, since these are legitimate IDs
+  // that existed in the conversation before compaction.
+  assertEquals(
+    modelOutputHasNovelOpaqueIdentifiers(prompt, history, output),
+    true, // documents the current buggy behavior
+  );
+});
+
+Deno.test("guardNovelOpaqueIdentifiers reclassifies leaked thought with timestamp to own_thought", () => {
+  const result = guardNovelOpaqueIdentifiers(
+    "You are helpful.",
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [
+      ownUtteranceTurn(
+        "[Internal thought, visible only to you: PROACTIVE TASK: check the weather] — sent Mar 22, 2026, 10:30 AM",
+      ),
+    ],
+  );
+  assertEquals(result.emit.length, 1);
+  const event = result.emit[0];
+  assertEquals(event.type, "own_thought");
+  if (event.type !== "own_thought") throw new Error("unreachable");
+  assertEquals(
+    event.text,
+    "PROACTIVE TASK: check the weather",
+  );
+});
+
+Deno.test("guardNovelOpaqueIdentifiers reclassifies leaked thought without timestamp to own_thought", () => {
+  const result = guardNovelOpaqueIdentifiers(
+    "You are helpful.",
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [
+      ownUtteranceTurn(
+        "[Internal thought, visible only to you: PROACTIVE TASK: check the weather]",
+      ),
+    ],
+  );
+  assertEquals(result.emit.length, 1);
+  const event = result.emit[0];
+  assertEquals(event.type, "own_thought");
+  if (event.type !== "own_thought") throw new Error("unreachable");
+  assertEquals(
+    event.text,
+    "PROACTIVE TASK: check the weather",
+  );
+});
+
+Deno.test("guardNovelOpaqueIdentifiers does not reclassify normal utterances", () => {
+  const output = [ownUtteranceTurn("Hello! How can I help you?")];
+  const result = guardNovelOpaqueIdentifiers(
+    "You are helpful.",
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    output,
+  );
+  assertEquals(result.emit.length, 1);
+  const event = result.emit[0];
+  assertEquals(event.type, "own_utterance");
+  if (event.type !== "own_utterance") throw new Error("unreachable");
+  assertEquals(event.text, "Hello! How can I help you?");
 });

@@ -507,6 +507,20 @@ const sanitizeInternalSentTimestampLeak = (
       : event
   );
 
+const internalThoughtPattern =
+  /^\[Internal thought, visible only to you: ([\s\S]*?)\]$/;
+
+const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
+  output.map((event) => {
+    if (event.type !== "own_utterance") return event;
+    const match = stripInternalSentTimestampSuffix(event.text).match(
+      internalThoughtPattern,
+    );
+    return match
+      ? { ...event, type: "own_thought" as const, text: match[1] }
+      : event;
+  });
+
 export const guardNovelOpaqueIdentifiers = (
   prompt: string,
   history: HistoryEvent[],
@@ -530,12 +544,11 @@ export const guardNovelOpaqueIdentifiers = (
       outputTypes: output.map(({ type }) => type),
     });
   }
-  return modelOutputLeaksInternalSentTimestamp(output)
-    ? {
-      emit: sanitizeInternalSentTimestampLeak(output),
-      internal: sanitizeInternalSentTimestampLeak(output),
-    }
-    : { emit: output, internal: output };
+  const sanitized = modelOutputLeaksInternalSentTimestamp(output)
+    ? sanitizeInternalSentTimestampLeak(output)
+    : output;
+  const safe = reclassifyLeakedThoughts(sanitized);
+  return { emit: safe, internal: safe };
 };
 
 // deno-lint-ignore no-explicit-any

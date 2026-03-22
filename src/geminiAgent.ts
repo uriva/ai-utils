@@ -46,7 +46,10 @@ import {
   geminiProVersion,
   zodToGeminiParameters,
 } from "./gemini.ts";
-import { appendInternalSentTimestamp } from "./internalMessageMetadata.ts";
+import {
+  appendInternalSentTimestamp,
+  stripInternalSentTimestampSuffix,
+} from "./internalMessageMetadata.ts";
 
 const isServerError = (error: unknown) =>
   error instanceof Error && "status" in error &&
@@ -892,7 +895,9 @@ const geminiOutputPartToHistoryEvent =
 
       const thoughtRegex =
         /^\[Internal thought, visible only to you: ([\s\S]*?)\]$/;
-      const match = text.match(thoughtRegex);
+      const match = stripInternalSentTimestampSuffix(text).match(
+        thoughtRegex,
+      );
 
       if (match) {
         return ownThoughtTurnWithMetadata<GeminiMetadata>(match[1], metadata);
