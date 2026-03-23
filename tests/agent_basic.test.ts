@@ -1,4 +1,4 @@
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import {
   type HistoryEvent,
   ownUtteranceTurn,
@@ -131,6 +131,78 @@ Deno.test(
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
+  }),
+);
+
+Deno.test(
+  "tool_call with empty thoughtSignature filters out other events from the same responseId",
+  injectSecrets(async () => {
+    let rewriteReplacements: Record<string, HistoryEvent> = {};
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please call the testTool and say something.",
+      }),
+      {
+        type: "tool_call",
+        isOwn: true,
+        id: "test-id",
+        timestamp: Date.now(),
+        name: "testTool",
+        parameters: {},
+        modelMetadata: {
+          type: "gemini",
+          thoughtSignature: "",
+          responseId: "resp_id",
+        },
+      } as HistoryEvent,
+      {
+        type: "own_utterance",
+        isOwn: true,
+        id: "utterance-id",
+        timestamp: Date.now(),
+        text: "I am going to call the tool.",
+        modelMetadata: {
+          type: "gemini",
+          thoughtSignature: "",
+          responseId: "resp_id",
+        },
+      } as HistoryEvent,
+      {
+        type: "tool_result",
+        isOwn: true,
+        id: "result-id",
+        timestamp: Date.now(),
+        name: "testTool",
+        toolCallId: "test-id",
+        result: "tool result",
+      } as HistoryEvent,
+    ];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [someTool],
+      prompt: "You are a helper.",
+      lightModel: true,
+      rewriteHistory: (replacements) => {
+        rewriteReplacements = replacements;
+        return Promise.resolve();
+      },
+      timezoneIANA: "UTC",
+    });
+
+    assertEquals(Object.keys(rewriteReplacements).length, 3);
+    assertEquals(rewriteReplacements["test-id"].type, "own_thought");
+    assertEquals(rewriteReplacements["utterance-id"].type, "own_thought");
+    assertEquals(rewriteReplacements["result-id"].type, "own_thought");
+    assert(
+      ("text" in rewriteReplacements["utterance-id"]
+        ? rewriteReplacements["utterance-id"].text
+        : "")?.includes(
+          "Removed own_utterance from response containing invalid tool call: I am going to call the tool.",
+        ),
+    );
   }),
 );
 

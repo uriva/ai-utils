@@ -569,15 +569,40 @@ const toolResultToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
   }]`,
 });
 
-const filterAndRewriteInvalidToolCalls =
+const textToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
+  type: "own_thought",
+  isOwn: true,
+  id: e.id,
+  timestamp: e.timestamp,
+  text: `[Removed ${e.type} from response containing invalid tool call: ${
+    "text" in e ? (e.text as string).slice(0, 200) : ""
+  }]`,
+});
+
+const isTaintedTextPart =
+  (taintedResponseIds: Set<string>) => (e: GeminiHistoryEvent) =>
+    (e.type === "own_utterance" || e.type === "own_thought") &&
+    "modelMetadata" in e &&
+    !e.modelMetadata?.thoughtSignature?.trim() &&
+    !!e.modelMetadata?.responseId &&
+    taintedResponseIds.has(e.modelMetadata.responseId);
+
+export const filterAndRewriteInvalidToolCalls =
   (rewriteHistory: AgentSpec["rewriteHistory"]) =>
   (history: GeminiHistoryEvent[]): GeminiHistoryEvent[] => {
-    const invalidToolCallIds = new Set(
-      history.filter((e) =>
-        e.type === "tool_call" && !e.modelMetadata?.thoughtSignature?.trim()
-      ).map((e) => e.id),
+    const invalidToolCalls = history.filter((e) =>
+      e.type === "tool_call" && !e.modelMetadata?.thoughtSignature?.trim()
     );
-    if (invalidToolCallIds.size === 0) return history;
+    if (invalidToolCalls.length === 0) return history;
+    const invalidToolCallIds = new Set(invalidToolCalls.map((e) => e.id));
+    const taintedResponseIds = new Set(
+      invalidToolCalls.flatMap((e) =>
+        "modelMetadata" in e && e.modelMetadata?.responseId
+          ? [e.modelMetadata.responseId]
+          : []
+      ),
+    );
+    const isTainted = isTaintedTextPart(taintedResponseIds);
     const replacements: Record<string, GeminiHistoryEvent> = {};
     const filtered = history.filter((e) => {
       if (e.type === "tool_call" && invalidToolCallIds.has(e.id)) {
@@ -589,6 +614,10 @@ const filterAndRewriteInvalidToolCalls =
         e.toolCallId && invalidToolCallIds.has(e.toolCallId)
       ) {
         replacements[e.id] = toolResultToOwnThought(e);
+        return false;
+      }
+      if (isTainted(e)) {
+        replacements[e.id] = textToOwnThought(e);
         return false;
       }
       return true;
