@@ -126,7 +126,7 @@ Deno.test(
     const result = await runCommandTool.handler({
       command: "test/test_tool",
       params: { value: 5 },
-    });
+    }, "test-call-id");
 
     assert(handlerWasCalled, "Handler should have been called");
     assertEquals(result, "Result: 10");
@@ -159,7 +159,10 @@ Deno.test(
       throw new Error(`${learnSkillToolName} tool not found`);
     }
 
-    const result = await learnSkillTool.handler({ skillName: "weather" });
+    const result = await learnSkillTool.handler(
+      { skillName: "weather" },
+      "test-call-id",
+    );
 
     assert(typeof result === "string", "Result should be a string");
     const parsed = JSON.parse(result);

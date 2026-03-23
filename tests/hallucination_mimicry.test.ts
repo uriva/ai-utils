@@ -17,7 +17,6 @@ const downloadVideoTool: DeferredTool<
   name: "download_video",
   description:
     "Start a background video download. The system will notify you when it completes. Do NOT fabricate URLs.",
-  isDeferred: true,
   parameters: z.object({
     movie: z.string().describe("Movie name"),
     time: z.string().describe("Timestamp"),

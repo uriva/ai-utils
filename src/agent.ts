@@ -53,17 +53,17 @@ type ToolBase<T extends ZodType> = {
   parameters: T;
 };
 
-export type RegularTool<T extends ZodType> = ToolBase<T> & {
-  isDeferred?: false;
-  handler: (params: z.infer<T>) => Promise<string | ToolReturn>;
+export type Tool<T extends ZodType> = ToolBase<T> & {
+  handler: (
+    params: z.infer<T>,
+    toolCallId: string,
+  ) => Promise<string | ToolReturn | void>;
 };
 
-export type DeferredTool<T extends ZodType> = ToolBase<T> & {
-  isDeferred: true;
-  handler: (params: z.infer<T>, toolCallId: string) => Promise<void>;
-};
-
-export type Tool<T extends ZodType> = RegularTool<T> | DeferredTool<T>;
+/** @deprecated Use Tool directly — deferred vs regular is determined by handler return value */
+export type RegularTool<T extends ZodType> = Tool<T>;
+/** @deprecated Use Tool directly — deferred vs regular is determined by handler return value */
+export type DeferredTool<T extends ZodType> = Tool<T>;
 
 export type Skill = {
   name: string;
@@ -240,17 +240,20 @@ const parseWithCatch = <T extends ZodType>(
 
 export const callToResult =
   // deno-lint-ignore no-explicit-any
-  (actions: RegularTool<any>[]) =>
-  async <T extends ZodType>(fc: FunctionCall): Promise<{
-    toolCallId: string | undefined;
-    name: string;
-    result: string;
-    attachments?: MediaAttachment[];
-  }> => {
+  (actions: Tool<any>[]) =>
+  async <T extends ZodType>(fc: FunctionCall): Promise<
+    | {
+      toolCallId: string | undefined;
+      name: string;
+      result: string;
+      attachments?: MediaAttachment[];
+    }
+    | undefined
+  > => {
     const { name, args, id } = fc;
     const toolCallId = id;
     if (!name) throw new Error("Function call name is missing");
-    const directMatch: RegularTool<T> | undefined = actions.find((
+    const directMatch: Tool<T> | undefined = actions.find((
       { name: n },
     ) => n === name);
     const [action, effectiveArgs] = directMatch
@@ -258,7 +261,7 @@ export const callToResult =
       : name.includes("/")
       ? [
         actions.find(({ name: n }) => n === runCommandToolName) as
-          | RegularTool<T>
+          | Tool<T>
           | undefined,
         { command: name, params: args },
       ]
@@ -275,7 +278,8 @@ export const callToResult =
         result: `Invalid arguments: ${JSON.stringify(parseResult.error)}`,
       };
     }
-    const out = await handler(parseResult.result);
+    const out = await handler(parseResult.result, toolCallId ?? "");
+    if (out === undefined) return undefined;
     const parsed = parseWithCatch(toolReturnSchema, out);
     if (!parsed.ok) {
       throw new Error(
@@ -551,9 +555,6 @@ export const guardNovelOpaqueIdentifiers = (
   return { emit: safe, internal: safe };
 };
 
-// deno-lint-ignore no-explicit-any
-const isRegularTool = (t: Tool<any>): t is RegularTool<any> => !t.isDeferred;
-
 export const handleFunctionCalls =
   // deno-lint-ignore no-explicit-any
   (tools: Tool<any>[], onToolResult?: (event: HistoryEvent) => void) =>
@@ -562,21 +563,15 @@ export const handleFunctionCalls =
     const toolCalls = filter((p: HistoryEvent): p is ToolUse<any> =>
       p.type === "tool_call"
     )(output);
-    const regularTools = tools.filter(isRegularTool);
     let hadDeferred = false;
     await each(async (t: ToolUse<Record<string, unknown>>) => {
       const fc: FunctionCall = { name: t.name, args: t.parameters, id: t.id };
-      // deno-lint-ignore no-explicit-any
-      const action: Tool<any> | undefined = tools.find(({ name: n }) =>
-        n === fc.name
-      );
-      if (action?.isDeferred) {
-        const parseResult = parseWithCatch(action.parameters, fc.args);
-        if (parseResult.ok) await action.handler(parseResult.result, fc.id!);
+      const callResult = await callToResult(tools)(fc);
+      if (callResult === undefined) {
         hadDeferred = true;
         return;
       }
-      const result = toolResultTurn(await callToResult(regularTools)(fc));
+      const result = toolResultTurn(callResult);
       await outputEvent(result);
       onToolResult?.(result);
     })(toolCalls);
@@ -587,12 +582,13 @@ export const runCommandToolName = "run_command";
 export const learnSkillToolName = "learn_skill";
 
 export const tool = <ParametersSchema extends z.ZodObject<z.ZodRawShape>>(
-  tool: RegularTool<ParametersSchema>,
-): RegularTool<ParametersSchema> => ({
+  tool: Tool<ParametersSchema>,
+): Tool<ParametersSchema> => ({
   ...tool,
-  handler: (params: z.infer<ParametersSchema>): ReturnType<
-    typeof tool.handler
-  > => tool.handler(params),
+  handler: (
+    params: z.infer<ParametersSchema>,
+    toolCallId: string,
+  ): ReturnType<typeof tool.handler> => tool.handler(params, toolCallId),
 });
 
 // deno-lint-ignore no-explicit-any
@@ -615,7 +611,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         ),
         params: z.any().describe("The parameters for the tool"),
       }),
-      handler: async ({ command, params }) => {
+      handler: async ({ command, params }, toolCallId) => {
         if (!command.includes("/")) {
           return `Invalid command format. Expected "skillName/toolName", got "${command}". Available skills: ${skillNames}`;
         }
@@ -632,7 +628,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         if (!parseResult.ok) {
           return `Invalid parameters for ${fullToolName}: ${parseResult.error.message}`;
         }
-        return await tool.handler(parseResult.result);
+        return await tool.handler(parseResult.result, toolCallId);
       },
     }),
     tool({

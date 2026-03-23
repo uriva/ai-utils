@@ -198,7 +198,6 @@ Deno.test(
     const deferredTool: DeferredTool<z.ZodObject<{ ms: z.ZodNumber }>> = {
       name: "timeout-wakeup",
       description: "Set a timeout to wake up later",
-      isDeferred: true,
       parameters: z.object({
         ms: z.number().describe("Milliseconds to wait"),
       }),
