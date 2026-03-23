@@ -106,24 +106,16 @@ export const findTextualAnswer = (events: HistoryEvent[]) =>
     event.text.length > 0
   );
 
-export const collectAttachment = (
-  events: HistoryEvent[],
-  toolName?: string,
-) => {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    if (
-      event.type === "tool_result" && event.attachments?.length &&
-      (!toolName || event.name === toolName)
-    ) {
-      return event.attachments[0];
-    }
-    if (event.type === "own_utterance" && event.attachments?.length) {
-      return event.attachments[0];
-    }
-  }
-  return undefined;
-};
+export const collectAttachment = (events: HistoryEvent[]) =>
+  [...events].reverse().find((
+    event,
+  ): event is Extract<
+    HistoryEvent,
+    { type: "tool_result" | "own_utterance" }
+  > =>
+    (event.type === "tool_result" || event.type === "own_utterance") &&
+    !!event.attachments?.length
+  )?.attachments?.[0];
 
 export const addition = tool({
   name: "add",

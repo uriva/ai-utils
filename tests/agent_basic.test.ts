@@ -75,7 +75,6 @@ Deno.test(
       isOwn: true,
       id: "test-id",
       timestamp: Date.now(),
-      name: "someTool",
       result: "some result",
     }];
     await agentDeps(mockHistory)(runAgent)({
@@ -116,7 +115,6 @@ Deno.test(
         isOwn: true,
         id: "result-id",
         timestamp: Date.now(),
-        name: "testTool",
         toolCallId: "test-id",
         result: "tool result",
       } as HistoryEvent,
@@ -173,7 +171,6 @@ Deno.test(
         isOwn: true,
         id: "result-id",
         timestamp: Date.now(),
-        name: "testTool",
         toolCallId: "test-id",
         result: "tool result",
       } as HistoryEvent,

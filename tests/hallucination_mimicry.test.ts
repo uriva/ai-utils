@@ -39,7 +39,6 @@ const buildHistory = (): HistoryEvent[] => [
     timestamp: Date.now() - 5000,
   },
   toolResultTurn({
-    name: "download_video",
     result:
       "Download started in the background. You will be notified when it completes. Do NOT fabricate a URL.",
   }),
@@ -66,7 +65,6 @@ const buildHistory = (): HistoryEvent[] => [
     timestamp: Date.now() - 1000,
   },
   toolResultTurn({
-    name: "download_video",
     result:
       "Download started in the background. You will be notified when it completes. Do NOT fabricate a URL.",
   }),

@@ -59,7 +59,7 @@ export const createAudioArtifactsWriter = (dir: URL) => {
   const summarize = (event: HistoryEvent) => {
     if (event.type === "tool_call") return `tool_call ${event.name}`;
     if (event.type === "tool_result") {
-      return `tool_result ${event.name} ${event.result}`;
+      return `tool_result ${event.result}`;
     }
     if (event.type === "participant_edit_message") {
       return `participant_edit_message ${event.name}: ${event.text}`;

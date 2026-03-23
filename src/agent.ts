@@ -136,7 +136,6 @@ export type ToolUse<T> = ToolUseWithMetadata<T, unknown>;
 export type ToolResult = {
   type: "tool_result";
   isOwn: true;
-  name: string;
   toolCallId?: string;
   result: string;
   attachments?: MediaAttachment[];
@@ -244,7 +243,6 @@ export const callToResult =
   async <T extends ZodType>(fc: FunctionCall): Promise<
     | {
       toolCallId: string | undefined;
-      name: string;
       result: string;
       attachments?: MediaAttachment[];
     }
@@ -267,14 +265,13 @@ export const callToResult =
       ]
       : [undefined, args];
     if (!action) {
-      return { toolCallId, name, result: `Function ${name} not found` };
+      return { toolCallId, result: `Function ${name} not found` };
     }
     const { handler, parameters } = action;
     const parseResult = parseWithCatch(parameters, effectiveArgs);
     if (!parseResult.ok) {
       return {
         toolCallId,
-        name,
         result: `Invalid arguments: ${JSON.stringify(parseResult.error)}`,
       };
     }
@@ -290,10 +287,9 @@ export const callToResult =
     }
     const validated = parsed.result;
     return typeof validated === "string"
-      ? { toolCallId, name, result: truncateToolOutput(validated) }
+      ? { toolCallId, result: truncateToolOutput(validated) }
       : {
         toolCallId,
-        name,
         result: truncateToolOutput(validated.result),
         attachments: validated.attachments,
       };
@@ -371,8 +367,7 @@ const sharedFields = () => ({
 });
 
 export const toolResultTurn = (
-  { name, result, attachments, toolCallId }: {
-    name: string;
+  { result, attachments, toolCallId }: {
     result: string;
     attachments?: MediaAttachment[];
     toolCallId?: string;
@@ -381,7 +376,6 @@ export const toolResultTurn = (
   ...sharedFields(),
   type: "tool_result",
   isOwn: true,
-  name,
   result,
   attachments,
   toolCallId,
@@ -794,7 +788,7 @@ export const estimateTokens = (e: HistoryEvent): number => {
     return approxTextTokens(e.name) + approxJsonTokens(e.parameters) + 4;
   }
   if (e.type === "tool_result") {
-    return approxTextTokens(e.name) + approxTextTokens(e.result) +
+    return approxTextTokens(e.result) +
       attachmentTokens(e.attachments) + 4;
   }
   if (e.type === "own_thought") {

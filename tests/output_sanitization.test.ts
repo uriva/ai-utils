@@ -95,7 +95,6 @@ Deno.test("modelOutputHasNovelOpaqueIdentifiers allows legitimate known ids", ()
           isOwn: true,
           id: crypto.randomUUID(),
           timestamp: Date.now(),
-          name: "fetchOrder",
           result: "Order id is ord_12345 and session sess_67890",
         },
       ],

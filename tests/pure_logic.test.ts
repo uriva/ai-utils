@@ -37,61 +37,59 @@ Deno.test("filterOrphanedToolResults logic", () => {
     modelMetadata: { type: "gemini", responseId: "r1", thoughtSignature: "" },
   });
   const mkResult = (
-    name: string,
     timestamp: number,
     toolCallId?: string,
   ) => ({
     ...baseAuth,
     type: "tool_result" as const,
-    name,
     timestamp,
     toolCallId,
     result: "res",
     modelMetadata: { type: "gemini", responseId: "r1", thoughtSignature: "" },
   });
 
-  // Case 1: Legacy match
+  // Case 1: Result without toolCallId is filtered out
   const h1 = [
     mkCall("c1", "toolA", 100),
-    mkResult("toolA", 101),
+    mkResult(101),
   ];
   // @ts-ignore - types match roughly
-  assertEquals(filterOrphanedToolResults(h1).length, 2);
+  assertEquals(filterOrphanedToolResults(h1).length, 1);
 
-  // Case 2: Orphaned legacy
+  // Case 2: Orphaned (no call at all, no toolCallId)
   const h2 = [
-    mkResult("toolA", 101),
+    mkResult(101),
   ];
   // @ts-ignore - types match roughly
   assertEquals(filterOrphanedToolResults(h2).length, 0);
 
-  // Case 3: Mixed strict and legacy
+  // Case 3: Strict match by toolCallId
   const h3 = [
     mkCall("c1", "toolA", 100),
     mkCall("c2", "toolA", 102),
-    mkResult("toolA", 103, "c2"), // Claims c2
-    mkResult("toolA", 104), // Should claim c1
+    mkResult(103, "c2"),
+    mkResult(104, "c1"),
   ];
   // @ts-ignore - types match roughly
   assertEquals(filterOrphanedToolResults(h3).length, 4);
 
-  // Case 4: Stealing prevention
+  // Case 4: Strict match with duplicate prevention
   const h4 = [
     mkCall("c1", "toolA", 100),
-    mkResult("toolA", 103, "c1"), // Claims c1
-    mkResult("toolA", 104), // Orphan, because c1 is taken
+    mkResult(103, "c1"),
+    mkResult(104), // No toolCallId, filtered out
   ];
   // @ts-ignore - types match roughly
   assertEquals(filterOrphanedToolResults(h4).length, 2);
 
-  // Case 5: Excess legacy results (1 call, 2 results)
+  // Case 5: Multiple results without toolCallId all filtered
   const h5 = [
     mkCall("c1", "toolA", 100),
-    mkResult("toolA", 101),
-    mkResult("toolA", 102),
+    mkResult(101),
+    mkResult(102),
   ];
   // @ts-ignore - types match roughly
-  assertEquals(filterOrphanedToolResults(h5).length, 2);
+  assertEquals(filterOrphanedToolResults(h5).length, 1);
 });
 
 Deno.test(

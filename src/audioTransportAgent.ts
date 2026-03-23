@@ -218,14 +218,20 @@ const resolveToolCalls = async (
           const geminiId = geminiIdByHistoryId.get(event.toolCallId!);
           const id = geminiId ?? event.toolCallId!;
           respondedGeminiIds.add(id);
+          const toolCall = sessionOutput.find((e) =>
+            e.type === "tool_call" && e.id === id
+          );
+          const name = toolCall && "name" in toolCall
+            ? toolCall.name
+            : "unknown";
           console.log(
-            `[audio-tool] tool result for ${event.name} after ${
+            `[audio-tool] tool result for ${name} after ${
               Date.now() - startTime
             }ms, responding to Gemini`,
           );
           session.respondToToolCall({
             id,
-            name: event.name,
+            name,
             response: { result: event.result },
           });
         }

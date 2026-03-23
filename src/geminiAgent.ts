@@ -280,10 +280,12 @@ const historyEventToContent = (
     }]);
   }
   if (e.type === "tool_result") {
+    const toolCall = e.toolCallId ? eventById(e.toolCallId) : undefined;
+    const name = toolCall && "name" in toolCall ? toolCall.name : "unknown";
     const parts: Part[] = [
       {
         functionResponse: {
-          name: e.name,
+          name,
           response: {
             result: stampText(e.result),
           },
@@ -480,54 +482,28 @@ export const filterOrphanedToolResults = (
   history: GeminiHistoryEvent[],
 ): GeminiHistoryEvent[] => {
   const allCalls = history.filter((e) => e.type === "tool_call");
-
-  // Reservartion pass: mark calls that are claimed by strict ID matching
-  const reservedCallIds = new Set<string>();
-  history.forEach((e) => {
-    if (e.type === "tool_result" && e.toolCallId) {
-      const call = allCalls.find((c) => c.id === e.toolCallId);
-      if (call) reservedCallIds.add(call.id);
-    }
-  });
-
-  const processedStrictCalls = new Set<string>();
-  const processedLegacyCalls = new Set<string>();
+  const processedCallIds = new Set<string>();
 
   return history.filter((e) => {
     if (e.type !== "tool_result") return true;
 
-    if (e.toolCallId) {
-      // Strict match: must match an ID not yet fully processed/duplicated
-      const call = allCalls.find((c) =>
-        c.id === e.toolCallId && !processedStrictCalls.has(c.id)
-      );
-      if (call) {
-        processedStrictCalls.add(call.id);
-        return true;
-      }
+    if (!e.toolCallId) {
       console.warn(
-        `Warning: Filtering out orphaned tool_result for "${e.name}" (toolCallId: ${e.toolCallId}). ` +
-          `No matching tool_call found with that ID.`,
+        `Warning: Filtering out orphaned tool_result (id: ${e.id}) with no toolCallId.`,
       );
       return false;
     }
 
-    // Legacy match: find available call (not reserved, not used)
     const call = allCalls.find((c) =>
-      c.name === e.name &&
-      c.timestamp < e.timestamp &&
-      !reservedCallIds.has(c.id) &&
-      !processedLegacyCalls.has(c.id)
+      c.id === e.toolCallId && !processedCallIds.has(c.id)
     );
-
     if (call) {
-      processedLegacyCalls.add(call.id);
+      processedCallIds.add(call.id);
       return true;
     }
-
     console.warn(
-      `Warning: Filtering out orphaned tool_result for "${e.name}" (id: ${e.id}). ` +
-        `No matching tool_call found.`,
+      `Warning: Filtering out orphaned tool_result (toolCallId: ${e.toolCallId}). ` +
+        `No matching tool_call found with that ID.`,
     );
     return false;
   });
@@ -564,9 +540,7 @@ const toolResultToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
   isOwn: true,
   id: e.id,
   timestamp: e.timestamp,
-  text: `[Removed tool result for "${"name" in e ? e.name : "unknown"}": ${
-    "result" in e ? e.result : ""
-  }]`,
+  text: `[Removed tool result: ${"result" in e ? e.result : ""}]`,
 });
 
 const textToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({

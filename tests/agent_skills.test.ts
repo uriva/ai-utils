@@ -48,7 +48,6 @@ Deno.test(
 
     const hasToolResult = mockHistory.some((event) =>
       event.type === "tool_result" &&
-      event.name === runCommandToolName &&
       event.result === "8"
     );
     assert(hasToolResult, "Should have result of 5 + 3 = 8 from run_command");
@@ -113,7 +112,6 @@ Deno.test(
 
     const learnSkillResult = mockHistory.find((event) =>
       event.type === "tool_result" &&
-      event.name === learnSkillToolName &&
       event.result.includes("weather")
     );
 
@@ -169,8 +167,7 @@ llmTest(
     });
 
     const hasRegularResult = mockHistory.some((event) =>
-      event.type === "tool_result" &&
-      event.name === "regularTool"
+      event.type === "tool_result"
     );
 
     const hasSkillResult = mockHistory.some((event) =>

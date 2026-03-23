@@ -228,9 +228,7 @@ Deno.test(
       "Deferred tool handler should have been called with a toolCallId",
     );
     assert(
-      !mockHistory.some((e) =>
-        e.type === "tool_result" && e.name === "timeout-wakeup"
-      ),
+      !mockHistory.some((e) => e.type === "tool_result"),
       "No tool_result should be emitted for deferred tools",
     );
     assert(
