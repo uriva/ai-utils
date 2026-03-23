@@ -579,49 +579,62 @@ const textToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
   }]`,
 });
 
-const isTaintedTextPart =
-  (taintedResponseIds: Set<string>) => (e: GeminiHistoryEvent) =>
-    (e.type === "own_utterance" || e.type === "own_thought") &&
-    "modelMetadata" in e &&
-    !e.modelMetadata?.thoughtSignature?.trim() &&
-    !!e.modelMetadata?.responseId &&
-    taintedResponseIds.has(e.modelMetadata.responseId);
-
 export const filterAndRewriteInvalidToolCalls =
   (rewriteHistory: AgentSpec["rewriteHistory"]) =>
   (history: GeminiHistoryEvent[]): GeminiHistoryEvent[] => {
-    const invalidToolCalls = history.filter((e) =>
-      e.type === "tool_call" && !e.modelMetadata?.thoughtSignature?.trim()
-    );
-    if (invalidToolCalls.length === 0) return history;
-    const invalidToolCallIds = new Set(invalidToolCalls.map((e) => e.id));
-    const taintedResponseIds = new Set(
-      invalidToolCalls.flatMap((e) =>
-        "modelMetadata" in e && e.modelMetadata?.responseId
-          ? [e.modelMetadata.responseId]
-          : []
-      ),
-    );
-    const isTainted = isTaintedTextPart(taintedResponseIds);
+    // Group all tool calls by their original response ID
+    const toolCallsByResponseId = new Map<string, GeminiHistoryEvent[]>();
+    for (const e of history) {
+      if (e.type === "tool_call") {
+        const id = getOriginalId(e);
+        const group = toolCallsByResponseId.get(id) || [];
+        group.push(e);
+        toolCallsByResponseId.set(id, group);
+      }
+    }
+
+    // A response group is tainted if it contains tool calls, but NONE of them
+    // have a thoughtSignature. (In parallel calls, only the first gets a signature).
+    const taintedResponseIds = new Set<string>();
+    for (const [responseId, toolCalls] of toolCallsByResponseId.entries()) {
+      const hasSignature = toolCalls.some((e) =>
+        "modelMetadata" in e && e.modelMetadata?.thoughtSignature?.trim()
+      );
+      if (!hasSignature) {
+        taintedResponseIds.add(responseId);
+      }
+    }
+
+    if (taintedResponseIds.size === 0) return history;
+
+    const isTainted = (e: GeminiHistoryEvent) =>
+      taintedResponseIds.has(getOriginalId(e));
+
     const replacements: Record<string, GeminiHistoryEvent> = {};
     const filtered = history.filter((e) => {
-      if (e.type === "tool_call" && invalidToolCallIds.has(e.id)) {
+      if (e.type === "tool_call" && isTainted(e)) {
         replacements[e.id] = toolCallToOwnThought(e);
         return false;
       }
       if (
-        e.type === "tool_result" && "toolCallId" in e &&
-        e.toolCallId && invalidToolCallIds.has(e.toolCallId)
+        e.type === "tool_result" && "toolCallId" in e && e.toolCallId
       ) {
-        replacements[e.id] = toolResultToOwnThought(e);
-        return false;
+        // Find if the parent tool call was tainted
+        const parentCall = history.find((h) => h.id === e.toolCallId);
+        if (parentCall && isTainted(parentCall)) {
+          replacements[e.id] = toolResultToOwnThought(e);
+          return false;
+        }
       }
-      if (isTainted(e)) {
+      if (
+        (e.type === "own_utterance" || e.type === "own_thought") && isTainted(e)
+      ) {
         replacements[e.id] = textToOwnThought(e);
         return false;
       }
       return true;
     });
+
     rewriteHistory(replacements).catch((err) =>
       console.warn("Failed to rewrite history for invalid tool calls:", err)
     );
