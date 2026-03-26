@@ -332,3 +332,34 @@ Deno.test(
     );
   }),
 );
+Deno.test(
+  "agent streams output chunk by chunk",
+  injectSecrets(async () => {
+    let streamedText = "";
+    let chunkCount = 0;
+
+    await agentDeps([
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please write a short 20-word story about a brave knight.",
+      }),
+    ])(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "You are a creative writer.",
+      onStreamChunk: (chunk) => {
+        streamedText += chunk;
+        chunkCount++;
+      },
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+
+    assert(
+      chunkCount > 1,
+      `Should have received multiple stream chunks (got ${chunkCount})`,
+    );
+    assert(streamedText.length > 20, "Streamed text should be reasonably long");
+  }),
+);
