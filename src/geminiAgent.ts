@@ -114,7 +114,7 @@ const dropOldestHalf = <T extends { type: string }>(events: T[]): T[] => {
 };
 
 const extractUnsupportedMimeType = (error: Error): string | undefined => {
-  const match = error.message.match(/Unsupported MIME type:\s*([^"\s}]+)/);
+  const match = error.message.match(/Unsupported MIME type:\s*([^"\\\s},]+)/);
   return match ? match[1] : undefined;
 };
 
