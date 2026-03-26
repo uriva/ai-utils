@@ -18,12 +18,12 @@ import {
 } from "gamla";
 import type { ZodType } from "zod/v4";
 import {
-  accessStreamChunk,
   type AgentSpec,
   createSkillTools,
   doNothingEvent,
   estimateTokens,
   generateId,
+  getStreamChunk,
   type HistoryEventWithMetadata,
   type MediaAttachment,
   type MessageId,
@@ -159,6 +159,8 @@ const rawCallGemini = async (
   let finalUsageMetadata: TokenUsage | undefined;
   const accumulatedParts: Part[] = [];
 
+  const handleStreamChunk = getStreamChunk();
+
   for await (const chunk of responseStream) {
     if (chunk.usageMetadata) {
       finalUsageMetadata = chunk.usageMetadata;
@@ -168,7 +170,7 @@ const rawCallGemini = async (
       if (
         typeof part.text === "string" && !part.thought && !part.thoughtSignature
       ) {
-        await accessStreamChunk(part.text);
+        await handleStreamChunk(part.text);
       }
 
       if (typeof part.text === "string") {

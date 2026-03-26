@@ -214,6 +214,7 @@ const streamChunkInjection: Injection<(chunk: string) => Promise<void> | void> =
   context((_chunk: string) => {});
 export const injectStreamChunk = streamChunkInjection.inject;
 export const accessStreamChunk = streamChunkInjection.access;
+export const getStreamChunk = streamChunkInjection.getStore;
 
 const historyInjection: Injection<() => Promise<HistoryEvent[]>> = context(
   (): Promise<HistoryEvent[]> => {
