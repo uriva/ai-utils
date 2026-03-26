@@ -153,13 +153,12 @@ const stripExpiredFile = (error: Error, events: GeminiHistoryEvent[]) => {
 const rawCallGemini = async (
   req: GenerateContentParameters,
 ): Promise<GeminiOutput> => {
+  const handleStreamChunk = getStreamChunk();
   const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
   const responseStream = await sdk.models.generateContentStream(req);
 
   let finalUsageMetadata: TokenUsage | undefined;
   const accumulatedParts: Part[] = [];
-
-  const handleStreamChunk = getStreamChunk();
 
   for await (const chunk of responseStream) {
     if (chunk.usageMetadata) {
