@@ -210,6 +210,11 @@ const outputEvent = modelOutput.access;
 export const injectOutputEvent = modelOutput.inject;
 export const accessOutputEvent = modelOutput.access;
 
+const streamChunkInjection: Injection<(chunk: string) => Promise<void> | void> =
+  context((_chunk: string) => {});
+export const injectStreamChunk = streamChunkInjection.inject;
+export const accessStreamChunk = streamChunkInjection.access;
+
 const historyInjection: Injection<() => Promise<HistoryEvent[]>> = context(
   (): Promise<HistoryEvent[]> => {
     throw new Error("History not injected");
@@ -664,6 +669,7 @@ export type AgentSpec = {
   skills?: Skill[];
   prompt: string;
   onOutputEvent?: (event: HistoryEvent) => Promise<void>;
+  onStreamChunk?: (chunk: string) => Promise<void> | void;
   maxIterations: number;
   // deno-lint-ignore no-explicit-any
   onMaxIterationsReached: () => any;

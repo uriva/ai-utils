@@ -2,7 +2,6 @@ import {
   type Content,
   type FunctionCall,
   type GenerateContentParameters,
-  type GenerateContentResponse,
   type GenerateContentResponseUsageMetadata,
   GoogleGenAI,
   type Part,
@@ -19,6 +18,7 @@ import {
 } from "gamla";
 import type { ZodType } from "zod/v4";
 import {
+  accessStreamChunk,
   type AgentSpec,
   createSkillTools,
   doNothingEvent,
@@ -150,37 +150,85 @@ const stripExpiredFile = (error: Error, events: GeminiHistoryEvent[]) => {
   };
 };
 
-const rawCallGemini = (
+const rawCallGemini = async (
   req: GenerateContentParameters,
-): Promise<GeminiOutput> =>
-  new GoogleGenAI({ apiKey: accessGeminiToken() }).models.generateContent(req)
-    .then((resp: GenerateContentResponse): GeminiOutput => {
-      if (resp.usageMetadata) tokenUsage.access(resp.usageMetadata, req.model);
-      return (resp.candidates?.[0]?.content?.parts ?? [])
-        .flatMap((part: Part): GeminiOutput => {
-          const {
-            text,
-            functionCall,
-            thoughtSignature,
-            inlineData,
-            fileData,
-            thought,
-          } = part;
-          if (functionCall) {
-            return [{ type: "function_call", functionCall, thoughtSignature }];
-          }
-          if (inlineData) {
-            return [{ type: "inline_data", inlineData, thoughtSignature }];
-          }
-          if (fileData) {
-            return [{ type: "file_data", fileData, thoughtSignature }];
-          }
-          if (typeof text === "string") {
-            return [{ type: "text", text, thoughtSignature, thought }];
-          }
-          return [];
-        });
-    });
+): Promise<GeminiOutput> => {
+  const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
+  const responseStream = await sdk.models.generateContentStream(req);
+
+  let finalUsageMetadata: TokenUsage | undefined;
+  const accumulatedParts: Part[] = [];
+
+  for await (const chunk of responseStream) {
+    if (chunk.usageMetadata) {
+      finalUsageMetadata = chunk.usageMetadata;
+    }
+    const parts = chunk.candidates?.[0]?.content?.parts ?? [];
+    for (const part of parts) {
+      if (
+        typeof part.text === "string" && !part.thought && !part.thoughtSignature
+      ) {
+        await accessStreamChunk(part.text);
+      }
+
+      if (typeof part.text === "string") {
+        const lastPart = accumulatedParts[accumulatedParts.length - 1];
+        if (
+          lastPart &&
+          typeof lastPart.text === "string" &&
+          lastPart.thought === part.thought &&
+          lastPart.thoughtSignature === part.thoughtSignature
+        ) {
+          lastPart.text += part.text;
+        } else {
+          accumulatedParts.push({ ...part });
+        }
+      } else if (part.functionCall) {
+        // Assume functionCalls are fully formed or overwrite previous partial ones of the same name
+        const lastPart = accumulatedParts[accumulatedParts.length - 1];
+        if (
+          lastPart && lastPart.functionCall &&
+          lastPart.functionCall.name === part.functionCall.name
+        ) {
+          // If the SDK streams function calls by updating the object, we just replace it
+          lastPart.functionCall = part.functionCall;
+        } else {
+          accumulatedParts.push({ ...part });
+        }
+      } else {
+        accumulatedParts.push(part);
+      }
+    }
+  }
+
+  if (finalUsageMetadata) {
+    tokenUsage.access(finalUsageMetadata, req.model);
+  }
+
+  return accumulatedParts.flatMap((part: Part): GeminiOutput => {
+    const {
+      text,
+      functionCall,
+      thoughtSignature,
+      inlineData,
+      fileData,
+      thought,
+    } = part;
+    if (functionCall) {
+      return [{ type: "function_call", functionCall, thoughtSignature }];
+    }
+    if (inlineData) {
+      return [{ type: "inline_data", inlineData, thoughtSignature }];
+    }
+    if (fileData) {
+      return [{ type: "file_data", fileData, thoughtSignature }];
+    }
+    if (typeof text === "string") {
+      return [{ type: "text", text, thoughtSignature, thought }];
+    }
+    return [];
+  });
+};
 
 const callGeminiWithRetry = conditionalRetry(isServerError)(
   1000,

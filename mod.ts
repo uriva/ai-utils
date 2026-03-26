@@ -1,6 +1,7 @@
 import {
   type AgentSpec,
   injectOutputEvent,
+  injectStreamChunk,
   runAbstractAgent,
 } from "./src/agent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
@@ -55,7 +56,13 @@ const runAgentInner = (spec: AgentSpec): Promise<void> =>
     // @ts-expect-error the caller has gemini metadata
     : runAbstractAgent(spec, geminiAgentCaller(spec));
 
-export const runAgent = (spec: AgentSpec): Promise<void> =>
-  spec.onOutputEvent
-    ? injectOutputEvent(spec.onOutputEvent)(() => runAgentInner(spec))()
-    : runAgentInner(spec);
+export const runAgent = (spec: AgentSpec): Promise<void> => {
+  let runner = () => runAgentInner(spec);
+  if (spec.onOutputEvent) {
+    runner = injectOutputEvent(spec.onOutputEvent)(runner);
+  }
+  if (spec.onStreamChunk) {
+    runner = injectStreamChunk(spec.onStreamChunk)(runner);
+  }
+  return runner();
+};
