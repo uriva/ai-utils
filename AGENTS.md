@@ -105,5 +105,5 @@ Error classification predicates: `isServerError` (status >= 500),
 ## Model versions (`src/gemini.ts`)
 
 Model version constants: `geminiProVersion` = `"gemini-3.1-pro-preview"`,
-`geminiFlashVersion` = `"gemini-3-flash-preview"`. These are preview models and
-may have server-side bugs (500 errors) that are not caused by our requests.
+`geminiFlashVersion` = `"gemini-3.1-flash"`. These are preview models and may
+have server-side bugs (500 errors) that are not caused by our requests.
