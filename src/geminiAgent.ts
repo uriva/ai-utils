@@ -193,6 +193,9 @@ const rawCallGemini = async (
         ) {
           // If the SDK streams function calls by updating the object, we just replace it
           lastPart.functionCall = part.functionCall;
+          if (part.thoughtSignature) {
+            lastPart.thoughtSignature = part.thoughtSignature;
+          }
         } else {
           accumulatedParts.push({ ...part });
         }
@@ -258,6 +261,9 @@ const actionToTool = ({ name, description, parameters }: Tool<ZodType>) => ({
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const optionalThoughtSignature = (sig: string | undefined) =>
+  sig ? { thoughtSignature: sig } : {};
+
 const attachmentsToPartsOrEmpty = (attachments?: MediaAttachment[]): Part[] =>
   attachmentsToParts(attachments ?? []);
 
@@ -305,7 +311,7 @@ const historyEventToContent = (
     const parts: Part[] = [];
     if (text) {
       parts.push({
-        thoughtSignature: e.modelMetadata?.thoughtSignature,
+        ...optionalThoughtSignature(e.modelMetadata?.thoughtSignature),
         text,
       });
     }
@@ -314,14 +320,14 @@ const historyEventToContent = (
     }
     return wrapModelContent(
       !empty(parts) ? parts : [{
-        thoughtSignature: e.modelMetadata?.thoughtSignature,
+        ...optionalThoughtSignature(e.modelMetadata?.thoughtSignature),
         text: "",
       }],
     );
   }
   if (e.type === "tool_call") {
     return wrapModelContent([{
-      thoughtSignature: e.modelMetadata?.thoughtSignature,
+      ...optionalThoughtSignature(e.modelMetadata?.thoughtSignature),
       functionCall: {
         name: e.name,
         args: isRecord(e.parameters) ? e.parameters : {},
@@ -363,7 +369,7 @@ const historyEventToContent = (
   }
   if (e.type === "own_reaction") {
     return wrapModelContent([{
-      thoughtSignature: e.modelMetadata?.thoughtSignature,
+      ...optionalThoughtSignature(e.modelMetadata?.thoughtSignature),
       text: `You reacted ${e.reaction} to message: ${
         getRefText(e.onMessage).slice(0, 100)
       }`,
@@ -379,7 +385,7 @@ const historyEventToContent = (
   if (e.type === "do_nothing") {
     return wrapModelContent([{
       text: "",
-      thoughtSignature: e.modelMetadata?.thoughtSignature,
+      ...optionalThoughtSignature(e.modelMetadata?.thoughtSignature),
     }]);
   }
   throw new Error(
@@ -412,7 +418,7 @@ const fixStart = (history: Content[]) =>
     ]
     : history;
 
-const buildReq = (
+export const buildReq = (
   imageGen: boolean | undefined,
   lightModel: boolean | undefined,
   prompt: string,

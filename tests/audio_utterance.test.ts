@@ -270,14 +270,15 @@ const runTwoBotExchange = async (): Promise<
       event.type === "own_thought"
     );
 
-  await aliceEndpoint.sendData({
+  await bobEndpoint.sendData({
     type: "text",
     text: "Say a short greeting out loud now.",
     from: "tester",
   });
   await waitForCondition(aliceSpoke, 15_000);
 
-  await bobEndpoint.sendData({
+  await new Promise((r) => setTimeout(r, 2000));
+  await aliceEndpoint.sendData({
     type: "text",
     text: "Say a short greeting out loud now.",
     from: "tester",
@@ -308,6 +309,13 @@ Deno.test({
     }
     assert(result !== "retry", "Bots never produced stable speech exchange");
     const { aliceEvents, bobEvents } = result;
+    if (
+      !aliceEvents.some((e) => e.type === "own_utterance") ||
+      !bobEvents.some((e) => e.type === "own_utterance")
+    ) {
+      console.log("Alice events:", aliceEvents);
+      console.log("Bob events:", bobEvents);
+    }
     assert(
       aliceEvents.some((e) => e.type === "own_utterance") &&
         bobEvents.some((e) => e.type === "own_utterance"),

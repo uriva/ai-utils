@@ -304,6 +304,15 @@ const createSessionConfig = (
     prompt: spec.prompt,
     voiceName: spec.transport.voiceName,
     tools: spec.tools,
+    onDebug: (msg) => {
+      // Only log Bob's debug to see what's happening
+      const msgStr = typeof msg === "string" ? msg : JSON.stringify(msg);
+      if (spec.transport.participantName === "Alice") {
+        console.log(`[debug-bob] ${msgStr}`);
+      } else {
+        console.log(`[debug-alice] ${msgStr}`);
+      }
+    },
     onClose: (code, reason) => {
       if (state.isClosed) return;
       if (generation !== state.sessionGeneration) return;
@@ -334,11 +343,12 @@ const createSessionConfig = (
         const spoken = spokenReplyOnly(text);
         if (spoken.length === 0) return;
         void outputEvent(ownUtteranceTurn(spoken));
-        void endpoint.sendData({
-          type: "text" as const,
-          text: spoken,
-          from: spec.transport.participantName,
-        });
+        // We do not send the text over the duplex to avoid confusing the remote end with both text and audio for the same utterance.
+        // void endpoint.sendData({
+        //   type: "text" as const,
+        //   text: spoken,
+        //   from: spec.transport.participantName,
+        // });
       },
       onFlush: () => {
         if (state.isReconnecting) return;

@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import type { Content } from "@google/genai";
 import { z } from "zod/v4";
 import { tool } from "../mod.ts";
 import {
@@ -17,6 +18,7 @@ import {
   runCommandToolName,
 } from "../src/agent.ts";
 import {
+  buildReq,
   filterOrphanedToolResults,
   stripEmbeddedThoughtPatterns,
 } from "../src/geminiAgent.ts";
@@ -331,4 +333,104 @@ Deno.test("stripEmbeddedThoughtPatterns returns empty for thought-only text", ()
   const thoughtOnly =
     "[Internal thought, visible only to you: some thought content]";
   assertEquals(stripEmbeddedThoughtPatterns(thoughtOnly), "");
+});
+
+Deno.test("tool_call with empty thoughtSignature omits field from API request", () => {
+  const events = [
+    {
+      type: "participant_utterance" as const,
+      isOwn: false as const,
+      id: "msg-1",
+      timestamp: 100,
+      name: "user",
+      text: "do something",
+    },
+    {
+      type: "tool_call" as const,
+      isOwn: true as const,
+      id: "tc-1",
+      timestamp: 101,
+      name: "my_tool",
+      parameters: { arg: "val" },
+      modelMetadata: {
+        type: "gemini" as const,
+        responseId: "r1",
+        thoughtSignature: "",
+      },
+    },
+    {
+      type: "tool_result" as const,
+      isOwn: true as const,
+      id: "tr-1",
+      timestamp: 102,
+      toolCallId: "tc-1",
+      result: "done",
+    },
+  ];
+  const req = buildReq(false, true, "prompt", [], "UTC", undefined)(events);
+  const contents = req.contents as Content[];
+  const modelContents = contents.filter((c: Content) => c.role === "model");
+  for (const content of modelContents) {
+    for (const part of content.parts ?? []) {
+      if (part.functionCall) {
+        assert(
+          !("thoughtSignature" in part),
+          `Expected functionCall part to NOT have thoughtSignature field when it's empty, but found: ${
+            JSON.stringify(part)
+          }`,
+        );
+      }
+    }
+  }
+});
+
+Deno.test("tool_call with non-empty thoughtSignature preserves it in API request", () => {
+  const events = [
+    {
+      type: "participant_utterance" as const,
+      isOwn: false as const,
+      id: "msg-1",
+      timestamp: 100,
+      name: "user",
+      text: "do something",
+    },
+    {
+      type: "tool_call" as const,
+      isOwn: true as const,
+      id: "tc-1",
+      timestamp: 101,
+      name: "my_tool",
+      parameters: { arg: "val" },
+      modelMetadata: {
+        type: "gemini" as const,
+        responseId: "r1",
+        thoughtSignature: "abc123signature",
+      },
+    },
+    {
+      type: "tool_result" as const,
+      isOwn: true as const,
+      id: "tr-1",
+      timestamp: 102,
+      toolCallId: "tc-1",
+      result: "done",
+    },
+  ];
+  const req = buildReq(false, true, "prompt", [], "UTC", undefined)(events);
+  const contents = req.contents as Content[];
+  const modelContents = contents.filter((c: Content) => c.role === "model");
+  let foundFc = false;
+  for (const content of modelContents) {
+    for (const part of content.parts ?? []) {
+      if (part.functionCall) {
+        foundFc = true;
+        assertEquals(
+          part.thoughtSignature,
+          "abc123signature",
+          "Expected thoughtSignature to be preserved when non-empty",
+        );
+      }
+    }
+  }
+  assert(foundFc, "Expected to find a functionCall part");
 });
