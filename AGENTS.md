@@ -1,5 +1,7 @@
 # General
 
+Never fix quality issue without first a reproducing test.
+
 To run the tests with the required env vars consult the deno task "test" in the
 `deno.json` file.
 

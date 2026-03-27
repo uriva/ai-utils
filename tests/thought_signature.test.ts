@@ -1,78 +1,76 @@
 import { assert } from "@std/assert";
-import { geminiAgentCaller } from "../src/geminiAgent.ts";
+import { buildReq } from "../src/geminiAgent.ts";
 import { z } from "zod/v4";
 
 Deno.test(
-  "thought_signature propagation to functionCall",
-  async () => {
-    // This test ensures that when the model generates a tool call, and then we reply,
-    // the subsequent turn doesn't fail with a thought_signature missing error.
-
-    const tools = [{
+  "thought_signature propagation to functionCall in buildReq",
+  () => {
+    // deno-lint-ignore no-explicit-any
+    const tools: any = [{
       name: "get_weather",
       description: "Get the weather in a city",
       parameters: z.object({ city: z.string() }),
-      handler: () => {
-        return Promise.resolve("done");
-      },
+      handler: () => Promise.resolve("done"),
     }];
 
-    const agent = geminiAgentCaller({
-      maxIterations: 1,
-      onMaxIterationsReached: () => {},
-      timezoneIANA: "UTC",
-      prompt:
-        "You are a helpful assistant. Always use the get_weather tool when asked about weather.",
-      tools,
-      skills: [],
-      rewriteHistory: () => Promise.resolve(), // Identity
-    });
+    const metadata = {
+      type: "gemini" as const,
+      responseId: "response-123",
+      thoughtSignature: "sig-123",
+    };
 
     // deno-lint-ignore no-explicit-any
-    let history: any[] = [{
-      type: "own_utterance",
-      id: "u1",
-      timestamp: Date.now(),
-      isOwn: false,
-      text: "What is the weather in Paris?",
-    }];
+    const history: any[] = [
+      {
+        type: "own_thought",
+        isOwn: true,
+        id: "msg1",
+        timestamp: 123,
+        text: "I should check the weather.",
+        modelMetadata: { ...metadata, thoughtSignature: "sig-123" },
+      },
+      {
+        type: "tool_call",
+        isOwn: true,
+        id: "msg2",
+        timestamp: 123,
+        name: "get_weather",
+        parameters: { city: "Paris" },
+        modelMetadata: { ...metadata, thoughtSignature: "" },
+      },
+    ];
 
-    // First turn: model should decide to call get_weather
-    const firstTurn = await agent(history);
-    history = [...history, ...firstTurn];
-
-    // Check if there's a tool call
-    const toolCall = firstTurn.find((e: import("../mod.ts").HistoryEvent) =>
-      e.type === "tool_call"
+    const reqBuilder = buildReq(
+      false, // imageGen
+      false, // lightModel
+      "system prompt",
+      tools,
+      "UTC",
+      undefined,
     );
-    assert(toolCall, "Model did not emit a tool call");
 
-    // Reply with the tool result
-    history.push({
-      type: "tool_result",
-      id: "r1",
-      timestamp: Date.now(),
-      isOwn: false,
-      toolCallId: toolCall.id,
-      result: JSON.stringify({ temperature: "22C", condition: "Sunny" }),
-    });
+    const req = reqBuilder(history);
 
-    // Second turn: this is where it might crash with a 400 Bad Request
-    // if thought_signature is missing from the history.
-    try {
-      const secondTurn = await agent(history);
-      history = [...history, ...secondTurn];
-      const answer = secondTurn.find((e) =>
-        e.type === "own_utterance" || e.type === "own_thought"
+    // deno-lint-ignore no-explicit-any
+    const contents: any = req.contents;
+    console.log(JSON.stringify(contents, null, 2));
+
+    // There should be a user turn added initially, then our model turn
+    // deno-lint-ignore no-explicit-any
+    const modelTurn = contents.find((c: any) => c.role === "model");
+
+    const parts = modelTurn.parts;
+    assert(parts && parts.length === 2, "Expected 2 parts");
+
+    // deno-lint-ignore no-explicit-any
+    const functionCallPart = parts.find((p: any) => p.functionCall);
+    assert(functionCallPart, "Expected functionCallPart");
+
+    // THE BUG: functionCallPart.thoughtSignature should be "sig-123", not "" or undefined
+    if (functionCallPart.thoughtSignature !== "sig-123") {
+      throw new Error(
+        `Reproduced thought_signature missing bug: thoughtSignature is ${functionCallPart.thoughtSignature}`,
       );
-      assert(answer, "Model should generate an answer");
-    } catch (e) {
-      if (e instanceof Error && e.message.includes("thought_signature")) {
-        throw new Error(
-          `Reproduced thought_signature missing bug: ${e.message}`,
-        );
-      }
-      throw e;
     }
   },
 );

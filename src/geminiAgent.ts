@@ -393,10 +393,16 @@ const historyEventToContent = (
   );
 };
 
-const combineContent = (contents: Content[]): Content => ({
-  role: contents.some((c) => c.role === "model") ? "model" : "user",
-  parts: contents.flatMap((c) => c.parts ?? []),
-});
+const combineContent = (contents: Content[]): Content => {
+  const parts = contents.flatMap((c) => c.parts ?? []);
+  const signature = parts.find((p) => p.thoughtSignature)?.thoughtSignature;
+  return {
+    role: contents.some((c) => c.role === "model") ? "model" : "user",
+    parts: signature
+      ? parts.map((p) => ({ ...p, thoughtSignature: signature }))
+      : parts,
+  };
+};
 
 const wrapRole = (role: "user" | "model") => (parts: Part[]): Content => ({
   role,
