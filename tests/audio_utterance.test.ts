@@ -382,3 +382,79 @@ Deno.test(
     );
   },
 );
+
+const exampleSkill = {
+  name: "math_skill",
+  description: "A skill for doing math",
+  instructions: "Use this skill to do math",
+  tools: [
+    tool({
+      name: "add_numbers",
+      description: "Add two numbers together",
+      parameters: z.object({ a: z.number(), b: z.number() }),
+      handler: ({ a, b }) => Promise.resolve(String(a + b)),
+    }),
+  ],
+};
+
+Deno.test({
+  name: "audio agent uses skills via real Gemini session",
+  ignore: !Deno.env.get("GEMINI_API_KEY"),
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: injectSecrets(async () => {
+    const { left: testEndpoint, right: agentEndpoint } = createDuplexPair();
+    const outputEvents: HistoryEvent[] = [];
+
+    const agentTask = runAgent({
+      prompt:
+        "You are a math assistant. When asked to add numbers, use the math_skill to add them. You must use the tool.",
+      tools: [],
+      skills: [exampleSkill],
+      maxIterations: 3,
+      onMaxIterationsReached: () => {},
+      timezoneIANA: "UTC",
+      transport: {
+        kind: "audio" as const,
+        endpoint: agentEndpoint,
+        voiceName: "Zephyr",
+        participantName: "User",
+      },
+      onOutputEvent: (event) => {
+        outputEvents.push(event);
+        return Promise.resolve();
+      },
+      rewriteHistory: async () => {},
+    });
+
+    await testEndpoint.sendData({
+      type: "text",
+      text: "Please add 5 and 7 using your math skill.",
+      from: "tester",
+    });
+
+    const hasRunCommandCall = () =>
+      outputEvents.some((e) =>
+        e.type === "tool_call" && e.name === "run_command" &&
+        (e.parameters as Record<string, unknown>)?.command ===
+          "math_skill/add_numbers"
+      );
+
+    await waitForCondition(
+      hasRunCommandCall,
+      60_000,
+    );
+
+    await testEndpoint.sendData({ type: "close", from: "tester" });
+    await agentTask;
+
+    assert(
+      hasRunCommandCall(),
+      `Expected run_command tool_call event for math_skill/add_numbers, got: ${
+        outputEvents.map((e) =>
+          e.type === "tool_call" ? `tool_call:${e.name}` : e.type
+        ).join(", ")
+      }`,
+    );
+  }),
+});

@@ -1,6 +1,7 @@
 import {
   accessOutputEvent,
   type AgentSpec,
+  createSkillTools,
   handleFunctionCalls,
   type HistoryEvent,
   ownThoughtTurn,
@@ -303,7 +304,9 @@ const createSessionConfig = (
     apiKey: accessGeminiToken(),
     prompt: spec.prompt,
     voiceName: spec.transport.voiceName,
-    tools: spec.tools,
+    tools: spec.skills && spec.skills.length > 0
+      ? [...spec.tools, ...createSkillTools(spec.skills)]
+      : spec.tools,
     onDebug: (msg) => {
       // Only log Bob's debug to see what's happening
       const msgStr = typeof msg === "string" ? msg : JSON.stringify(msg);
@@ -392,7 +395,10 @@ const processTurnOutput = async (
   if (!wasInterrupted) {
     await emitNonUtteranceEvents(outputEvent, sessionOutput);
   }
-  await resolveToolCalls(session, spec.tools, sessionOutput);
+  const allTools = spec.skills && spec.skills.length > 0
+    ? [...spec.tools, ...createSkillTools(spec.skills)]
+    : spec.tools;
+  await resolveToolCalls(session, allTools, sessionOutput);
 };
 
 export const runAudioAgentLoop = async (
