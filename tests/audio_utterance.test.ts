@@ -384,15 +384,15 @@ Deno.test(
 );
 
 const exampleSkill = {
-  name: "math_skill",
-  description: "A skill for doing math",
-  instructions: "Use this skill to do math",
+  name: "secret_skill",
+  description: "A skill for getting secrets",
+  instructions: "Use this skill to get the secret word",
   tools: [
     tool({
-      name: "add_numbers",
-      description: "Add two numbers together",
-      parameters: z.object({ a: z.number(), b: z.number() }),
-      handler: ({ a, b }) => Promise.resolve(String(a + b)),
+      name: "get_secret",
+      description: "Gets the secret word",
+      parameters: z.object({}),
+      handler: () => Promise.resolve("Bananarama"),
     }),
   ],
 };
@@ -408,7 +408,7 @@ Deno.test({
 
     const agentTask = runAgent({
       prompt:
-        "You are a math assistant. When asked to add numbers, use the math_skill to add them. You must use the tool.",
+        "You are a math assistant. When asked to add numbers, use the secret_skill to add them. You must use the tool.",
       tools: [],
       skills: [exampleSkill],
       maxIterations: 3,
@@ -429,7 +429,7 @@ Deno.test({
 
     await testEndpoint.sendData({
       type: "text",
-      text: "Please add 5 and 7 using your math skill.",
+      text: "Please get the secret word using your secret_skill.",
       from: "tester",
     });
 
@@ -437,7 +437,7 @@ Deno.test({
       outputEvents.some((e) =>
         e.type === "tool_call" && e.name === "run_command" &&
         (e.parameters as Record<string, unknown>)?.command ===
-          "math_skill/add_numbers"
+          "secret_skill/get_secret"
       );
 
     await waitForCondition(
@@ -450,11 +450,78 @@ Deno.test({
 
     assert(
       hasRunCommandCall(),
-      `Expected run_command tool_call event for math_skill/add_numbers, got: ${
+      `Expected run_command tool_call event for secret_skill/get_secret, got: ${
         outputEvents.map((e) =>
           e.type === "tool_call" ? `tool_call:${e.name}` : e.type
         ).join(", ")
       }`,
+    );
+  }),
+});
+
+Deno.test({
+  name:
+    "audio agent speaks the result of a skill tool when not explicitly told to",
+  ignore: !Deno.env.get("GEMINI_API_KEY"),
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: injectSecrets(async () => {
+    const { left: testEndpoint, right: agentEndpoint } = createDuplexPair();
+    const outputEvents: HistoryEvent[] = [];
+
+    const agentTask = runAgent({
+      prompt:
+        "You are a helpful voice assistant. Use the secret_skill to find the secret word. When you use the skill, use the run_command tool to execute secret_skill/get_secret.",
+      tools: [],
+      skills: [exampleSkill],
+      maxIterations: 5,
+      onMaxIterationsReached: () => {},
+      timezoneIANA: "UTC",
+      transport: {
+        kind: "audio" as const,
+        endpoint: agentEndpoint,
+        voiceName: "Zephyr",
+        participantName: "User",
+      },
+      onOutputEvent: (event) => {
+        outputEvents.push(event);
+        return Promise.resolve();
+      },
+      rewriteHistory: async () => {},
+    });
+
+    await testEndpoint.sendData({
+      type: "text",
+      text: "What is the secret word?",
+      from: "tester",
+    });
+
+    await waitForCondition(
+      () => {
+        const hasToolCall = outputEvents.some((e) =>
+          e.type === "tool_call" && e.name === "run_command" &&
+          (e.parameters as Record<string, unknown>)?.command ===
+            "secret_skill/get_secret"
+        );
+        const hasUtteranceWithAnswer = outputEvents.some((e) =>
+          e.type === "own_utterance" && e.text.includes("Bananarama")
+        );
+        return hasToolCall && hasUtteranceWithAnswer;
+      },
+      45_000,
+    );
+
+    await testEndpoint.sendData({ type: "close", from: "tester" });
+    await agentTask;
+
+    const utterances = outputEvents.filter((e) => e.type === "own_utterance");
+    const spokenText = utterances.map((e) => (e as { text: string }).text).join(
+      " ",
+    );
+
+    assert(
+      spokenText.includes("Bananarama"),
+      `Expected agent to speak the answer "Bananarama", but it only spoke: "${spokenText}"`,
     );
   }),
 });

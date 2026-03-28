@@ -302,7 +302,8 @@ const createSessionConfig = (
   const generation = state.sessionGeneration;
   return {
     apiKey: accessGeminiToken(),
-    prompt: spec.prompt,
+    prompt:
+      `${spec.prompt}\n\nIMPORTANT: You are operating via a voice interface. The user cannot see tool results visually. You MUST speak the result of tool calls out loud.`,
     voiceName: spec.transport.voiceName,
     tools: spec.skills && spec.skills.length > 0
       ? [...spec.tools, ...createSkillTools(spec.skills)]
