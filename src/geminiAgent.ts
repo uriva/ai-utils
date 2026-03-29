@@ -51,6 +51,19 @@ import {
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
 
+const normalizeError = (error: unknown): Error => {
+  if (error instanceof Error) return error;
+  if (typeof error === "string") return new Error(error);
+  if (typeof error === "object" && error !== null) {
+    const err = new Error(
+      (error as { message?: string }).message || JSON.stringify(error),
+    );
+    Object.assign(err, error);
+    return err;
+  }
+  return new Error(String(error));
+};
+
 const isServerError = (error: unknown) =>
   error instanceof Error && "status" in error &&
   (error as { status: number }).status >= 500;
@@ -82,12 +95,12 @@ export const injectTokenUsage = tokenUsage.inject;
 
 type GeminiOutput = GeminiPartOfInterest[];
 
-const extractFileIdFromError = (error: Error) => {
+export const extractFileIdFromError = (error: Error) => {
   const match = error.message.match(/File\s+([a-zA-Z0-9]+)/);
   return match ? match[1] : null;
 };
 
-const is403PermissionError = (error: Error) => {
+export const is403PermissionError = (error: Error) => {
   if ("status" in error && (error as { status: number }).status === 403) {
     return true;
   }
@@ -126,7 +139,10 @@ const getExpiredMediaText = (attachments: MediaAttachment[]) =>
     }>`
     : "";
 
-const stripExpiredFile = (error: Error, events: GeminiHistoryEvent[]) => {
+export const stripExpiredFile = (
+  error: Error,
+  events: GeminiHistoryEvent[],
+) => {
   const fileId = extractFileIdFromError(error);
   if (!fileId) return undefined;
   const matchesFile = hasFileAttachment(fileId);
@@ -791,7 +807,7 @@ const stripAllNotActiveFiles = async (
     try {
       return await callGemini(eventsToRequest(currentEvents), disableStreaming);
     } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
+      const err = normalizeError(error);
       const fixed = handleFileNotActiveError(err, currentEvents);
       if (!fixed) throw err;
       currentEvents = fixed;
@@ -823,11 +839,14 @@ const stripAllUnsupportedMimeTypes = async (
     Object.assign(allReplacements, replacements);
     currentEvents = updatedHistory;
     try {
-      const result = await callGemini(eventsToRequest(currentEvents));
+      const result = await callGemini(
+        eventsToRequest(currentEvents),
+        disableStreaming,
+      );
       await rewriteHistory(allReplacements);
       return result;
     } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
+      const err = normalizeError(error);
       if (!isUnsupportedMimeTypeError(err)) throw err;
       currentError = err;
     }
@@ -865,7 +884,7 @@ const stripAllFileAttachments = (
   return { updatedHistory, replacements };
 };
 
-const stripAllExpiredFiles = async (
+export const stripAllExpiredFiles = async (
   initialError: Error,
   events: GeminiHistoryEvent[],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
@@ -885,18 +904,24 @@ const stripAllExpiredFiles = async (
       const nuclear = stripAllFileAttachments(currentEvents);
       Object.assign(allReplacements, nuclear.replacements);
       currentEvents = nuclear.updatedHistory;
-      const result = await callGemini(eventsToRequest(currentEvents));
+      const result = await callGemini(
+        eventsToRequest(currentEvents),
+        disableStreaming,
+      );
       await rewriteHistory(allReplacements);
       return result;
     }
     Object.assign(allReplacements, fixed.replacements);
     currentEvents = fixed.updatedHistory;
     try {
-      const result = await callGemini(eventsToRequest(currentEvents));
+      const result = await callGemini(
+        eventsToRequest(currentEvents),
+        disableStreaming,
+      );
       await rewriteHistory(allReplacements);
       return result;
     } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
+      const err = normalizeError(error);
       if (!is403PermissionError(err)) throw err;
       currentError = err;
     }
@@ -913,7 +938,7 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
   try {
     return await callGemini(eventsToRequest(events), disableStreaming);
   } catch (error) {
-    const err = error instanceof Error ? error : new Error(String(error));
+    const err = normalizeError(error);
     if (isTokenLimitExceeded(err)) {
       const totalTokens = sum(map(estimateTokens)(events));
       console.warn(
