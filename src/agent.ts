@@ -675,6 +675,7 @@ export type AgentSpec = {
   // deno-lint-ignore no-explicit-any
   onMaxIterationsReached: () => any;
   lightModel?: boolean;
+  disableStreaming?: boolean;
   provider?: "gemini";
   imageGen?: boolean;
   rewriteHistory: (replacements: Record<string, HistoryEvent>) => Promise<void>;

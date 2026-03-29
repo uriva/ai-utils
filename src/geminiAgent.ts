@@ -150,57 +150,76 @@ const stripExpiredFile = (error: Error, events: GeminiHistoryEvent[]) => {
   };
 };
 
-const rawCallGemini = async (
-  req: GenerateContentParameters,
-): Promise<GeminiOutput> => {
+const rawCallGemini = async ({
+  req,
+  disableStreaming,
+}: {
+  req: GenerateContentParameters;
+  disableStreaming?: boolean;
+}): Promise<GeminiOutput> => {
   const handleStreamChunk = getStreamChunk();
   const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
-  const responseStream = await sdk.models.generateContentStream(req);
-
   let finalUsageMetadata: TokenUsage | undefined;
   const accumulatedParts: Part[] = [];
 
-  for await (const chunk of responseStream) {
-    if (chunk.usageMetadata) {
-      finalUsageMetadata = chunk.usageMetadata;
-    }
-    const parts = chunk.candidates?.[0]?.content?.parts ?? [];
+  if (disableStreaming) {
+    const response = await sdk.models.generateContent(req);
+    finalUsageMetadata = response.usageMetadata;
+    const parts = response.candidates?.[0]?.content?.parts ?? [];
     for (const part of parts) {
       if (
-        typeof part.text === "string" && !part.thought && !part.thoughtSignature
+        typeof part.text === "string" && !part.thought
       ) {
         await handleStreamChunk(part.text);
       }
+      accumulatedParts.push(part);
+    }
+  } else {
+    const responseStream = await sdk.models.generateContentStream(req);
 
-      if (typeof part.text === "string") {
-        const lastPart = accumulatedParts[accumulatedParts.length - 1];
+    for await (const chunk of responseStream) {
+      if (chunk.usageMetadata) {
+        finalUsageMetadata = chunk.usageMetadata;
+      }
+      const parts = chunk.candidates?.[0]?.content?.parts ?? [];
+      for (const part of parts) {
         if (
-          lastPart &&
-          typeof lastPart.text === "string" &&
-          lastPart.thought === part.thought &&
-          lastPart.thoughtSignature === part.thoughtSignature
+          typeof part.text === "string" && !part.thought &&
+          !part.thoughtSignature
         ) {
-          lastPart.text += part.text;
-        } else {
-          accumulatedParts.push({ ...part });
+          await handleStreamChunk(part.text);
         }
-      } else if (part.functionCall) {
-        // Assume functionCalls are fully formed or overwrite previous partial ones of the same name
-        const lastPart = accumulatedParts[accumulatedParts.length - 1];
-        if (
-          lastPart && lastPart.functionCall &&
-          lastPart.functionCall.name === part.functionCall.name
-        ) {
-          // If the SDK streams function calls by updating the object, we just replace it
-          lastPart.functionCall = part.functionCall;
-          if (part.thoughtSignature) {
-            lastPart.thoughtSignature = part.thoughtSignature;
+
+        if (typeof part.text === "string") {
+          const lastPart = accumulatedParts[accumulatedParts.length - 1];
+          if (
+            lastPart &&
+            typeof lastPart.text === "string" &&
+            lastPart.thought === part.thought &&
+            lastPart.thoughtSignature === part.thoughtSignature
+          ) {
+            lastPart.text += part.text;
+          } else {
+            accumulatedParts.push({ ...part });
+          }
+        } else if (part.functionCall) {
+          // Assume functionCalls are fully formed or overwrite previous partial ones of the same name
+          const lastPart = accumulatedParts[accumulatedParts.length - 1];
+          if (
+            lastPart && lastPart.functionCall &&
+            lastPart.functionCall.name === part.functionCall.name
+          ) {
+            // If the SDK streams function calls by updating the object, we just replace it
+            lastPart.functionCall = part.functionCall;
+            if (part.thoughtSignature) {
+              lastPart.thoughtSignature = part.thoughtSignature;
+            }
+          } else {
+            accumulatedParts.push({ ...part });
           }
         } else {
-          accumulatedParts.push({ ...part });
+          accumulatedParts.push(part);
         }
-      } else {
-        accumulatedParts.push(part);
       }
     }
   }
@@ -240,12 +259,18 @@ const callGeminiWithRetry = conditionalRetry(isServerError)(
   rawCallGemini,
 );
 
-const callGemini = (req: GenerateContentParameters): Promise<GeminiOutput> =>
-  callGeminiWithRetry(req).catch((err) => {
+const callGemini = (
+  req: GenerateContentParameters,
+  disableStreaming?: boolean,
+): Promise<GeminiOutput> =>
+  callGeminiWithRetry({ req, disableStreaming }).catch((err) => {
     if (!isServerError(err)) throw err;
     return rawCallGemini({
-      ...req,
-      model: alternateModel(req.model),
+      req: {
+        ...req,
+        model: alternateModel(req.model),
+      },
+      disableStreaming,
     });
   }).catch((err) => {
     geminiError.access(err, req);
@@ -759,11 +784,12 @@ const handleFileNotActiveError = (
 const stripAllNotActiveFiles = async (
   events: GeminiHistoryEvent[],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
+  disableStreaming?: boolean,
 ): Promise<GeminiOutput> => {
   let currentEvents = events;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      return await callGemini(eventsToRequest(currentEvents));
+      return await callGemini(eventsToRequest(currentEvents), disableStreaming);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       const fixed = handleFileNotActiveError(err, currentEvents);
@@ -771,7 +797,7 @@ const stripAllNotActiveFiles = async (
       currentEvents = fixed;
     }
   }
-  return callGemini(eventsToRequest(currentEvents));
+  return callGemini(eventsToRequest(currentEvents), disableStreaming);
 };
 
 const stripAllUnsupportedMimeTypes = async (
@@ -779,6 +805,7 @@ const stripAllUnsupportedMimeTypes = async (
   events: GeminiHistoryEvent[],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
   rewriteHistory: AgentSpec["rewriteHistory"],
+  disableStreaming?: boolean,
 ): Promise<GeminiOutput> => {
   let currentEvents = events;
   let currentError = initialError;
@@ -805,7 +832,7 @@ const stripAllUnsupportedMimeTypes = async (
       currentError = err;
     }
   }
-  return callGemini(eventsToRequest(currentEvents));
+  return callGemini(eventsToRequest(currentEvents), disableStreaming);
 };
 
 const stripAllFileAttachments = (
@@ -843,6 +870,7 @@ const stripAllExpiredFiles = async (
   events: GeminiHistoryEvent[],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
   rewriteHistory: AgentSpec["rewriteHistory"],
+  disableStreaming?: boolean,
 ): Promise<GeminiOutput> => {
   let currentEvents = events;
   let currentError = initialError;
@@ -873,16 +901,17 @@ const stripAllExpiredFiles = async (
       currentError = err;
     }
   }
-  return callGemini(eventsToRequest(currentEvents));
+  return callGemini(eventsToRequest(currentEvents), disableStreaming);
 };
 
 const callGeminiWithFixHistory = (
   rewriteHistory: AgentSpec["rewriteHistory"],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
+  disableStreaming?: boolean,
 ) =>
 async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
   try {
-    return await callGemini(eventsToRequest(events));
+    return await callGemini(eventsToRequest(events), disableStreaming);
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
     if (isTokenLimitExceeded(err)) {
@@ -892,10 +921,10 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
       );
       const truncated = dropOldestHalf(events);
       if (truncated.length === events.length) throw err;
-      return callGemini(eventsToRequest(truncated));
+      return callGemini(eventsToRequest(truncated), disableStreaming);
     }
     if (isFileNotActiveError(err)) {
-      return stripAllNotActiveFiles(events, eventsToRequest);
+      return stripAllNotActiveFiles(events, eventsToRequest, disableStreaming);
     }
     if (isUnsupportedMimeTypeError(err)) {
       return stripAllUnsupportedMimeTypes(
@@ -903,10 +932,17 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
         events,
         eventsToRequest,
         rewriteHistory,
+        disableStreaming,
       );
     }
     if (!is403PermissionError(err)) throw err;
-    return stripAllExpiredFiles(err, events, eventsToRequest, rewriteHistory);
+    return stripAllExpiredFiles(
+      err,
+      events,
+      eventsToRequest,
+      rewriteHistory,
+      disableStreaming,
+    );
   }
 };
 
@@ -919,6 +955,7 @@ export const geminiAgentCaller = ({
   rewriteHistory,
   timezoneIANA,
   maxOutputTokens,
+  disableStreaming,
 }: AgentSpec) =>
 (events: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> =>
   pipe(
@@ -943,6 +980,7 @@ export const geminiAgentCaller = ({
         timezoneIANA,
         maxOutputTokens,
       ),
+      disableStreaming,
     ),
     (geminiOutput: GeminiOutput): GeminiHistoryEvent[] => {
       const responseId = generateId();

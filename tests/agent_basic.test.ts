@@ -363,3 +363,37 @@ Deno.test(
     assert(streamedText.length > 20, "Streamed text should be reasonably long");
   }),
 );
+
+Deno.test(
+  "agent outputs complete text in one chunk when disableStreaming is true",
+  injectSecrets(async () => {
+    let streamedText = "";
+    let chunkCount = 0;
+
+    await agentDeps([
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please write a short 20-word story about a brave knight.",
+      }),
+    ])(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "You are a creative writer.",
+      onStreamChunk: (chunk) => {
+        streamedText += chunk;
+        chunkCount++;
+      },
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+      disableStreaming: true,
+    });
+
+    assertEquals(
+      chunkCount,
+      1,
+      `Should have received exactly one stream chunk (got ${chunkCount})`,
+    );
+    assert(streamedText.length > 20, "Streamed text should be reasonably long");
+  }),
+);
