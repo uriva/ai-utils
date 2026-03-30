@@ -525,6 +525,46 @@ const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
       : event;
   });
 
+const participantNamesFromHistory = (history: HistoryEvent[]): Set<string> =>
+  new Set(
+    history
+      .filter((e): e is ParticipantUtterance | ParticipantEditMessage =>
+        e.type === "participant_utterance" ||
+        e.type === "participant_edit_message"
+      )
+      .map((e) => e.name),
+  );
+
+const fabricatedUserMessagePattern = (participantNames: Set<string>) => {
+  if (participantNames.size === 0) return null;
+  const escaped = [...participantNames].map((n) =>
+    n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  );
+  return new RegExp(`^(${escaped.join("|")}):\\s`, "m");
+};
+
+export const stripFabricatedUserMessages = (
+  participantNames: Set<string>,
+  output: HistoryEvent[],
+): HistoryEvent[] => {
+  const pattern = fabricatedUserMessagePattern(participantNames);
+  if (!pattern) return output;
+  return output.map((event) => {
+    if (event.type !== "own_utterance") return event;
+    const text = stripInternalSentTimestampSuffix(event.text);
+    if (!pattern.test(text)) return event;
+    console.warn(
+      "[fabrication-guard] model fabricated user message in own_utterance",
+      { text: text.slice(0, 200) },
+    );
+    const lines = text.split("\n");
+    const clean = lines.filter((line) => !pattern.test(line)).join("\n").trim();
+    return clean.length > 0
+      ? { ...event, text: clean }
+      : { ...event, type: "own_thought" as const, text };
+  });
+};
+
 export const guardNovelOpaqueIdentifiers = (
   prompt: string,
   history: HistoryEvent[],
@@ -551,7 +591,11 @@ export const guardNovelOpaqueIdentifiers = (
   const sanitized = modelOutputLeaksInternalSentTimestamp(output)
     ? sanitizeInternalSentTimestampLeak(output)
     : output;
-  const safe = reclassifyLeakedThoughts(sanitized);
+  const withoutFabrications = stripFabricatedUserMessages(
+    participantNamesFromHistory(history),
+    sanitized,
+  );
+  const safe = reclassifyLeakedThoughts(withoutFabrications);
   return { emit: safe, internal: safe };
 };
 
