@@ -288,9 +288,6 @@ const callGemini = (
       },
       disableStreaming,
     });
-  }).catch((err) => {
-    geminiError.access(err, req);
-    throw err;
   });
 
 const actionToTool = ({ name, description, parameters }: Tool<ZodType>) => ({
@@ -904,12 +901,19 @@ export const stripAllExpiredFiles = async (
       const nuclear = stripAllFileAttachments(currentEvents);
       Object.assign(allReplacements, nuclear.replacements);
       currentEvents = nuclear.updatedHistory;
-      const result = await callGemini(
-        eventsToRequest(currentEvents),
-        disableStreaming,
-      );
-      await rewriteHistory(allReplacements);
-      return result;
+      try {
+        const result = await callGemini(
+          eventsToRequest(currentEvents),
+          disableStreaming,
+        );
+        await rewriteHistory(allReplacements);
+        return result;
+      } catch (nuclearError) {
+        const err = normalizeError(nuclearError);
+        throw new Error(
+          `403 persists after stripping all file attachments: ${err.message}`,
+        );
+      }
     }
     Object.assign(allReplacements, fixed.replacements);
     currentEvents = fixed.updatedHistory;
@@ -926,7 +930,9 @@ export const stripAllExpiredFiles = async (
       currentError = err;
     }
   }
-  return callGemini(eventsToRequest(currentEvents), disableStreaming);
+  throw new Error(
+    `403 persists after 5 attempts to strip expired files: ${currentError.message}`,
+  );
 };
 
 const callGeminiWithFixHistory = (
@@ -936,23 +942,37 @@ const callGeminiWithFixHistory = (
 ) =>
 async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
   try {
-    return await callGemini(eventsToRequest(events), disableStreaming);
-  } catch (error) {
-    const err = normalizeError(error);
-    if (isTokenLimitExceeded(err)) {
-      const totalTokens = sum(map(estimateTokens)(events));
-      console.warn(
-        `Token limit exceeded (estimated ${totalTokens} tokens, ${events.length} events). Dropping oldest half.`,
-      );
-      const truncated = dropOldestHalf(events);
-      if (truncated.length === events.length) throw err;
-      return callGemini(eventsToRequest(truncated), disableStreaming);
-    }
-    if (isFileNotActiveError(err)) {
-      return stripAllNotActiveFiles(events, eventsToRequest, disableStreaming);
-    }
-    if (isUnsupportedMimeTypeError(err)) {
-      return stripAllUnsupportedMimeTypes(
+    try {
+      return await callGemini(eventsToRequest(events), disableStreaming);
+    } catch (error) {
+      const err = normalizeError(error);
+      if (isTokenLimitExceeded(err)) {
+        const totalTokens = sum(map(estimateTokens)(events));
+        console.warn(
+          `Token limit exceeded (estimated ${totalTokens} tokens, ${events.length} events). Dropping oldest half.`,
+        );
+        const truncated = dropOldestHalf(events);
+        if (truncated.length === events.length) throw err;
+        return callGemini(eventsToRequest(truncated), disableStreaming);
+      }
+      if (isFileNotActiveError(err)) {
+        return stripAllNotActiveFiles(
+          events,
+          eventsToRequest,
+          disableStreaming,
+        );
+      }
+      if (isUnsupportedMimeTypeError(err)) {
+        return stripAllUnsupportedMimeTypes(
+          err,
+          events,
+          eventsToRequest,
+          rewriteHistory,
+          disableStreaming,
+        );
+      }
+      if (!is403PermissionError(err)) throw err;
+      return stripAllExpiredFiles(
         err,
         events,
         eventsToRequest,
@@ -960,14 +980,10 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
         disableStreaming,
       );
     }
-    if (!is403PermissionError(err)) throw err;
-    return stripAllExpiredFiles(
-      err,
-      events,
-      eventsToRequest,
-      rewriteHistory,
-      disableStreaming,
-    );
+  } catch (terminalError) {
+    const err = normalizeError(terminalError);
+    geminiError.access(err, eventsToRequest(events));
+    throw err;
   }
 };
 

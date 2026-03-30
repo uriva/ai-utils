@@ -80,12 +80,12 @@ The Gemini API call path has several layers of error handling:
    `conditionalRetry(isServerError)(1000, 4, rawCallGemini)` — retries up to 4
    times with 1s delay on 500+ errors.
 3. `callGemini` — wraps `callGeminiWithRetry`. On server error, tries the
-   alternate model (pro<->flash). Error logging (`geminiError.access`) fires
-   only here, after all retries AND alternate model are exhausted. This ensures
-   only truly terminal errors are reported.
+   alternate model (pro<->flash). No error logging here.
 4. `callGeminiWithFixHistory` — wraps `callGemini`. Handles token limit exceeded
    (drops oldest half), file permission errors (strips files), unsupported mime
-   types.
+   types. Error logging (`geminiError.access`) fires only here as an outer
+   catch, after all recovery strategies are exhausted. This ensures only truly
+   terminal errors are reported.
 
 Error classification predicates: `isServerError` (status >= 500),
 `isTokenLimitExceeded` (400 + "token count exceeds"), `is403PermissionError`,
