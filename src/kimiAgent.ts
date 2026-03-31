@@ -112,6 +112,7 @@ const dropOldestHalf = <T extends { type: string }>(events: T[]): T[] => {
 type KimiMetadata = {
   type: "kimi";
   responseId: string;
+  reasoningContent?: string | null;
 };
 
 type KimiHistoryEvent = HistoryEventWithMetadata<KimiMetadata>;
@@ -268,6 +269,7 @@ async (e: KimiHistoryEvent): Promise<ChatCompletionMessageParam[]> => {
   }
 
   if (e.type === "tool_call") {
+    const metadata = e.modelMetadata as KimiMetadata | undefined;
     return [{
       role: "assistant",
       content: null,
@@ -279,7 +281,11 @@ async (e: KimiHistoryEvent): Promise<ChatCompletionMessageParam[]> => {
           arguments: JSON.stringify(e.parameters),
         },
       }],
-    }];
+      // Kimi-specific: include reasoning_content for thinking mode
+      ...(metadata?.reasoningContent !== undefined
+        ? { reasoning_content: metadata.reasoningContent }
+        : {}),
+    } as ChatCompletionMessageParam];
   }
 
   if (e.type === "tool_result") {
