@@ -27,6 +27,27 @@ import {
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
 
+// Fetch file attachment and convert to base64
+const fetchFileAttachment = async (
+  attachment: MediaAttachment,
+): Promise<string | null> => {
+  if (attachment.kind !== "file" || !attachment.fileUri) return null;
+
+  try {
+    const response = await fetch(attachment.fileUri);
+    if (!response.ok) {
+      console.error(`Failed to fetch attachment: ${response.status}`);
+      return null;
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    return base64;
+  } catch (e) {
+    console.error("Error fetching file attachment:", e);
+    return null;
+  }
+};
+
 const kimiApiKeyInjection: Injection<() => string> = context((): string => {
   throw new Error("no kimi API key injected");
 });
@@ -91,9 +112,9 @@ type KimiRequestParams = {
   stream: boolean;
 };
 
-const attachmentsToContentParts = (
+const attachmentsToContentParts = async (
   attachments?: MediaAttachment[],
-): OpenAI.Chat.Completions.ChatCompletionContentPart[] | undefined => {
+): Promise<OpenAI.Chat.Completions.ChatCompletionContentPart[] | undefined> => {
   if (!attachments || empty(attachments)) return undefined;
 
   const parts: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [];
@@ -117,11 +138,32 @@ const attachmentsToContentParts = (
           text: `[Attachment: ${att.caption || att.mimeType}]`,
         });
       }
-    } else {
-      parts.push({
-        type: "text",
-        text: `[File: ${att.caption || att.fileUri}]`,
-      });
+    } else if (att.kind === "file" && att.fileUri) {
+      // Fetch file attachment and convert to base64 for Kimi
+      const base64 = await fetchFileAttachment(att);
+      if (base64) {
+        if (att.mimeType.startsWith("image/")) {
+          parts.push({
+            type: "image_url",
+            image_url: { url: `data:${att.mimeType};base64,${base64}` },
+          });
+        } else if (att.mimeType.startsWith("audio/")) {
+          parts.push({
+            type: "text",
+            text: `data:${att.mimeType};base64,${base64}`,
+          });
+        } else {
+          parts.push({
+            type: "text",
+            text: `[Attachment: ${att.caption || att.mimeType}]`,
+          });
+        }
+      } else {
+        parts.push({
+          type: "text",
+          text: `[File: ${att.caption || att.fileUri}]`,
+        });
+      }
     }
   }
 
@@ -132,7 +174,7 @@ const historyEventToMessage = (
   eventById: (id: string) => KimiHistoryEvent | undefined,
   timezoneIANA: string,
 ) =>
-(e: KimiHistoryEvent): ChatCompletionMessageParam[] => {
+async (e: KimiHistoryEvent): Promise<ChatCompletionMessageParam[]> => {
   const getRefText = (onMessage: MessageId): string => {
     const msg = eventById(onMessage);
     return typeof msg === "object" && "text" in msg ? msg.text : "";
@@ -152,7 +194,7 @@ const historyEventToMessage = (
       ? `${e.name}: ${e.text}`
       : "";
 
-    const contentParts = attachmentsToContentParts(e.attachments);
+    const contentParts = await attachmentsToContentParts(e.attachments);
 
     if (contentParts && contentParts.length > 0) {
       const textPart: OpenAI.Chat.Completions.ChatCompletionContentPart = {
@@ -174,7 +216,7 @@ const historyEventToMessage = (
 
     // For assistant messages with attachments, include as text descriptions
     // (Kimi/OpenAI doesn't support images in assistant content parts)
-    const contentParts = attachmentsToContentParts(e.attachments);
+    const contentParts = await attachmentsToContentParts(e.attachments);
     const attachmentDescriptions = contentParts
       ? contentParts
         .filter((
@@ -267,7 +309,7 @@ const actionToTool = (
   };
 };
 
-type BuildReqFn = (events: KimiHistoryEvent[]) => KimiRequestParams;
+type BuildReqFn = (events: KimiHistoryEvent[]) => Promise<KimiRequestParams>;
 
 const buildReq = (
   prompt: string,
@@ -276,7 +318,7 @@ const buildReq = (
   timezoneIANA: string,
   maxOutputTokens: number | undefined,
 ): BuildReqFn =>
-(events: KimiHistoryEvent[]): KimiRequestParams => {
+async (events: KimiHistoryEvent[]): Promise<KimiRequestParams> => {
   const eventById = (id: MessageId) => events.find((e) => e.id === id);
 
   // Filter out do_nothing events as they create empty assistant messages
@@ -284,7 +326,9 @@ const buildReq = (
 
   const messages: ChatCompletionMessageParam[] = [
     { role: "system", content: prompt },
-    ...filteredEvents.flatMap(historyEventToMessage(eventById, timezoneIANA)),
+    ...(await Promise.all(
+      filteredEvents.map(historyEventToMessage(eventById, timezoneIANA)),
+    )).flat(),
   ];
 
   const firstNonSystem = messages.find((m) => m.role !== "system");
@@ -425,7 +469,7 @@ const callKimiWithFixHistory = (
 ) =>
 async (events: KimiHistoryEvent[]): Promise<KimiOutputPart[]> => {
   try {
-    return await callKimi(eventsToRequest(events), disableStreaming);
+    return await callKimi(await eventsToRequest(events), disableStreaming);
   } catch (error) {
     const err = normalizeError(error);
 
@@ -436,7 +480,7 @@ async (events: KimiHistoryEvent[]): Promise<KimiOutputPart[]> => {
       );
       const truncated = dropOldestHalf(events);
       if (truncated.length === events.length) throw err;
-      return callKimi(eventsToRequest(truncated), disableStreaming);
+      return callKimi(await eventsToRequest(truncated), disableStreaming);
     }
 
     throw err;
