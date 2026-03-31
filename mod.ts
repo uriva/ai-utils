@@ -6,6 +6,7 @@ import {
 } from "./src/agent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
 import { geminiAgentCaller } from "./src/geminiAgent.ts";
+import { kimiAgentCaller } from "./src/kimiAgent.ts";
 export {
   extractOpaqueIdentifiers,
   findNovelOpaqueIdentifiers,
@@ -32,6 +33,7 @@ export {
   injectTokenUsage,
   type TokenUsage,
 } from "./src/geminiAgent.ts";
+export { injectKimiToken } from "./src/kimiAgent.ts";
 export {
   injectOpenAiToken,
   openAiGenJson,
@@ -50,11 +52,27 @@ export {
   type DuplexEndpoint,
   type DuplexMessage,
 } from "./src/duplex.ts";
+
+const getCaller = (
+  spec: AgentSpec,
+): (
+  history: import("./src/agent.ts").HistoryEvent[],
+) => Promise<import("./src/agent.ts").HistoryEvent[]> => {
+  if (spec.provider === "kimi") {
+    return kimiAgentCaller(spec) as (
+      history: import("./src/agent.ts").HistoryEvent[],
+    ) => Promise<import("./src/agent.ts").HistoryEvent[]>;
+  }
+  // Default to Gemini for audio transport or when provider is "gemini" or undefined
+  return geminiAgentCaller(spec) as (
+    history: import("./src/agent.ts").HistoryEvent[],
+  ) => Promise<import("./src/agent.ts").HistoryEvent[]>;
+};
+
 const runAgentInner = (spec: AgentSpec): Promise<void> =>
   spec.transport?.kind === "audio"
     ? runAudioTransportAgent(spec)
-    // @ts-expect-error the caller has gemini metadata
-    : runAbstractAgent(spec, geminiAgentCaller(spec));
+    : runAbstractAgent(spec, getCaller(spec));
 
 export const runAgent = (spec: AgentSpec): Promise<void> => {
   let runner = () => runAgentInner(spec);
