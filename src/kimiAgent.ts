@@ -273,9 +273,12 @@ const buildReq = (
 (events: KimiHistoryEvent[]): KimiRequestParams => {
   const eventById = (id: MessageId) => events.find((e) => e.id === id);
 
+  // Filter out do_nothing events as they create empty assistant messages
+  const filteredEvents = events.filter((e) => e.type !== "do_nothing");
+
   const messages: ChatCompletionMessageParam[] = [
     { role: "system", content: prompt },
-    ...events.flatMap(historyEventToMessage(eventById, timezoneIANA)),
+    ...filteredEvents.flatMap(historyEventToMessage(eventById, timezoneIANA)),
   ];
 
   const firstNonSystem = messages.find((m) => m.role !== "system");

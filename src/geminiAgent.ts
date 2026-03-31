@@ -550,6 +550,13 @@ const isUnsupportedGeminiMimeType = (mimeType: string | undefined): boolean => {
   return false;
 };
 
+const filterDoNothingWithoutThought = (
+  history: GeminiHistoryEvent[],
+): GeminiHistoryEvent[] =>
+  history.filter((e) =>
+    !(e.type === "do_nothing" && !e.modelMetadata?.thoughtSignature)
+  );
+
 const filterUnsupportedGeminiAttachments = (
   history: GeminiHistoryEvent[],
 ): GeminiHistoryEvent[] =>
@@ -1002,6 +1009,7 @@ export const geminiAgentCaller = ({
   pipe(
     filterAndRewriteInvalidToolCalls(rewriteHistory),
     filterOrphanedToolResults,
+    filterDoNothingWithoutThought,
     filterUnsupportedGeminiAttachments,
     callGeminiWithFixHistory(
       rewriteHistory,

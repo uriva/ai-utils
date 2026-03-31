@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import {
+  doNothingEvent,
   type HistoryEvent,
   ownUtteranceTurn,
   participantUtteranceTurn,
@@ -403,5 +404,26 @@ runForBothProviders(
       `Should have received exactly one stream chunk (got ${chunkCount})`,
     );
     assert(streamedText.length > 20, "Streamed text should be reasonably long");
+  },
+);
+
+runForBothProviders(
+  "handles do_nothing events in history",
+  async (runAgent) => {
+    const history = [
+      participantUtteranceTurn({ name: "user", text: "Hello" }),
+      // do_nothing event should be filtered out
+      doNothingEvent({ type: "gemini", responseId: "test-id" }),
+      participantUtteranceTurn({ name: "user", text: "What's up?" }),
+    ];
+
+    await agentDeps(history)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "You are a helpful assistant.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
   },
 );
