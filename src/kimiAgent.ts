@@ -31,19 +31,41 @@ import {
 const fetchFileAttachment = async (
   attachment: MediaAttachment,
 ): Promise<string | null> => {
-  if (attachment.kind !== "file" || !attachment.fileUri) return null;
+  if (attachment.kind !== "file" || !attachment.fileUri) {
+    console.log(
+      `[KIMI DEBUG] fetchFileAttachment: not a file attachment or no URI`,
+    );
+    return null;
+  }
+
+  console.log(
+    `[KIMI DEBUG] fetchFileAttachment: fetching ${
+      attachment.fileUri.slice(0, 50)
+    }...`,
+  );
 
   try {
     const response = await fetch(attachment.fileUri);
+    console.log(
+      `[KIMI DEBUG] fetchFileAttachment: response status ${response.status}`,
+    );
     if (!response.ok) {
-      console.error(`Failed to fetch attachment: ${response.status}`);
+      console.error(
+        `[KIMI DEBUG] Failed to fetch attachment: ${response.status}`,
+      );
       return null;
     }
     const arrayBuffer = await response.arrayBuffer();
+    console.log(
+      `[KIMI DEBUG] fetchFileAttachment: got ${arrayBuffer.byteLength} bytes`,
+    );
     const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    console.log(
+      `[KIMI DEBUG] fetchFileAttachment: converted to base64 (${base64.length} chars)`,
+    );
     return base64;
   } catch (e) {
-    console.error("Error fetching file attachment:", e);
+    console.error("[KIMI DEBUG] Error fetching file attachment:", e);
     return null;
   }
 };
@@ -140,7 +162,17 @@ const attachmentsToContentParts = async (
       }
     } else if (att.kind === "file" && att.fileUri) {
       // Fetch file attachment and convert to base64 for Kimi
+      console.log(
+        `[KIMI DEBUG] Processing file attachment: ${att.mimeType}, uri: ${
+          att.fileUri?.slice(0, 50)
+        }...`,
+      );
       const base64 = await fetchFileAttachment(att);
+      console.log(
+        `[KIMI DEBUG] fetchFileAttachment result: ${
+          base64 ? "success (" + base64.length + " chars)" : "failed"
+        }`,
+      );
       if (base64) {
         if (att.mimeType.startsWith("image/")) {
           parts.push({
