@@ -105,6 +105,12 @@ const attachmentsToContentParts = (
           type: "image_url",
           image_url: { url: `data:${att.mimeType};base64,${att.dataBase64}` },
         });
+      } else if (att.mimeType.startsWith("audio/")) {
+        // Send audio as base64 data URL for multimodal models
+        parts.push({
+          type: "text",
+          text: `data:${att.mimeType};base64,${att.dataBase64}`,
+        });
       } else {
         parts.push({
           type: "text",
