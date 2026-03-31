@@ -1,4 +1,4 @@
-import { context, type Injection } from "@uri/inject";
+import { context, type Injection, type Injector } from "@uri/inject";
 import { conditionalRetry, empty, map, sum } from "gamla";
 import { OpenAI } from "openai";
 import type {
@@ -31,9 +31,7 @@ const kimiApiKeyInjection: Injection<() => string> = context((): string => {
   throw new Error("no kimi API key injected");
 });
 
-export const injectKimiToken = (
-  token: string,
-): (f: () => unknown) => () => unknown =>
+export const injectKimiToken = (token: string): Injector =>
   kimiApiKeyInjection.inject(() => token);
 
 const kimiModelVersion = "kimi-k2.5";
