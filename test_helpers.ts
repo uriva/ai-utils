@@ -4,10 +4,13 @@ import { z } from "zod/v4";
 import {
   injectCacher,
   injectGeminiToken,
+  injectKimiToken,
   injectOpenAiToken,
+  runAgent,
   tool,
 } from "./mod.ts";
 import {
+  type AgentSpec,
   type HistoryEvent,
   injectAccessHistory,
   injectOutputEvent,
@@ -21,6 +24,7 @@ export const injectSecrets = pipe(
     Deno.env.get("OPENAI_API_KEY") ?? "",
   ),
   injectGeminiToken(Deno.env.get("GEMINI_API_KEY") ?? ""),
+  injectKimiToken(Deno.env.get("KIMI_API_KEY") ?? ""),
 );
 
 export const agentDeps = (inMemoryHistory: HistoryEvent[]): Injector =>
@@ -31,6 +35,41 @@ export const agentDeps = (inMemoryHistory: HistoryEvent[]): Injector =>
       return Promise.resolve();
     }),
   );
+
+// Run agent with a specific provider
+export const runWithProvider =
+  (provider: "gemini" | "kimi" | undefined) =>
+  (spec: AgentSpec): Promise<void> => runAgent({ ...spec, provider });
+
+// Run the same test with both Gemini and Kimi providers
+// The testFn receives a runAgent function configured for the specific provider
+// Set geminiOnly=true for tests that use Gemini-specific features/mock data
+export const runForBothProviders = (
+  testName: string,
+  testFn: (
+    runAgentWithProvider: (spec: AgentSpec) => Promise<void>,
+  ) => Promise<void>,
+  retries = 3,
+  geminiOnly = false,
+): void => {
+  // Run with Gemini (default provider)
+  Deno.test(
+    `${testName} [gemini]`,
+    injectSecrets(withRetries(retries, async () => {
+      await testFn(runWithProvider(undefined));
+    })),
+  );
+
+  // Run with Kimi (unless test is Gemini-specific)
+  if (!geminiOnly) {
+    Deno.test(
+      `${testName} [kimi]`,
+      injectSecrets(withRetries(retries, async () => {
+        await testFn(runWithProvider("kimi"));
+      })),
+    );
+  }
+};
 
 export const noopRewriteHistory = async () => {};
 

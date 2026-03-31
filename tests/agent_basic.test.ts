@@ -4,17 +4,16 @@ import {
   ownUtteranceTurn,
   participantUtteranceTurn,
 } from "../src/agent.ts";
-import { runAgent } from "../mod.ts";
 import {
   agentDeps,
-  injectSecrets,
   noopRewriteHistory,
+  runForBothProviders,
   someTool,
 } from "../test_helpers.ts";
 
-Deno.test(
+runForBothProviders(
   "agent can run when history starts with only a model message",
-  injectSecrets(async () => {
+  async (runAgent) => {
     await agentDeps([ownUtteranceTurn("Priming without user turn")])(runAgent)({
       maxIterations: 1,
       onMaxIterationsReached: () => {},
@@ -24,12 +23,12 @@ Deno.test(
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
-  }),
+  },
 );
 
-Deno.test(
+runForBothProviders(
   "agent can start an empty conversation",
-  injectSecrets(async () => {
+  async (runAgent) => {
     await agentDeps([])(runAgent)({
       onMaxIterationsReached: () => {},
       tools: [],
@@ -38,12 +37,12 @@ Deno.test(
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
-  }),
+  },
 );
 
-Deno.test(
-  "maxOutputTokens limits gemini output length",
-  injectSecrets(async () => {
+runForBothProviders(
+  "maxOutputTokens limits output length",
+  async (runAgent) => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -64,12 +63,12 @@ Deno.test(
       !ownUtterance?.text || ownUtterance.text.length <= 2,
       `Expected at most 2 characters but got: "${ownUtterance?.text}"`,
     );
-  }),
+  },
 );
 
-Deno.test(
+runForBothProviders(
   "agent with history starting with only tool doesn't trigger 400",
-  injectSecrets(async () => {
+  async (runAgent) => {
     const mockHistory: HistoryEvent[] = [{
       type: "tool_result",
       isOwn: true,
@@ -86,12 +85,14 @@ Deno.test(
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
-  }),
+  },
+  3,
+  true, // Gemini-only: test uses orphaned tool_result which Kimi rejects
 );
 
-Deno.test(
+runForBothProviders(
   "tool_call with empty thoughtSignature is filtered along with its tool_result",
-  injectSecrets(async () => {
+  async (runAgent) => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -129,12 +130,14 @@ Deno.test(
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
-  }),
+  },
+  3,
+  true, // Gemini-only: test uses Gemini-specific thoughtSignature metadata
 );
 
-Deno.test(
+runForBothProviders(
   "tool_call with empty thoughtSignature filters out other events from the same responseId",
-  injectSecrets(async () => {
+  async (runAgent) => {
     let rewriteReplacements: Record<string, HistoryEvent> = {};
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
@@ -200,12 +203,14 @@ Deno.test(
           "Removed own_utterance from response containing invalid tool call: I am going to call the tool.",
         ),
     );
-  }),
+  },
+  3,
+  true, // Gemini-only: test uses Gemini-specific thoughtSignature metadata
 );
 
-Deno.test(
-  "agent filters unsupported gemini attachments before api call",
-  injectSecrets(async () => {
+runForBothProviders(
+  "agent filters unsupported attachments before api call",
+  async (runAgent) => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -228,12 +233,12 @@ Deno.test(
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
-  }),
+  },
 );
 
-Deno.test(
+runForBothProviders(
   "handles 403 file permission errors and replaces history items",
-  injectSecrets(async () => {
+  async (runAgent) => {
     const replacedItems = new Map<string, HistoryEvent>();
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
@@ -277,12 +282,12 @@ Deno.test(
     });
 
     assert(true, "Agent completed successfully");
-  }),
+  },
 );
 
-Deno.test(
+runForBothProviders(
   "handles unsupported MIME type by stripping attachment and rewriting history",
-  injectSecrets(async () => {
+  async (runAgent) => {
     const replacedItems = new Map<string, HistoryEvent>();
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
@@ -330,11 +335,14 @@ Deno.test(
         ),
       "Unsupported attachment should have been stripped from rewritten history",
     );
-  }),
+  },
+  3,
+  true, // Gemini-only: test relies on Gemini-specific MIME type filtering behavior
 );
-Deno.test(
+
+runForBothProviders(
   "agent streams output chunk by chunk",
-  injectSecrets(async () => {
+  async (runAgent) => {
     let streamedText = "";
     let chunkCount = 0;
 
@@ -361,12 +369,12 @@ Deno.test(
       `Should have received multiple stream chunks (got ${chunkCount})`,
     );
     assert(streamedText.length > 20, "Streamed text should be reasonably long");
-  }),
+  },
 );
 
-Deno.test(
+runForBothProviders(
   "agent outputs complete text in one chunk when disableStreaming is true",
-  injectSecrets(async () => {
+  async (runAgent) => {
     let streamedText = "";
     let chunkCount = 0;
 
@@ -395,5 +403,5 @@ Deno.test(
       `Should have received exactly one stream chunk (got ${chunkCount})`,
     );
     assert(streamedText.length > 20, "Streamed text should be reasonably long");
-  }),
+  },
 );
