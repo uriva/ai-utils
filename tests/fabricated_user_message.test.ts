@@ -1,7 +1,7 @@
 import { assert } from "@std/assert";
 import { runAgent } from "../mod.ts";
 import {
-  guardNovelOpaqueIdentifiers,
+  sanitizeModelOutput,
   type HistoryEvent,
   ownUtteranceTurn,
   participantUtteranceTurn,
@@ -71,7 +71,7 @@ Deno.test(
   ),
 );
 
-Deno.test("guardNovelOpaqueIdentifiers self-corrects fabricated user message with timestamp", () => {
+Deno.test("sanitizeModelOutput self-corrects fabricated user message with timestamp", () => {
   const history = [
     participantUtteranceTurn({ name: participantName, text: "שלום" }),
     ownUtteranceTurn("שלום! איך אני יכול לעזור?"),
@@ -85,8 +85,8 @@ Deno.test("guardNovelOpaqueIdentifiers self-corrects fabricated user message wit
       `${participantName}: לא ממש משנה לי המחיר, משהו איכותי. שמעתי על Miele שהם טובים — sent Mar 30, 2026, 3:12 PM`,
     ),
   ];
-  const result = guardNovelOpaqueIdentifiers(
-    "You are a sales assistant.",
+  const result = sanitizeModelOutput(
+    
     history,
     output,
   );
@@ -99,7 +99,7 @@ Deno.test("guardNovelOpaqueIdentifiers self-corrects fabricated user message wit
   );
 });
 
-Deno.test("guardNovelOpaqueIdentifiers preserves legitimate response mixed with fabricated line", () => {
+Deno.test("sanitizeModelOutput preserves legitimate response mixed with fabricated line", () => {
   const history = [
     participantUtteranceTurn({ name: "user", text: "tell me about ovens" }),
   ];
@@ -108,8 +108,8 @@ Deno.test("guardNovelOpaqueIdentifiers preserves legitimate response mixed with 
       "user: I want a big oven\nSure! Here are some great options for large ovens.",
     ),
   ];
-  const result = guardNovelOpaqueIdentifiers(
-    "You are a sales assistant.",
+  const result = sanitizeModelOutput(
+    
     history,
     output,
   );

@@ -1,16 +1,11 @@
 import { context, type Injection } from "@uri/inject";
-import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
+import { coerce, each, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
 import { zodToGeminiParameters } from "./gemini.ts";
 import {
   hasInternalSentTimestampSuffix,
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
-import {
-  extractOpaqueIdentifiers,
-  findNovelOpaqueIdentifiers,
-} from "./opaqueIdentifiers.ts";
-
 export type MediaAttachment =
   | { kind: "inline"; mimeType: string; dataBase64: string; caption?: string }
   | { kind: "file"; mimeType: string; fileUri: string; caption?: string };
@@ -436,62 +431,6 @@ export const overrideTime = timestampGeneration.inject;
 export const overrideIdGenerator = idGeneration.inject;
 export const generateId = idGeneration.access;
 
-export const novelOpaqueIdentifierThought =
-  "I should reply without inventing IDs or links that depend on them. I should only use IDs that appeared in the prompt, history, or tool results. If I need a real ID, I should get it from a tool result or ask the user.";
-
-export const maxNovelOpaqueIdentifierCorrections = 5;
-
-const isNovelOpaqueIdentifierCorrection = (event: HistoryEvent) =>
-  event.type === "own_thought" && event.text === novelOpaqueIdentifierThought;
-
-const trailingConsecutiveCount = <T>(
-  predicate: (x: T) => boolean,
-  xs: T[],
-): number =>
-  xs.reduceRight<[boolean, number]>(
-    ([stopped, count], x): [boolean, number] =>
-      stopped
-        ? [true, count]
-        : predicate(x)
-        ? [false, count + 1]
-        : [true, count],
-    [false, 0],
-  )[1];
-
-const _novelOpaqueIdentifierCorrectionCount = (
-  history: HistoryEvent[],
-): number =>
-  trailingConsecutiveCount(isNovelOpaqueIdentifierCorrection, history);
-
-const isDefined = <T>(value: T | undefined): value is T => value !== undefined;
-
-const modelAuthoredValue = (event: HistoryEvent): unknown => {
-  if (event.type === "own_utterance") return event.text;
-  if (event.type === "own_edit_message") {
-    return { text: event.text, onMessage: event.onMessage };
-  }
-  if (event.type === "own_thought") return event.text;
-  if (event.type === "own_reaction") {
-    return { reaction: event.reaction, onMessage: event.onMessage };
-  }
-  if (event.type === "tool_call") {
-    return { name: event.name, parameters: event.parameters };
-  }
-  return undefined;
-};
-
-export const modelOutputHasNovelOpaqueIdentifiers = (
-  prompt: string,
-  history: HistoryEvent[],
-  output: HistoryEvent[],
-): boolean =>
-  !empty(
-    findNovelOpaqueIdentifiers(
-      output.map(modelAuthoredValue).filter(isDefined),
-      [prompt, ...history],
-    ),
-  );
-
 export const modelOutputLeaksInternalSentTimestamp = (
   output: HistoryEvent[],
 ): boolean =>
@@ -565,29 +504,10 @@ export const stripFabricatedUserMessages = (
   });
 };
 
-export const guardNovelOpaqueIdentifiers = (
-  prompt: string,
+export const sanitizeModelOutput = (
   history: HistoryEvent[],
   output: HistoryEvent[],
 ): { emit: HistoryEvent[]; internal: HistoryEvent[] } => {
-  const candidateValues = output.map(modelAuthoredValue).filter(isDefined);
-  const novelIds = findNovelOpaqueIdentifiers(candidateValues, [
-    prompt,
-    ...history,
-  ]);
-  if (!empty(novelIds)) {
-    const knownIds = extractOpaqueIdentifiers([prompt, ...history]);
-    const candidateIds = extractOpaqueIdentifiers(candidateValues);
-    console.warn("[opaque-id-guard] novel ids detected (shadow mode)", {
-      novelIds,
-      candidateIds,
-      knownIdsCount: knownIds.length,
-      knownIdsSample: knownIds.slice(0, 30),
-      historyLength: history.length,
-      historyTypes: history.map(({ type }) => type),
-      outputTypes: output.map(({ type }) => type),
-    });
-  }
   const sanitized = modelOutputLeaksInternalSentTimestamp(output)
     ? sanitizeInternalSentTimestampLeak(output)
     : output;
@@ -734,7 +654,8 @@ export type AgentSpec = {
 };
 
 export const runAbstractAgent = async (
-  { maxIterations, tools, skills, onMaxIterationsReached, prompt }: AgentSpec,
+  { maxIterations, tools, skills, onMaxIterationsReached, prompt: _prompt }:
+    AgentSpec,
   callModel: (history: HistoryEvent[]) => Promise<HistoryEvent[]>,
 ) => {
   const allTools = skills && skills.length > 0
@@ -754,8 +675,7 @@ export const runAbstractAgent = async (
     const modelResponse = await timeit(reportTimeElapsedMs, callModel)(
       effectiveHistory,
     );
-    const { emit, internal } = guardNovelOpaqueIdentifiers(
-      prompt,
+    const { emit, internal } = sanitizeModelOutput(
       effectiveHistory,
       modelResponse,
     );

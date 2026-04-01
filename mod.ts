@@ -8,10 +8,6 @@ import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
 import { geminiAgentCaller } from "./src/geminiAgent.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
 export {
-  extractOpaqueIdentifiers,
-  findNovelOpaqueIdentifiers,
-} from "./src/opaqueIdentifiers.ts";
-export {
   appendInternalSentTimestamp,
   formatInternalSentTimestamp,
   hasInternalSentTimestampSuffix,

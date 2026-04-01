@@ -4,16 +4,10 @@ import { z } from "zod/v4";
 import { tool } from "../mod.ts";
 import {
   createSkillTools,
-  guardNovelOpaqueIdentifiers,
   type HistoryEvent,
   injectAccessHistory,
   injectOutputEvent,
   learnSkillToolName,
-  maxNovelOpaqueIdentifierCorrections,
-  novelOpaqueIdentifierThought,
-  ownThoughtTurn,
-  ownUtteranceTurn,
-  participantUtteranceTurn,
   runAbstractAgent,
   runCommandToolName,
 } from "../src/agent.ts";
@@ -235,85 +229,6 @@ Deno.test(
     assert(toolResult, "Should have tool result with correct output");
   },
 );
-
-Deno.test("novel opaque id guard logs but passes through in shadow mode", () => {
-  const prompt = "No URL is available until the async notification arrives.";
-  const offendingOutput = [
-    ownUtteranceTurn(
-      '<video controls><source src="https://api.example-fake.com/s/e53b21" type="video/mp4" /></video>',
-    ),
-  ];
-  const baseHistory = [
-    participantUtteranceTurn({ name: "user", text: "wait" }),
-  ];
-
-  // Shadow mode: novel IDs are logged but output passes through unchanged
-  const firstResult = guardNovelOpaqueIdentifiers(
-    prompt,
-    baseHistory,
-    offendingOutput,
-  );
-  assertEquals(firstResult.emit, offendingOutput);
-  assertEquals(firstResult.internal, offendingOutput);
-
-  // Even after many offenses, still passes through (no do_nothing)
-  const historyWithMaxCorrections = [
-    ...baseHistory,
-    ...Array.from(
-      { length: maxNovelOpaqueIdentifierCorrections },
-      () => ownThoughtTurn(novelOpaqueIdentifierThought),
-    ),
-  ];
-  const exhaustedResult = guardNovelOpaqueIdentifiers(
-    prompt,
-    historyWithMaxCorrections,
-    offendingOutput,
-  );
-  assertEquals(exhaustedResult.emit, offendingOutput);
-  assertEquals(exhaustedResult.internal, offendingOutput);
-
-  // Non-novel output: passes through unchanged
-  const legitimateOutput = [
-    ownUtteranceTurn("I'll wait for the download to complete."),
-  ];
-  const passthroughResult = guardNovelOpaqueIdentifiers(
-    prompt,
-    baseHistory,
-    legitimateOutput,
-  );
-  assertEquals(passthroughResult.emit, legitimateOutput);
-  assertEquals(passthroughResult.internal, legitimateOutput);
-});
-
-Deno.test("novel opaque id guard shadow mode ignores correction count", () => {
-  const prompt = "No URL is available until the async notification arrives.";
-  const offendingOutput = [
-    ownUtteranceTurn(
-      '<video controls><source src="https://api.example-fake.com/s/e53b21" type="video/mp4" /></video>',
-    ),
-  ];
-  // History with old corrections interrupted by a non-correction event
-  const historyWithResetCount = [
-    participantUtteranceTurn({ name: "user", text: "wait" }),
-    ...Array.from(
-      { length: maxNovelOpaqueIdentifierCorrections - 1 },
-      () => ownThoughtTurn(novelOpaqueIdentifierThought),
-    ),
-    participantUtteranceTurn({ name: "user", text: "try again" }),
-    ...Array.from(
-      { length: maxNovelOpaqueIdentifierCorrections - 1 },
-      () => ownThoughtTurn(novelOpaqueIdentifierThought),
-    ),
-  ];
-  // Shadow mode: always passes through regardless of correction count
-  const result = guardNovelOpaqueIdentifiers(
-    prompt,
-    historyWithResetCount,
-    offendingOutput,
-  );
-  assertEquals(result.emit, offendingOutput);
-  assertEquals(result.internal, offendingOutput);
-});
 
 Deno.test("stripEmbeddedThoughtPatterns removes thoughts from mixed text", () => {
   const mixed =
