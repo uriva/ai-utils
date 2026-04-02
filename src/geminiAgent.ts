@@ -166,6 +166,15 @@ export const stripExpiredFile = (
   };
 };
 
+const geminiTimeoutMs = 120_000;
+
+const withTimeout = (
+  req: GenerateContentParameters,
+): GenerateContentParameters => ({
+  ...req,
+  config: { ...req.config, abortSignal: AbortSignal.timeout(geminiTimeoutMs) },
+});
+
 const rawCallGemini = async ({
   req,
   disableStreaming,
@@ -177,9 +186,10 @@ const rawCallGemini = async ({
   const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
   let finalUsageMetadata: TokenUsage | undefined;
   const accumulatedParts: Part[] = [];
+  const timedReq = withTimeout(req);
 
   if (disableStreaming) {
-    const response = await sdk.models.generateContent(req);
+    const response = await sdk.models.generateContent(timedReq);
     finalUsageMetadata = response.usageMetadata;
     const parts = response.candidates?.[0]?.content?.parts ?? [];
     for (const part of parts) {
@@ -191,7 +201,7 @@ const rawCallGemini = async ({
       accumulatedParts.push(part);
     }
   } else {
-    const responseStream = await sdk.models.generateContentStream(req);
+    const responseStream = await sdk.models.generateContentStream(timedReq);
 
     for await (const chunk of responseStream) {
       if (chunk.usageMetadata) {
