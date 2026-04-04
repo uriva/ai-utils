@@ -54,12 +54,12 @@ const getCaller = (
 ): (
   history: import("./src/agent.ts").HistoryEvent[],
 ) => Promise<import("./src/agent.ts").HistoryEvent[]> => {
-  if (spec.provider === "kimi") {
+  if (spec.provider === "moonshot") {
     return kimiAgentCaller(spec) as (
       history: import("./src/agent.ts").HistoryEvent[],
     ) => Promise<import("./src/agent.ts").HistoryEvent[]>;
   }
-  // Default to Gemini for audio transport or when provider is "gemini" or undefined
+  // Default to Gemini for audio transport or when provider is "google" or undefined
   return geminiAgentCaller(spec) as (
     history: import("./src/agent.ts").HistoryEvent[],
   ) => Promise<import("./src/agent.ts").HistoryEvent[]>;

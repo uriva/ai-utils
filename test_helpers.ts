@@ -38,10 +38,10 @@ export const agentDeps = (inMemoryHistory: HistoryEvent[]): Injector =>
 
 // Run agent with a specific provider
 export const runWithProvider =
-  (provider: "gemini" | "kimi" | undefined) =>
+  (provider: "google" | "moonshot" | undefined) =>
   (spec: AgentSpec): Promise<void> => runAgent({ ...spec, provider });
 
-// Run the same test with both Gemini and Kimi providers
+// Run the same test with both Google and Moonshot providers
 // The testFn receives a runAgent function configured for the specific provider
 // Set geminiOnly=true for tests that use Gemini-specific features/mock data
 export const runForBothProviders = (
@@ -52,20 +52,20 @@ export const runForBothProviders = (
   retries = 3,
   geminiOnly = false,
 ): void => {
-  // Run with Gemini (default provider)
+  // Run with Google (default provider)
   Deno.test(
-    `${testName} [gemini]`,
+    `${testName} [google]`,
     injectSecrets(withRetries(retries, async () => {
       await testFn(runWithProvider(undefined));
     })),
   );
 
-  // Run with Kimi (unless test is Gemini-specific)
+  // Run with Moonshot (unless test is Gemini-specific)
   if (!geminiOnly) {
     Deno.test(
-      `${testName} [kimi]`,
+      `${testName} [moonshot]`,
       injectSecrets(withRetries(retries, async () => {
-        await testFn(runWithProvider("kimi"));
+        await testFn(runWithProvider("moonshot"));
       })),
     );
   }

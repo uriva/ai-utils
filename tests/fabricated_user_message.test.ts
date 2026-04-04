@@ -1,10 +1,10 @@
 import { assert } from "@std/assert";
 import { runAgent } from "../mod.ts";
 import {
-  sanitizeModelOutput,
   type HistoryEvent,
   ownUtteranceTurn,
   participantUtteranceTurn,
+  sanitizeModelOutput,
 } from "../src/agent.ts";
 import { agentDeps, injectSecrets, withRetries } from "../test_helpers.ts";
 
@@ -86,7 +86,6 @@ Deno.test("sanitizeModelOutput self-corrects fabricated user message with timest
     ),
   ];
   const result = sanitizeModelOutput(
-    
     history,
     output,
   );
@@ -109,7 +108,6 @@ Deno.test("sanitizeModelOutput preserves legitimate response mixed with fabricat
     ),
   ];
   const result = sanitizeModelOutput(
-    
     history,
     output,
   );
