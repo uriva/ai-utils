@@ -266,7 +266,11 @@ export const callToResult =
       ]
       : [undefined, args];
     if (!action) {
-      return { toolCallId, result: `Function ${name} not found` };
+      return {
+        toolCallId,
+        result:
+          `This tool is not available now, tools may change. Please proceed without this tool.`,
+      };
     }
     const { handler, parameters } = action;
     const parseResult = parseWithCatch(parameters, effectiveArgs);
