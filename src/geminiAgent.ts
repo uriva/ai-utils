@@ -66,7 +66,8 @@ const normalizeError = (error: unknown): Error => {
 
 const isServerError = (error: unknown) =>
   error instanceof Error && "status" in error &&
-  (error as { status: number }).status >= 500;
+  ((error as { status: number }).status >= 500 ||
+    (error as { status: number }).status === 429);
 
 const alternateModel = (model: string) =>
   model === geminiProVersion
