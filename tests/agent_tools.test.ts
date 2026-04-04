@@ -2,6 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import { sleep } from "gamla";
 import { z } from "zod/v4";
 import { runAgent } from "../mod.ts";
+import { runForBothProviders } from "../test_helpers.ts";
 import {
   type DeferredTool,
   type HistoryEvent,
@@ -238,4 +239,37 @@ Deno.test(
       "tool_call should be in history",
     );
   }),
+);
+
+runForBothProviders(
+  "does not throw when there is an orphaned tool call",
+  async (runAgent) => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please do something.",
+      }),
+      {
+        type: "tool_call",
+        isOwn: true,
+        timestamp: Date.now(),
+        name: "doSomethingUnique",
+        parameters: { param: "value" },
+        id: "call_123",
+      },
+      participantUtteranceTurn({
+        name: "user",
+        text: "Actually, ignore that.",
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [someTool],
+      prompt: "You are an AI assistant.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  },
 );

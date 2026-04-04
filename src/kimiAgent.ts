@@ -336,6 +336,34 @@ async (events: KimiHistoryEvent[]): Promise<KimiRequestParams> => {
     )).flat(),
   ];
 
+  const finalMessages: ChatCompletionMessageParam[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    finalMessages.push(msg);
+    if (msg.role === "assistant" && msg.tool_calls) {
+      const missingToolCalls = msg.tool_calls.map((tc) => tc.id).filter(
+        (id) => {
+          for (let j = i + 1; j < messages.length; j++) {
+            const nextMsg = messages[j];
+            if (nextMsg.role === "tool" && nextMsg.tool_call_id === id) {
+              return false;
+            }
+          }
+          return true;
+        },
+      );
+      for (const id of missingToolCalls) {
+        finalMessages.push({
+          role: "tool",
+          tool_call_id: id,
+          content: "[Tool result unavailable]",
+        });
+      }
+    }
+  }
+  messages.length = 0;
+  messages.push(...finalMessages);
+
   const firstNonSystem = messages.find((m) => m.role !== "system");
   if (firstNonSystem && firstNonSystem.role !== "user") {
     messages.splice(1, 0, { role: "user", content: "<conversation started>" });
