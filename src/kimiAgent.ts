@@ -27,6 +27,8 @@ import {
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
 
+import { encodeBase64 } from "@std/encoding/base64";
+
 // Fetch file attachment and convert to base64
 const fetchFileAttachment = async (
   attachment: MediaAttachment,
@@ -40,7 +42,7 @@ const fetchFileAttachment = async (
       return null;
     }
     const arrayBuffer = await response.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    const base64 = encodeBase64(new Uint8Array(arrayBuffer));
     return base64;
   } catch (e) {
     console.error("Error fetching file attachment:", e);

@@ -1,12 +1,13 @@
 {
   "name": "@uri/ai-utils",
-  "version": "0.1.209",
+  "version": "0.1.210",
   "license": "MIT",
   "exports": "./mod.ts",
   "imports": {
     "@google/genai": "npm:@google/genai@1.40.0",
     "@std/assert": "jsr:@std/assert@1.0.14",
     "@std/dotenv": "jsr:@std/dotenv@^0.225.6",
+    "@std/encoding": "jsr:@std/encoding@^1.0.10",
     "@uri/inject": "jsr:@uri/inject@0.0.2",
     "gamla": "jsr:@uri/gamla@0.0.6",
     "openai": "npm:openai@5.2.0",
