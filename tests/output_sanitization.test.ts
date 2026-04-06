@@ -228,6 +228,40 @@ Deno.test("sanitizeModelOutput strips fabricated user messages from model output
   assertEquals(result.emit[0].text, "בטח! הנה כמה אפשרויות.");
 });
 
+Deno.test("hasInternalSentTimestampSuffix matches timestamp as prefix", () => {
+  assertEquals(
+    hasInternalSentTimestampSuffix(
+      "— sent Apr 6, 2026, 5:45 AMמעולה! מדוובוט מוכן ורץ.",
+    ),
+    true,
+  );
+});
+
+Deno.test("stripInternalSentTimestampSuffix strips timestamp prefix", () => {
+  assertEquals(
+    stripInternalSentTimestampSuffix(
+      "— sent Apr 6, 2026, 5:45 AMמעולה! מדוובוט מוכן ורץ.",
+    ),
+    "מעולה! מדוובוט מוכן ורץ.",
+  );
+});
+
+Deno.test("sanitizeModelOutput strips prefix timestamp from utterance", () => {
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [
+      ownUtteranceTurn(
+        "— sent Apr 6, 2026, 5:45 AMמעולה! מדוובוט מוכן ורץ.",
+      ),
+    ],
+  );
+  assertEquals(result.emit.length, 1);
+  const event = result.emit[0];
+  assertEquals(event.type, "own_utterance");
+  if (event.type !== "own_utterance") throw new Error("unreachable");
+  assertEquals(event.text, "מעולה! מדוובוט מוכן ורץ.");
+});
+
 Deno.test("sanitizeModelOutput reclassifies fully fabricated user message to own_thought", () => {
   const history = [
     participantUtteranceTurn({ name: "אורח/ת", text: "שלום" }),
