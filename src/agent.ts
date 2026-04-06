@@ -183,6 +183,13 @@ const makeDebugLogger = <Input>(): Injection<
   (inp: Input) => void | Promise<void>
 > => context((_) => {});
 
+const toolNotFoundInjection: Injection<
+  (toolName: string) => void | Promise<void>
+> = makeDebugLogger<string>();
+
+export const injectToolNotFound = toolNotFoundInjection.inject;
+const reportToolNotFound = toolNotFoundInjection.access;
+
 const debugHistory: Injection<
   (inp: HistoryEvent[]) => void | Promise<void>
 > = makeDebugLogger<HistoryEvent[]>();
@@ -266,6 +273,7 @@ export const callToResult =
       ]
       : [undefined, args];
     if (!action) {
+      reportToolNotFound(name);
       return {
         toolCallId,
         result:
