@@ -126,6 +126,24 @@ const dropOldestHalf = <T extends { type: string }>(events: T[]): T[] => {
   return events.slice(half);
 };
 
+export const capEventsToTokenBudget = (maxTokens: number) =>
+(
+  events: GeminiHistoryEvent[],
+): GeminiHistoryEvent[] => {
+  const tokenCounts = map(estimateTokens)(events);
+  const total = sum(tokenCounts);
+  if (total <= maxTokens) return events;
+  let cumulative = 0;
+  const keepFromIndex = tokenCounts.findIndex((t: number) => {
+    cumulative += t;
+    return total - cumulative <= maxTokens;
+  });
+  const sliced = keepFromIndex < 0
+    ? events.slice(-1)
+    : events.slice(keepFromIndex + 1);
+  return filterOrphanedToolResults(sliced);
+};
+
 const extractUnsupportedMimeType = (error: Error): string | undefined => {
   const match = error.message.match(/Unsupported MIME type:\s*([^"\\\s},]+)/);
   return match ? match[1] : undefined;
@@ -988,6 +1006,8 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
   }
 };
 
+const maxHistoryTokens = 800_000;
+
 export const geminiAgentCaller = ({
   lightModel,
   prompt,
@@ -1005,6 +1025,7 @@ export const geminiAgentCaller = ({
     filterOrphanedToolResults,
     filterDoNothing,
     filterUnsupportedGeminiAttachments,
+    capEventsToTokenBudget(maxHistoryTokens),
     callGeminiWithFixHistory(
       rewriteHistory,
       buildReq(
