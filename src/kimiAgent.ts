@@ -267,10 +267,9 @@ async (e: KimiHistoryEvent): Promise<ChatCompletionMessageParam[]> => {
   }
 
   if (e.type === "own_thought") {
-    return [{
-      role: "assistant",
-      content: `[Internal thought: ${e.text}]`,
-    }];
+    return e.modelMetadata
+      ? [{ role: "assistant", content: "" }]
+      : [{ role: "user", content: `[System notification: ${e.text}]` }];
   }
 
   if (e.type === "own_reaction") {
