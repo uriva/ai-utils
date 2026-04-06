@@ -262,6 +262,15 @@ Deno.test("sanitizeModelOutput strips prefix timestamp from utterance", () => {
   assertEquals(event.text, "מעולה! מדוובוט מוכן ורץ.");
 });
 
+Deno.test("hasInternalSentTimestampSuffix ignores timestamp in middle of text", () => {
+  assertEquals(
+    hasInternalSentTimestampSuffix(
+      "The user said — sent Apr 6, 2026, 5:45 AM and then continued talking",
+    ),
+    false,
+  );
+});
+
 Deno.test("sanitizeModelOutput reclassifies fully fabricated user message to own_thought", () => {
   const history = [
     participantUtteranceTurn({ name: "אורח/ת", text: "שלום" }),
