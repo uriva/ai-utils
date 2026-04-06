@@ -98,12 +98,13 @@ type KimiMetadata = {
 type KimiHistoryEvent = HistoryEventWithMetadata<KimiMetadata>;
 
 type KimiOutputPart =
-  | { type: "text"; text: string }
+  | { type: "text"; text: string; reasoningContent?: string }
   | {
     type: "function_call";
     name: string;
     arguments: Record<string, unknown>;
     id?: string;
+    reasoningContent?: string;
   };
 
 type KimiRequestParams = {
@@ -400,12 +401,6 @@ const rawCallKimi = async ({
     baseURL: "https://api.moonshot.ai/v1",
   });
 
-  const accumulatedContent: string[] = [];
-  const toolCalls = new Map<
-    string,
-    { id: string; name: string; args: string }
-  >();
-
   if (disableStreaming) {
     const response = await client.chat.completions.create({
       ...req,
@@ -415,12 +410,18 @@ const rawCallKimi = async ({
     const choice = response.choices[0];
     if (!choice) return [];
 
+    const reasoning = (choice.message as unknown as Record<string, unknown>)
+      .reasoning_content as
+        | string
+        | undefined;
+
     if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
-      return choice.message.tool_calls.map((tc): KimiOutputPart => ({
+      return choice.message.tool_calls.map((tc, i): KimiOutputPart => ({
         type: "function_call",
         id: tc.id,
         name: tc.function.name,
         arguments: JSON.parse(tc.function.arguments || "{}"),
+        ...(i === 0 && reasoning ? { reasoningContent: reasoning } : {}),
       }));
     }
 
@@ -429,7 +430,11 @@ const rawCallKimi = async ({
       await handleStreamChunk(content);
     }
 
-    return [{ type: "text", text: content }];
+    return [{
+      type: "text",
+      text: content,
+      ...(reasoning ? { reasoningContent: reasoning } : {}),
+    }];
   }
 
   // Streaming mode
@@ -438,9 +443,21 @@ const rawCallKimi = async ({
     stream: true,
   });
 
+  const accumulatedContent: string[] = [];
+  const accumulatedReasoning: string[] = [];
+  const toolCalls = new Map<
+    string,
+    { id: string; name: string; args: string }
+  >();
+
   for await (const chunk of stream) {
     const delta = chunk.choices[0]?.delta;
     if (!delta) continue;
+
+    const deltaRecord = delta as unknown as Record<string, unknown>;
+    if (typeof deltaRecord.reasoning_content === "string") {
+      accumulatedReasoning.push(deltaRecord.reasoning_content);
+    }
 
     if (delta.content) {
       await handleStreamChunk(delta.content);
@@ -464,16 +481,24 @@ const rawCallKimi = async ({
     }
   }
 
+  const reasoning = accumulatedReasoning.join("") || undefined;
+
   if (toolCalls.size > 0) {
-    return Array.from(toolCalls.values()).map((tc): KimiOutputPart => ({
+    const parts = Array.from(toolCalls.values());
+    return parts.map((tc, i): KimiOutputPart => ({
       type: "function_call",
       id: tc.id,
       name: tc.name,
       arguments: JSON.parse(tc.args || "{}"),
+      ...(i === 0 && reasoning ? { reasoningContent: reasoning } : {}),
     }));
   }
 
-  return [{ type: "text", text: accumulatedContent.join("") }];
+  return [{
+    type: "text",
+    text: accumulatedContent.join(""),
+    ...(reasoning ? { reasoningContent: reasoning } : {}),
+  }];
 };
 
 const callKimiWithRetry = conditionalRetry(isServerError)(
@@ -528,9 +553,17 @@ const didNothing = (output: KimiOutputPart[]) =>
     output[0].type === "text" &&
     !output[0].text.replace(/[\s\u200B\u200C\u200D\uFEFF]/g, ""));
 
-const kimiOutputPartToHistoryEvent =
-  (responseId: string) => (p: KimiOutputPart): KimiHistoryEvent => {
-    const metadata: KimiMetadata = { type: "kimi", responseId };
+const kimiOutputPartToHistoryEvents =
+  (responseId: string) => (p: KimiOutputPart): KimiHistoryEvent[] => {
+    const metadata: KimiMetadata = {
+      type: "kimi",
+      responseId,
+      reasoningContent: p.reasoningContent,
+    };
+
+    const thoughtEvent = p.reasoningContent
+      ? [ownThoughtTurnWithMetadata<KimiMetadata>(p.reasoningContent, metadata)]
+      : [];
 
     if (p.type === "text") {
       const text = p.text || "";
@@ -541,27 +574,39 @@ const kimiOutputPartToHistoryEvent =
       const match = stripped.match(thoughtRegex);
 
       if (match) {
-        return ownThoughtTurnWithMetadata<KimiMetadata>(match[1], metadata);
+        return [
+          ...thoughtEvent,
+          ownThoughtTurnWithMetadata<KimiMetadata>(match[1], metadata),
+        ];
       }
 
       const notificationRegex = /^\[System notification: ([\s\S]*?)\]$/;
       const notificationMatch = stripped.match(notificationRegex);
 
       if (notificationMatch) {
-        return ownThoughtTurnWithMetadata<KimiMetadata>(
-          notificationMatch[1],
-          metadata,
-        );
+        return [
+          ...thoughtEvent,
+          ownThoughtTurnWithMetadata<KimiMetadata>(
+            notificationMatch[1],
+            metadata,
+          ),
+        ];
       }
 
-      return ownUtteranceTurnWithMetadata<KimiMetadata>(stripped, metadata);
+      return [
+        ...thoughtEvent,
+        ownUtteranceTurnWithMetadata<KimiMetadata>(stripped, metadata),
+      ];
     }
 
     if (p.type === "function_call") {
-      return toolUseTurnWithMetadata(
-        { name: p.name, args: p.arguments, id: p.id },
-        metadata,
-      );
+      return [
+        ...thoughtEvent,
+        toolUseTurnWithMetadata(
+          { name: p.name, args: p.arguments, id: p.id },
+          metadata,
+        ),
+      ];
     }
 
     throw new Error(`Unknown Kimi output part type: ${JSON.stringify(p)}`);
@@ -598,5 +643,5 @@ async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
     return [doNothingEvent({ type: "kimi", responseId })];
   }
 
-  return kimiOutput.map(kimiOutputPartToHistoryEvent(responseId));
+  return kimiOutput.flatMap(kimiOutputPartToHistoryEvents(responseId));
 };
