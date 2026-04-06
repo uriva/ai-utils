@@ -49,6 +49,12 @@ absolutely necessary.
 When writing tests that verify a behaviour against the api, actually call the
 api instead of mocking it. Only mock when given explicit permission by the user.
 
+Tests should verify behaviour at the agent-run level (using `runAgent` /
+`agentDeps` / `runForBothProviders`), not at the level of internal helper
+functions. A pure-logic unit test on e.g. `buildReq` output shape does not catch
+real integration issues. Prefer a test that runs the agent against the real API
+and asserts on the resulting history events.
+
 When running the tests after changes, first run only the tests that were
 affected by the changes. Only in your final verification run the full test
 suite.
