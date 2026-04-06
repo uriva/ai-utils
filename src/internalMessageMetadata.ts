@@ -28,16 +28,14 @@ export const appendInternalSentTimestamp = (
     formatInternalSentTimestamp(ts, timezoneIANA)
   }`;
 
-const exactInternalTimestampPattern = new RegExp(
-  `${
-    internalSentPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  }${internalSentTimestampShape.source}`,
+const flexibleInternalTimestampPattern = new RegExp(
+  `\\s?[—–-]\\s?sent\\s+${internalSentTimestampShape.source}`,
 );
 
 export const hasInternalSentTimestampSuffix = (
   text: string,
-): boolean => exactInternalTimestampPattern.test(text);
+): boolean => flexibleInternalTimestampPattern.test(text);
 
 export const stripInternalSentTimestampSuffix = (
   text: string,
-): string => text.replace(exactInternalTimestampPattern, "");
+): string => text.replace(flexibleInternalTimestampPattern, "");

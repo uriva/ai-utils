@@ -20,6 +20,65 @@ Deno.test("internal sent timestamp suffix matches the exact leaked example", () 
   );
 });
 
+Deno.test("hasInternalSentTimestampSuffix matches without leading space before em dash", () => {
+  assertEquals(
+    hasInternalSentTimestampSuffix(
+      "אורן— sent Apr 6, 2026, 8:05 AM",
+    ),
+    true,
+  );
+});
+
+Deno.test("stripInternalSentTimestampSuffix strips without leading space before em dash", () => {
+  assertEquals(
+    stripInternalSentTimestampSuffix(
+      "אורן— sent Apr 6, 2026, 8:05 AM",
+    ),
+    "אורן",
+  );
+});
+
+Deno.test("hasInternalSentTimestampSuffix matches en dash variant", () => {
+  assertEquals(
+    hasInternalSentTimestampSuffix(
+      "some text – sent Apr 6, 2026, 8:05 AM",
+    ),
+    true,
+  );
+});
+
+Deno.test("hasInternalSentTimestampSuffix matches hyphen variant", () => {
+  assertEquals(
+    hasInternalSentTimestampSuffix(
+      "some text - sent Apr 6, 2026, 8:05 AM",
+    ),
+    true,
+  );
+});
+
+Deno.test("modelOutputLeaksInternalSentTimestamp flags no-leading-space variant", () => {
+  assertEquals(
+    modelOutputLeaksInternalSentTimestamp([
+      ownUtteranceTurn(
+        "אורן— sent Apr 6, 2026, 8:05 AM",
+      ),
+    ]),
+    true,
+  );
+});
+
+Deno.test("sanitizeModelOutput strips no-leading-space timestamp from utterance", () => {
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [ownUtteranceTurn("Hello!— sent Apr 6, 2026, 8:05 AM")],
+  );
+  assertEquals(result.emit.length, 1);
+  const event = result.emit[0];
+  assertEquals(event.type, "own_utterance");
+  if (event.type !== "own_utterance") throw new Error("unreachable");
+  assertEquals(event.text, "Hello!");
+});
+
 Deno.test("appendInternalSentTimestamp uses the same shape we detect", () => {
   assertEquals(
     appendInternalSentTimestamp(
