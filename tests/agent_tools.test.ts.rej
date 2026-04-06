@@ -1,0 +1,37 @@
+--- agent_tools.test.ts
++++ agent_tools.test.ts
+@@ -202,4 +203,34 @@
+     );
+   }),
+ );
+ 
++runForBothProviders(
++  "does not throw when there is an orphaned tool call",
++  async (runAgent) => {
++    const mockHistory: HistoryEvent[] = [
++      participantUtteranceTurn({
++        name: "user",
++        text: "Please do something.",
++      }),
++      {
++        type: "tool_call",
++        isOwn: true,
++        name: "doSomethingUnique",
++        parameters: { param: "value" },
++        id: "call_123",
++      },
++      participantUtteranceTurn({
++        name: "user",
++        text: "Actually, ignore that.",
++      }),
++    ];
++    
++    await agentDeps(mockHistory)(runAgent)({
++      maxIterations: 1,
++      onMaxIterationsReached: () => {},
++      tools: [someTool],
++      prompt: "You are an AI assistant.",
++      rewriteHistory: noopRewriteHistory,
++      timezoneIANA: "UTC",
++    });
++  }

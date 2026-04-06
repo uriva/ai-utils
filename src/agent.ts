@@ -269,7 +269,7 @@ export const callToResult =
       return {
         toolCallId,
         result:
-          `This tool is not available now, tools may change. Please proceed without this tool.`,
+          `Tool not found. You may have misspelled it, or you need to call learn_skill to discover available tools. If you see this tool in your history, it may also be that this tool is no longer available or has changed names.`,
       };
     }
     const { handler, parameters } = action;
