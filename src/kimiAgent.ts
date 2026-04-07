@@ -338,15 +338,32 @@ async (events: KimiHistoryEvent[]): Promise<KimiRequestParams> => {
     )).flat(),
   ];
 
+  const allToolCallIds = new Set(
+    messages.flatMap((msg) =>
+      msg.role === "assistant" && msg.tool_calls
+        ? msg.tool_calls.map((tc) => tc.id)
+        : []
+    ),
+  );
+
+  const withoutOrphanedResults = messages.filter((msg) => {
+    if (msg.role !== "tool") return true;
+    if (allToolCallIds.has(msg.tool_call_id)) return true;
+    console.warn(
+      `Warning: Filtering out orphaned Kimi tool message (tool_call_id: ${msg.tool_call_id}).`,
+    );
+    return false;
+  });
+
   const finalMessages: ChatCompletionMessageParam[] = [];
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i];
+  for (let i = 0; i < withoutOrphanedResults.length; i++) {
+    const msg = withoutOrphanedResults[i];
     finalMessages.push(msg);
     if (msg.role === "assistant" && msg.tool_calls) {
       const missingToolCalls = msg.tool_calls.map((tc) => tc.id).filter(
         (id) => {
-          for (let j = i + 1; j < messages.length; j++) {
-            const nextMsg = messages[j];
+          for (let j = i + 1; j < withoutOrphanedResults.length; j++) {
+            const nextMsg = withoutOrphanedResults[j];
             if (nextMsg.role === "tool" && nextMsg.tool_call_id === id) {
               return false;
             }

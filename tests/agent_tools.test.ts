@@ -273,3 +273,45 @@ runForBothProviders(
     });
   },
 );
+
+runForBothProviders(
+  "does not throw when tool_call id mismatches tool_result toolCallId",
+  async (runAgent) => {
+    const now = Date.now();
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Save contact John.",
+      }),
+      {
+        type: "tool_call",
+        isOwn: true,
+        timestamp: now,
+        name: "upsert_contact",
+        parameters: { name: "John" },
+        id: "upsert_contact:3",
+      },
+      {
+        type: "tool_result",
+        isOwn: true,
+        timestamp: now + 1,
+        result: "Contact saved.",
+        toolCallId: crypto.randomUUID(),
+        id: crypto.randomUUID(),
+      },
+      participantUtteranceTurn({
+        name: "user",
+        text: "What was the contact name?",
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [someTool],
+      prompt: "You are an AI assistant.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  },
+);
