@@ -1,7 +1,7 @@
 import { context, type Injection } from "@uri/inject";
 import { coerce, each, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
-import { zodToGeminiParameters } from "./gemini.ts";
+import { zodToTypingString } from "./gemini.ts";
 import {
   hasInternalSentTimestampSuffix,
   stripInternalSentTimestampSuffix,
@@ -653,15 +653,11 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
             `Tool "${toolPath}" not found. Call ${learnSkillToolName} first to see available tools.`,
           );
         }
-        return Promise.resolve(JSON.stringify(
-          {
-            name: matchedTool.name,
-            description: matchedTool.description,
-            parameters: zodToGeminiParameters(matchedTool.parameters),
-          },
-          null,
-          2,
-        ));
+        return Promise.resolve(
+          `${matchedTool.name}: ${matchedTool.description}\nParameters: ${
+            zodToTypingString(matchedTool.parameters)
+          }`,
+        );
       },
     }),
   ];

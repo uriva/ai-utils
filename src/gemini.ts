@@ -63,6 +63,36 @@ export const zodToGeminiParameters = (zodObj: ZodType): FunctionDeclaration => {
   return jsonSchema as unknown as FunctionDeclaration;
 };
 
+// deno-lint-ignore no-explicit-any
+const jsonSchemaNodeToTyping = (node: any): string => {
+  if (node.enum) return node.enum.map((v: string) => `"${v}"`).join(" | ");
+  if (node.anyOf) return node.anyOf.map(jsonSchemaNodeToTyping).join(" | ");
+  if (node.type === "array") {
+    return `${jsonSchemaNodeToTyping(node.items || { type: "unknown" })}[]`;
+  }
+  if (node.type === "object" && node.properties) {
+    return jsonSchemaObjectToTyping(node);
+  }
+  return node.type || "unknown";
+};
+
+// deno-lint-ignore no-explicit-any
+const jsonSchemaObjectToTyping = (schema: any): string => {
+  const required = new Set(schema.required || []);
+  const entries = Object.entries(schema.properties || {}).map(
+    // deno-lint-ignore no-explicit-any
+    ([key, prop]: [string, any]) => {
+      const opt = required.has(key) ? "" : "?";
+      const desc = prop.description ? ` /* ${prop.description} */` : "";
+      return `${key}${opt}: ${jsonSchemaNodeToTyping(prop)}${desc}`;
+    },
+  );
+  return `{ ${entries.join(", ")} }`;
+};
+
+export const zodToTypingString = (zodObj: ZodType): string =>
+  jsonSchemaObjectToTyping(z.toJSONSchema(zodObj));
+
 const tokenInjection: Injection<() => string> = context((): string => {
   throw new Error("no gemini token injected");
 });

@@ -17,6 +17,7 @@ import {
   filterOrphanedToolResults,
   stripEmbeddedThoughtPatterns,
 } from "../src/geminiAgent.ts";
+import { zodToTypingString } from "../src/gemini.ts";
 
 Deno.test("filterOrphanedToolResults logic", () => {
   const baseAuth = { isOwn: true, id: "msg-id", timestamp: 100 } as const;
@@ -403,7 +404,7 @@ Deno.test(
 );
 
 Deno.test(
-  "get_tool_details returns full parameter schema for a specific tool",
+  "get_tool_details returns concise typing string for a specific tool",
   async () => {
     const skillTools = createSkillTools([{
       name: "weather",
@@ -427,17 +428,19 @@ Deno.test(
     const result = await getDetailsTool.handler(
       { toolPath: "weather/get_forecast" },
       "test-call-id",
-    );
+    ) as string;
 
-    const parsed = JSON.parse(result as string);
-    assertEquals(parsed.name, "get_forecast");
-    assertEquals(parsed.description, "Get weather forecast");
+    assert(result.includes("get_forecast"), "Should include tool name");
     assert(
-      "parameters" in parsed,
-      "get_tool_details SHOULD include parameters",
+      result.includes("Get weather forecast"),
+      "Should include description",
     );
-    assert(parsed.parameters.properties.location, "Should have location param");
-    assert(parsed.parameters.properties.days, "Should have days param");
+    assert(
+      result.includes("location: string"),
+      "Should include location param",
+    );
+    assert(result.includes("days: number"), "Should include days param");
+    assert(!result.includes('"type"'), "Should NOT be JSON Schema format");
   },
 );
 
@@ -470,3 +473,37 @@ Deno.test(
     );
   },
 );
+
+Deno.test("zodToTypingString renders flat object with descriptions", () => {
+  const schema = z.object({
+    location: z.string().describe("City name"),
+    days: z.number(),
+  });
+  assertEquals(
+    zodToTypingString(schema),
+    "{ location: string /* City name */, days: number }",
+  );
+});
+
+Deno.test("zodToTypingString renders optional, enum, array, boolean", () => {
+  const schema = z.object({
+    units: z.enum(["celsius", "fahrenheit"]).optional(),
+    tags: z.array(z.string()),
+    active: z.boolean(),
+  });
+  assertEquals(
+    zodToTypingString(schema),
+    '{ units?: "celsius" | "fahrenheit", tags: string[], active: boolean }',
+  );
+});
+
+Deno.test("zodToTypingString renders nullable fields", () => {
+  const schema = z.object({
+    name: z.string().nullable(),
+    ids: z.array(z.string()).nullable().optional(),
+  });
+  assertEquals(
+    zodToTypingString(schema),
+    "{ name: string | null, ids?: string[] | null }",
+  );
+});
