@@ -355,28 +355,30 @@ async (events: KimiHistoryEvent[]): Promise<KimiRequestParams> => {
     return false;
   });
 
+  // Index tool messages by tool_call_id for reordering
+  const toolMsgByCallId = new Map<string, ChatCompletionMessageParam>();
+  for (const msg of withoutOrphanedResults) {
+    if (msg.role === "tool") toolMsgByCallId.set(msg.tool_call_id, msg);
+  }
+
+  // Rebuild message list ensuring each assistant's tool responses
+  // immediately follow it (required by OpenAI/Kimi API).
+  // Tool messages placed out of order (e.g. after consecutive tool_call
+  // events) are relocated; missing ones get placeholders.
   const finalMessages: ChatCompletionMessageParam[] = [];
-  for (let i = 0; i < withoutOrphanedResults.length; i++) {
-    const msg = withoutOrphanedResults[i];
+  for (const msg of withoutOrphanedResults) {
+    if (msg.role === "tool") continue;
     finalMessages.push(msg);
     if (msg.role === "assistant" && msg.tool_calls) {
-      const missingToolCalls = msg.tool_calls.map((tc) => tc.id).filter(
-        (id) => {
-          for (let j = i + 1; j < withoutOrphanedResults.length; j++) {
-            const nextMsg = withoutOrphanedResults[j];
-            if (nextMsg.role === "tool" && nextMsg.tool_call_id === id) {
-              return false;
-            }
-          }
-          return true;
-        },
-      );
-      for (const id of missingToolCalls) {
-        finalMessages.push({
-          role: "tool",
-          tool_call_id: id,
-          content: "[Tool result unavailable]",
-        });
+      for (const tc of msg.tool_calls) {
+        const toolMsg = toolMsgByCallId.get(tc.id);
+        finalMessages.push(
+          toolMsg ?? {
+            role: "tool",
+            tool_call_id: tc.id,
+            content: "[Tool result unavailable]",
+          },
+        );
       }
     }
   }

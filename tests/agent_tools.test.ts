@@ -315,3 +315,145 @@ runForBothProviders(
     });
   },
 );
+
+runForBothProviders(
+  "does not throw when tool_result is missing (compaction dropped it)",
+  async (runAgent) => {
+    const now = Date.now();
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Save contact John.",
+      }),
+      {
+        type: "tool_call",
+        isOwn: true,
+        timestamp: now,
+        name: "upsert_contact",
+        parameters: { name: "John" },
+        id: "upsert_contact:3",
+      },
+      participantUtteranceTurn({
+        name: "user",
+        text: "What was the contact name?",
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [someTool],
+      prompt: "You are an AI assistant.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  },
+);
+
+runForBothProviders(
+  "handles consecutive tool_calls with missing tool_results after compaction",
+  async (runAgent) => {
+    const now = Date.now();
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Save contacts John and Jane.",
+      }),
+      {
+        type: "tool_call",
+        isOwn: true,
+        timestamp: now,
+        name: "upsert_contact",
+        parameters: { name: "John" },
+        id: "upsert_contact:3",
+      },
+      {
+        type: "tool_call",
+        isOwn: true,
+        timestamp: now + 1,
+        name: "upsert_contact",
+        parameters: { name: "Jane" },
+        id: "upsert_contact:4",
+      },
+      {
+        type: "tool_result",
+        isOwn: true,
+        timestamp: now + 2,
+        result: "Contact Jane saved.",
+        toolCallId: "upsert_contact:4",
+        id: crypto.randomUUID(),
+      },
+      participantUtteranceTurn({
+        name: "user",
+        text: "What were the contact names?",
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [someTool],
+      prompt: "You are an AI assistant.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  },
+);
+
+runForBothProviders(
+  "handles consecutive tool_calls with all tool_results present",
+  async (runAgent) => {
+    const now = Date.now();
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Save contacts John and Jane.",
+      }),
+      {
+        type: "tool_call",
+        isOwn: true,
+        timestamp: now,
+        name: "upsert_contact",
+        parameters: { name: "John" },
+        id: "upsert_contact:3",
+      },
+      {
+        type: "tool_call",
+        isOwn: true,
+        timestamp: now + 1,
+        name: "upsert_contact",
+        parameters: { name: "Jane" },
+        id: "upsert_contact:4",
+      },
+      {
+        type: "tool_result",
+        isOwn: true,
+        timestamp: now + 2,
+        result: "Contact John saved.",
+        toolCallId: "upsert_contact:3",
+        id: crypto.randomUUID(),
+      },
+      {
+        type: "tool_result",
+        isOwn: true,
+        timestamp: now + 3,
+        result: "Contact Jane saved.",
+        toolCallId: "upsert_contact:4",
+        id: crypto.randomUUID(),
+      },
+      participantUtteranceTurn({
+        name: "user",
+        text: "What were the contact names?",
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [someTool],
+      prompt: "You are an AI assistant.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  },
+);
