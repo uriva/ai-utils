@@ -6,6 +6,7 @@ import { runForBothProviders } from "../test_helpers.ts";
 import {
   type DeferredTool,
   type HistoryEvent,
+  ownThoughtTurnWithMetadata,
   ownUtteranceTurn,
   participantUtteranceTurn,
 } from "../src/agent.ts";
@@ -259,7 +260,37 @@ runForBothProviders(
       },
       participantUtteranceTurn({
         name: "user",
-        text: "Actually, ignore that.",
+        text: "What were the contact names?",
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [someTool],
+      prompt: "You are an AI assistant.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  },
+);
+
+runForBothProviders(
+  "does not throw when own_thought with modelMetadata is in history",
+  async (runAgent) => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Hello, how are you?",
+      }),
+      ownThoughtTurnWithMetadata("The user is greeting me.", {
+        type: "kimi",
+        responseId: "test-response-1",
+      }),
+      ownUtteranceTurn("I'm doing well, thanks!"),
+      participantUtteranceTurn({
+        name: "user",
+        text: "What is 1+1?",
       }),
     ];
 
