@@ -556,6 +556,7 @@ export const handleFunctionCalls =
 
 export const runCommandToolName = "run_command";
 export const learnSkillToolName = "learn_skill";
+export const getToolDetailsToolName = "get_tool_details";
 
 export const tool = <ParametersSchema extends z.ZodObject<z.ZodRawShape>>(
   tool: Tool<ParametersSchema>,
@@ -610,7 +611,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
     tool({
       name: learnSkillToolName,
       description:
-        "Get detailed information about a skill including its instructions and available tools",
+        "Get information about a skill: its instructions and available tool names. Call get_tool_details for full parameter schemas.",
       parameters: z.object({
         skillName: z.string().describe("The name of the skill to learn about"),
       }),
@@ -629,8 +630,34 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
             tools: skill.tools.map((tool) => ({
               name: tool.name,
               description: tool.description,
-              parameters: zodToGeminiParameters(tool.parameters),
             })),
+          },
+          null,
+          2,
+        ));
+      },
+    }),
+    tool({
+      name: getToolDetailsToolName,
+      description:
+        "Get full parameter schema for a specific skill tool. Use after learn_skill to get the exact parameters before calling run_command.",
+      parameters: z.object({
+        toolPath: z.string().describe(
+          "The tool path in format skillName/toolName",
+        ),
+      }),
+      handler: ({ toolPath }) => {
+        const matchedTool = toolMap[toolPath];
+        if (!matchedTool) {
+          return Promise.resolve(
+            `Tool "${toolPath}" not found. Call ${learnSkillToolName} first to see available tools.`,
+          );
+        }
+        return Promise.resolve(JSON.stringify(
+          {
+            name: matchedTool.name,
+            description: matchedTool.description,
+            parameters: zodToGeminiParameters(matchedTool.parameters),
           },
           null,
           2,

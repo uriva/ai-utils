@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 import { tool } from "../mod.ts";
 import {
   createSkillTools,
+  getToolDetailsToolName,
   type HistoryEvent,
   injectAccessHistory,
   injectOutputEvent,
@@ -349,3 +350,123 @@ Deno.test("tool_call with non-empty thoughtSignature preserves it in API request
   }
   assert(foundFc, "Expected to find a functionCall part");
 });
+
+Deno.test(
+  "learn_skill returns lightweight payload without parameter schemas",
+  async () => {
+    const skillTools = createSkillTools([{
+      name: "weather",
+      description: "Weather information service",
+      instructions: "Always ask for location before checking weather",
+      tools: [
+        {
+          name: "get_forecast",
+          description: "Get weather forecast",
+          parameters: z.object({ location: z.string(), days: z.number() }),
+          handler: () => Promise.resolve("Sunny"),
+        },
+        {
+          name: "get_temperature",
+          description: "Get current temperature",
+          parameters: z.object({ location: z.string() }),
+          handler: () => Promise.resolve("25°C"),
+        },
+      ],
+    }]);
+    const learnSkillTool = skillTools.find((t) =>
+      t.name === learnSkillToolName
+    )!;
+
+    const result = await learnSkillTool.handler(
+      { skillName: "weather" },
+      "test-call-id",
+    );
+
+    const parsed = JSON.parse(result as string);
+    assertEquals(parsed.name, "weather");
+    assertEquals(
+      parsed.instructions,
+      "Always ask for location before checking weather",
+    );
+    assertEquals(parsed.tools.length, 2);
+    assertEquals(parsed.tools[0].name, "get_forecast");
+    assertEquals(parsed.tools[0].description, "Get weather forecast");
+    assert(
+      !("parameters" in parsed.tools[0]),
+      "learn_skill should NOT include parameters",
+    );
+    assert(
+      !("parameters" in parsed.tools[1]),
+      "learn_skill should NOT include parameters",
+    );
+  },
+);
+
+Deno.test(
+  "get_tool_details returns full parameter schema for a specific tool",
+  async () => {
+    const skillTools = createSkillTools([{
+      name: "weather",
+      description: "Weather information service",
+      instructions: "Always ask for location before checking weather",
+      tools: [
+        {
+          name: "get_forecast",
+          description: "Get weather forecast",
+          parameters: z.object({ location: z.string(), days: z.number() }),
+          handler: () => Promise.resolve("Sunny"),
+        },
+      ],
+    }]);
+    const getDetailsTool = skillTools.find((t) =>
+      t.name === getToolDetailsToolName
+    )!;
+
+    assert(getDetailsTool, "get_tool_details tool should exist");
+
+    const result = await getDetailsTool.handler(
+      { toolPath: "weather/get_forecast" },
+      "test-call-id",
+    );
+
+    const parsed = JSON.parse(result as string);
+    assertEquals(parsed.name, "get_forecast");
+    assertEquals(parsed.description, "Get weather forecast");
+    assert(
+      "parameters" in parsed,
+      "get_tool_details SHOULD include parameters",
+    );
+    assert(parsed.parameters.properties.location, "Should have location param");
+    assert(parsed.parameters.properties.days, "Should have days param");
+  },
+);
+
+Deno.test(
+  "get_tool_details returns error for nonexistent tool",
+  async () => {
+    const skillTools = createSkillTools([{
+      name: "weather",
+      description: "Weather information service",
+      instructions: "test",
+      tools: [{
+        name: "get_forecast",
+        description: "Get weather forecast",
+        parameters: z.object({ location: z.string() }),
+        handler: () => Promise.resolve("Sunny"),
+      }],
+    }]);
+    const getDetailsTool = skillTools.find((t) =>
+      t.name === getToolDetailsToolName
+    )!;
+
+    const result = await getDetailsTool.handler(
+      { toolPath: "weather/nonexistent" },
+      "test-call-id",
+    );
+
+    assert(
+      (result as string).includes("not found"),
+      "Should return not found message",
+    );
+  },
+);
