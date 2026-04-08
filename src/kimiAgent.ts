@@ -26,10 +26,9 @@ import {
   appendInternalSentTimestamp,
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
+import { isRetryableError, normalizeError } from "./utils.ts";
 
 import { encodeBase64 } from "@std/encoding/base64";
-
-// Fetch file attachment and convert to base64
 const fetchFileAttachment = async (
   attachment: MediaAttachment,
 ): Promise<string | null> => {
@@ -59,29 +58,9 @@ export const injectKimiToken = (token: string): Injector =>
 
 const kimiModelVersion = "kimi-k2.5";
 
-const normalizeError = (error: unknown): Error => {
-  if (error instanceof Error) return error;
-  if (typeof error === "string") return new Error(error);
-  if (typeof error === "object" && error !== null) {
-    const err = new Error(
-      (error as { message?: string }).message || JSON.stringify(error),
-    );
-    Object.assign(err, error);
-    return err;
-  }
-  return new Error(String(error));
-};
-
-const isServerError = (error: unknown) =>
-  error instanceof Error && "status" in error &&
-  (error as { status: number }).status >= 500;
-
 const isTokenLimitExceeded = (error: Error) =>
   "status" in error && (error as { status: number }).status === 400 &&
   error.message.includes("token count exceeds");
-
-const isRateLimitError = (error: Error) =>
-  "status" in error && (error as { status: number }).status === 429;
 
 const dropOldestHalf = <T extends { type: string }>(events: T[]): T[] => {
   if (events.length <= 2) return events;
@@ -519,7 +498,7 @@ const rawCallKimi = async ({
   }];
 };
 
-const callKimiWithRetry = conditionalRetry(isServerError)(
+const callKimiWithRetry = conditionalRetry(isRetryableError)(
   1000,
   4,
   rawCallKimi,
@@ -533,7 +512,7 @@ const callKimi = async (
     return await callKimiWithRetry({ req, disableStreaming });
   } catch (error) {
     const err = normalizeError(error);
-    if (isServerError(err) || isRateLimitError(err)) {
+    if (isRetryableError(err)) {
       return rawCallKimi({ req, disableStreaming });
     }
     throw err;

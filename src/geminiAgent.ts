@@ -50,23 +50,7 @@ import {
   appendInternalSentTimestamp,
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
-
-const normalizeError = (error: unknown): Error => {
-  if (error instanceof Error) return error;
-  if (typeof error === "string") return new Error(error);
-  if (typeof error === "object" && error !== null) {
-    const err = new Error(
-      (error as { message?: string }).message || JSON.stringify(error),
-    );
-    Object.assign(err, error);
-    return err;
-  }
-  return new Error(String(error));
-};
-
-const isServerError = (error: unknown) =>
-  error instanceof Error && "status" in error &&
-  (error as { status: number }).status >= 500;
+import { isRetryableError, normalizeError } from "./utils.ts";
 
 const alternateModel = (model: string) =>
   model === geminiProVersion
@@ -287,7 +271,7 @@ const rawCallGemini = async ({
   });
 };
 
-const callGeminiWithRetry = conditionalRetry(isServerError)(
+const callGeminiWithRetry = conditionalRetry(isRetryableError)(
   1000,
   4,
   rawCallGemini,
@@ -298,7 +282,7 @@ const callGemini = (
   disableStreaming?: boolean,
 ): Promise<GeminiOutput> =>
   callGeminiWithRetry({ req, disableStreaming }).catch((err) => {
-    if (!isServerError(err)) throw err;
+    if (!isRetryableError(err)) throw err;
     return rawCallGemini({
       req: {
         ...req,

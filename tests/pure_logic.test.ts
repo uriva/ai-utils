@@ -17,6 +17,11 @@ import {
   stripEmbeddedThoughtPatterns,
 } from "../src/geminiAgent.ts";
 import { zodToTypingString } from "../src/gemini.ts";
+import {
+  isRateLimitError,
+  isRetryableError,
+  isServerError,
+} from "../src/utils.ts";
 
 Deno.test("filterOrphanedToolResults logic", () => {
   const baseAuth = { isOwn: true, id: "msg-id", timestamp: 100 } as const;
@@ -434,4 +439,36 @@ Deno.test("zodToTypingString renders nullable fields", () => {
     zodToTypingString(schema),
     "{ name: string | null, ids?: string[] | null }",
   );
+});
+
+const makeErrorWithStatus = (status: number, message = "test"): Error => {
+  const err = new Error(message);
+  Object.assign(err, { status });
+  return err;
+};
+
+Deno.test("isServerError returns true for 500+", () => {
+  assert(isServerError(makeErrorWithStatus(500)));
+  assert(isServerError(makeErrorWithStatus(502)));
+  assert(isServerError(makeErrorWithStatus(503)));
+  assert(!isServerError(makeErrorWithStatus(429)));
+  assert(!isServerError(makeErrorWithStatus(400)));
+  assert(!isServerError(new Error("plain error")));
+  assert(!isServerError("string"));
+});
+
+Deno.test("isRateLimitError returns true only for 429", () => {
+  assert(isRateLimitError(makeErrorWithStatus(429)));
+  assert(!isRateLimitError(makeErrorWithStatus(500)));
+  assert(!isRateLimitError(makeErrorWithStatus(400)));
+  assert(!isRateLimitError(new Error("plain error")));
+  assert(!isRateLimitError("string"));
+});
+
+Deno.test("isRetryableError covers both 500+ and 429", () => {
+  assert(isRetryableError(makeErrorWithStatus(500)));
+  assert(isRetryableError(makeErrorWithStatus(429)));
+  assert(!isRetryableError(makeErrorWithStatus(400)));
+  assert(!isRetryableError(makeErrorWithStatus(404)));
+  assert(!isRetryableError(new Error("plain error")));
 });
