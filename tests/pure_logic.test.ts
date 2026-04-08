@@ -2,7 +2,6 @@ import { assert, assertEquals } from "@std/assert";
 import type { Content } from "@google/genai";
 import { z } from "zod/v4";
 import { tool } from "../mod.ts";
-import { isFakeSilence } from "../src/kimiAgent.ts";
 import {
   createSkillTools,
   type HistoryEvent,
@@ -435,38 +434,4 @@ Deno.test("zodToTypingString renders nullable fields", () => {
     zodToTypingString(schema),
     "{ name: string | null, ids?: string[] | null }",
   );
-});
-
-Deno.test("isFakeSilence catches Kimi fake silent responses", () => {
-  const fakeSilentTexts = [
-    "(ריק)",
-    "[ריק]",
-    "[no response]",
-    "(no response)",
-    "[empty]",
-    "(empty)",
-    "...",
-    "…",
-    "[ ]",
-    "( )",
-    "(  )",
-    "[  ]",
-  ];
-  for (const text of fakeSilentTexts) {
-    assert(isFakeSilence(text), `Expected "${text}" to be fake silence`);
-  }
-});
-
-Deno.test("isFakeSilence does not flag real content", () => {
-  const realTexts = [
-    "Hello, how can I help?",
-    "Sure, let me check that for you.",
-    "The answer is 42.",
-    "(parenthetical remark about something)",
-    "[link to resource]",
-    "I don't have anything to add right now, but let me know if you need help.",
-  ];
-  for (const text of realTexts) {
-    assert(!isFakeSilence(text), `Expected "${text}" to NOT be fake silence`);
-  }
 });

@@ -565,23 +565,14 @@ async (events: KimiHistoryEvent[]): Promise<KimiOutputPart[]> => {
   }
 };
 
-export const isFakeSilence = (text: string): boolean => {
-  const trimmed = text.trim();
-  if (/^[.…]+$/.test(trimmed)) return true;
-  if (/^[\[\(]\s*[\]\)]$/.test(trimmed)) return true;
-  const inner = /^[\[\(]\s*(.*?)\s*[\]\)]$/.exec(trimmed)?.[1]?.toLowerCase();
-  if (!inner) return false;
-  return ["ריק", "empty", "no response"].includes(inner);
-};
+export const noResponseTag = "<no response>";
 
 const didNothing = (output: KimiOutputPart[]) =>
   output.length === 0 ||
   (output.length === 1 &&
     output[0].type === "text" &&
-    !output[0].text.replace(/[\s\u200B\u200C\u200D\uFEFF]/g, "")) ||
-  (output.length === 1 &&
-    output[0].type === "text" &&
-    isFakeSilence(output[0].text));
+    (!output[0].text.replace(/[\s\u200B\u200C\u200D\uFEFF]/g, "") ||
+      output[0].text.trim().toLowerCase() === noResponseTag));
 
 const kimiOutputPartToHistoryEvents =
   (responseId: string) => (p: KimiOutputPart): KimiHistoryEvent[] => {
@@ -655,11 +646,19 @@ export const kimiAgentCaller = ({
 async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
   void lightModel;
 
-  const enhancedPrompt = skills && skills.length > 0
-    ? `${prompt}\n\nAvailable skills:\n${
-      skills.map((skill) => `- ${skill.name}: ${skill.description}`).join("\n")
-    }`
-    : prompt;
+  const enhancedPrompt = [
+    prompt,
+    ...(skills && skills.length > 0
+      ? [
+        `Available skills:\n${
+          skills.map((skill) => `- ${skill.name}: ${skill.description}`).join(
+            "\n",
+          )
+        }`,
+      ]
+      : []),
+    `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,
+  ].join("\n\n");
 
   const kimiOutput = await callKimiWithFixHistory(
     rewriteHistory,

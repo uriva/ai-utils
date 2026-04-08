@@ -427,3 +427,44 @@ runForBothProviders(
     });
   },
 );
+
+runForBothProviders(
+  "agent stays silent when it has nothing to say",
+  async (runAgent) => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "Alice",
+        text: "Hey Bob, what time is our meeting tomorrow?",
+      }),
+      participantUtteranceTurn({
+        name: "Bob",
+        text: "It's at 3pm, same room as last week.",
+      }),
+      participantUtteranceTurn({
+        name: "Alice",
+        text: "Great, thanks Bob!",
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt:
+        "You are a silent observer in a group chat. You must never respond to messages between other people. Only respond if someone explicitly addresses you by name.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+
+    const botUtterances = mockHistory.filter((e) => e.type === "own_utterance");
+    assertEquals(
+      botUtterances.length,
+      0,
+      `Expected no own_utterance events but found ${botUtterances.length}: ${
+        botUtterances.map((e) =>
+          e.type === "own_utterance" ? `"${e.text.slice(0, 60)}"` : ""
+        ).join(", ")
+      }`,
+    );
+  },
+);
