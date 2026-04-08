@@ -33,30 +33,33 @@ const isToolResult = (
 export const groupToolCallPairs = (
   events: HistoryEvent[],
 ): HistoryEvent[][] => {
+  // Build a map from tool_call id to its matching tool_results
+  const callIdToResults = new Map<string, HistoryEvent[]>();
+  const matchedResultIds = new Set<string>();
+  for (const e of events) {
+    if (isToolResult(e) && e.toolCallId) {
+      const existing = callIdToResults.get(e.toolCallId);
+      if (existing) {
+        existing.push(e);
+      } else {
+        callIdToResults.set(e.toolCallId, [e]);
+      }
+    }
+  }
+  // Walk events in order, emitting groups
   const result: HistoryEvent[][] = [];
-  let i = 0;
-  while (i < events.length) {
-    if (isToolCall(events[i])) {
-      const group: HistoryEvent[] = [events[i]];
-      let j = i + 1;
-      while (j < events.length && isToolResult(events[j])) {
-        group.push(events[j]);
-        j++;
+  for (const e of events) {
+    if (matchedResultIds.has(e.id)) continue;
+    if (isToolCall(e)) {
+      const results = callIdToResults.get(e.id);
+      if (results && results.length > 0) {
+        result.push([e, ...results]);
+        for (const r of results) matchedResultIds.add(r.id);
+      } else {
+        result.push([e]);
       }
-      result.push(group);
-      i = j;
-    } else if (isToolResult(events[i])) {
-      const group: HistoryEvent[] = [events[i]];
-      let j = i + 1;
-      while (j < events.length && isToolResult(events[j])) {
-        group.push(events[j]);
-        j++;
-      }
-      result.push(group);
-      i = j;
     } else {
-      result.push([events[i]]);
-      i++;
+      result.push([e]);
     }
   }
   return result;

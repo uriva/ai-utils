@@ -50,7 +50,23 @@ import {
   appendInternalSentTimestamp,
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
-import { isRetryableError, normalizeError } from "./utils.ts";
+
+const normalizeError = (error: unknown): Error => {
+  if (error instanceof Error) return error;
+  if (typeof error === "string") return new Error(error);
+  if (typeof error === "object" && error !== null) {
+    const err = new Error(
+      (error as { message?: string }).message || JSON.stringify(error),
+    );
+    Object.assign(err, error);
+    return err;
+  }
+  return new Error(String(error));
+};
+
+const isServerError = (error: unknown) =>
+  error instanceof Error && "status" in error &&
+  (error as { status: number }).status >= 500;
 
 const alternateModel = (model: string) =>
   model === geminiProVersion
@@ -271,7 +287,7 @@ const rawCallGemini = async ({
   });
 };
 
-const callGeminiWithRetry = conditionalRetry(isRetryableError)(
+const callGeminiWithRetry = conditionalRetry(isServerError)(
   1000,
   4,
   rawCallGemini,
@@ -282,7 +298,7 @@ const callGemini = (
   disableStreaming?: boolean,
 ): Promise<GeminiOutput> =>
   callGeminiWithRetry({ req, disableStreaming }).catch((err) => {
-    if (!isRetryableError(err)) throw err;
+    if (!isServerError(err)) throw err;
     return rawCallGemini({
       req: {
         ...req,
@@ -1046,10 +1062,7 @@ export const geminiAgentCaller = ({
             : undefined,
         )];
       }
-      return geminiOutput.flatMap((part) => {
-        const event = geminiOutputPartToHistoryEvent(responseId)(part);
-        return event ? [event] : [];
-      });
+      return geminiOutput.map(geminiOutputPartToHistoryEvent(responseId));
     },
   )(events);
 
@@ -1060,8 +1073,7 @@ export const stripEmbeddedThoughtPatterns = (text: string): string =>
   text.replace(embeddedThoughtPattern, "").trim();
 
 const geminiOutputPartToHistoryEvent =
-  (responseId: string) =>
-  (p: GeminiPartOfInterest): GeminiHistoryEvent | null => {
+  (responseId: string) => (p: GeminiPartOfInterest): GeminiHistoryEvent => {
     if (p.type === "text") {
       const metadata: GeminiMetadata = {
         type: "gemini",
@@ -1081,17 +1093,9 @@ const geminiOutputPartToHistoryEvent =
 
       const cleanedText = stripEmbeddedThoughtPatterns(stripped);
 
-      if (p.thought) {
-        return ownThoughtTurnWithMetadata<GeminiMetadata>(
-          cleanedText,
-          metadata,
-        );
-      }
-      if (!cleanedText) return null;
-      return ownUtteranceTurnWithMetadata<GeminiMetadata>(
-        cleanedText,
-        metadata,
-      );
+      return p.thought
+        ? ownThoughtTurnWithMetadata<GeminiMetadata>(cleanedText, metadata)
+        : ownUtteranceTurnWithMetadata<GeminiMetadata>(cleanedText, metadata);
     }
     if (p.type === "function_call") {
       return toolUseTurnWithMetadata(p.functionCall, {
@@ -1102,7 +1106,13 @@ const geminiOutputPartToHistoryEvent =
     }
     if (p.type === "inline_data") {
       const { data, mimeType } = p.inlineData;
-      if (!data) return null;
+      if (!data) {
+        return ownUtteranceTurnWithMetadata<GeminiMetadata>("", {
+          type: "gemini",
+          responseId,
+          thoughtSignature: "",
+        });
+      }
       return ownUtteranceTurnWithMetadata<GeminiMetadata>(
         "",
         {
@@ -1133,7 +1143,11 @@ const geminiOutputPartToHistoryEvent =
             fileUri,
           }],
         )
-        : null;
+        : ownUtteranceTurnWithMetadata<GeminiMetadata>("", {
+          type: "gemini",
+          responseId,
+          thoughtSignature: "",
+        });
     }
     throw new Error(`Unknown part type: ${JSON.stringify(p)}`);
   };

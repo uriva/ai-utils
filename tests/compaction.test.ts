@@ -325,6 +325,79 @@ Deno.test("segmentHistoryEvents returns empty for empty input", () => {
   assertEquals(segmentHistoryEvents([], segmentGapMs), []);
 });
 
+Deno.test("groupToolCallPairs matches by toolCallId, not adjacency", () => {
+  // This is the actual pattern from runAbstractAgent: all tool_calls emitted
+  // first, then all tool_results after (because outputEvent emits all model
+  // events before handleFunctionCalls processes them).
+  const events: HistoryEvent[] = [
+    makeToolCall("c1", "toolA", 100),
+    makeToolCall("c2", "toolB", 101),
+    makeToolResult("c1", 102),
+    makeToolResult("c2", 103),
+  ];
+  const groups = groupToolCallPairs(events);
+  // c1 and its result should be in the same group
+  const c1Group = groups.find((g) =>
+    g.some((e) => e.type === "tool_call" && e.id === "c1")
+  )!;
+  assertEquals(
+    c1Group.some((e) =>
+      e.type === "tool_result" &&
+      (e as Extract<HistoryEvent, { type: "tool_result" }>).toolCallId === "c1"
+    ),
+    true,
+    "tool_call c1 should be grouped with tool_result referencing c1",
+  );
+  // c2 and its result should be in the same group
+  const c2Group = groups.find((g) =>
+    g.some((e) => e.type === "tool_call" && e.id === "c2")
+  )!;
+  assertEquals(
+    c2Group.some((e) =>
+      e.type === "tool_result" &&
+      (e as Extract<HistoryEvent, { type: "tool_result" }>).toolCallId === "c2"
+    ),
+    true,
+    "tool_call c2 should be grouped with tool_result referencing c2",
+  );
+});
+
+Deno.test("segmentation never splits non-adjacent tool_call from its tool_result", () => {
+  const base = Date.now();
+  // Pattern from runAbstractAgent with multi-call turn:
+  // msg, tool_call_c1, <big gap>, tool_call_c2, tool_result_c1, tool_result_c2
+  // The gap after tool_call_c1 should NOT orphan it from tool_result_c1
+  const events: HistoryEvent[] = [
+    makeParticipantUtterance("hello", base),
+    makeToolCall("c1", "toolA", base + 1000),
+    makeToolCall("c2", "toolB", base + 1000 + segmentGapMs + 1),
+    makeToolResult("c1", base + 1000 + segmentGapMs + 2),
+    makeToolResult("c2", base + 1000 + segmentGapMs + 3),
+  ];
+  const segments = segmentHistoryEvents(events, segmentGapMs);
+  for (const seg of segments) {
+    const callIds = new Set(
+      seg.events
+        .filter((e): e is Extract<HistoryEvent, { type: "tool_call" }> =>
+          e.type === "tool_call"
+        )
+        .map((e) => e.id),
+    );
+    for (const e of seg.events) {
+      if (e.type === "tool_result") {
+        const tr = e as Extract<HistoryEvent, { type: "tool_result" }>;
+        if (tr.toolCallId) {
+          assertEquals(
+            callIds.has(tr.toolCallId),
+            true,
+            `tool_result for ${tr.toolCallId} is in segment without its tool_call`,
+          );
+        }
+      }
+    }
+  }
+});
+
 Deno.test("trimming within single segment respects tool_call/tool_result atomicity", () => {
   const base = Date.now();
   const events: HistoryEvent[] = [];
