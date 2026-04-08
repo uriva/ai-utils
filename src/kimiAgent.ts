@@ -565,11 +565,23 @@ async (events: KimiHistoryEvent[]): Promise<KimiOutputPart[]> => {
   }
 };
 
+export const isFakeSilence = (text: string): boolean => {
+  const trimmed = text.trim();
+  if (/^[.…]+$/.test(trimmed)) return true;
+  if (/^[\[\(]\s*[\]\)]$/.test(trimmed)) return true;
+  const inner = /^[\[\(]\s*(.*?)\s*[\]\)]$/.exec(trimmed)?.[1]?.toLowerCase();
+  if (!inner) return false;
+  return ["ריק", "empty", "no response"].includes(inner);
+};
+
 const didNothing = (output: KimiOutputPart[]) =>
   output.length === 0 ||
   (output.length === 1 &&
     output[0].type === "text" &&
-    !output[0].text.replace(/[\s\u200B\u200C\u200D\uFEFF]/g, ""));
+    !output[0].text.replace(/[\s\u200B\u200C\u200D\uFEFF]/g, "")) ||
+  (output.length === 1 &&
+    output[0].type === "text" &&
+    isFakeSilence(output[0].text));
 
 const kimiOutputPartToHistoryEvents =
   (responseId: string) => (p: KimiOutputPart): KimiHistoryEvent[] => {
