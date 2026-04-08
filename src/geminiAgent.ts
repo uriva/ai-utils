@@ -1062,7 +1062,10 @@ export const geminiAgentCaller = ({
             : undefined,
         )];
       }
-      return geminiOutput.map(geminiOutputPartToHistoryEvent(responseId));
+      return geminiOutput.flatMap((part) => {
+        const event = geminiOutputPartToHistoryEvent(responseId)(part);
+        return event ? [event] : [];
+      });
     },
   )(events);
 
@@ -1073,7 +1076,8 @@ export const stripEmbeddedThoughtPatterns = (text: string): string =>
   text.replace(embeddedThoughtPattern, "").trim();
 
 const geminiOutputPartToHistoryEvent =
-  (responseId: string) => (p: GeminiPartOfInterest): GeminiHistoryEvent => {
+  (responseId: string) =>
+  (p: GeminiPartOfInterest): GeminiHistoryEvent | null => {
     if (p.type === "text") {
       const metadata: GeminiMetadata = {
         type: "gemini",
@@ -1093,9 +1097,17 @@ const geminiOutputPartToHistoryEvent =
 
       const cleanedText = stripEmbeddedThoughtPatterns(stripped);
 
-      return p.thought
-        ? ownThoughtTurnWithMetadata<GeminiMetadata>(cleanedText, metadata)
-        : ownUtteranceTurnWithMetadata<GeminiMetadata>(cleanedText, metadata);
+      if (p.thought) {
+        return ownThoughtTurnWithMetadata<GeminiMetadata>(
+          cleanedText,
+          metadata,
+        );
+      }
+      if (!cleanedText) return null;
+      return ownUtteranceTurnWithMetadata<GeminiMetadata>(
+        cleanedText,
+        metadata,
+      );
     }
     if (p.type === "function_call") {
       return toolUseTurnWithMetadata(p.functionCall, {
@@ -1106,13 +1118,7 @@ const geminiOutputPartToHistoryEvent =
     }
     if (p.type === "inline_data") {
       const { data, mimeType } = p.inlineData;
-      if (!data) {
-        return ownUtteranceTurnWithMetadata<GeminiMetadata>("", {
-          type: "gemini",
-          responseId,
-          thoughtSignature: "",
-        });
-      }
+      if (!data) return null;
       return ownUtteranceTurnWithMetadata<GeminiMetadata>(
         "",
         {
@@ -1143,11 +1149,7 @@ const geminiOutputPartToHistoryEvent =
             fileUri,
           }],
         )
-        : ownUtteranceTurnWithMetadata<GeminiMetadata>("", {
-          type: "gemini",
-          responseId,
-          thoughtSignature: "",
-        });
+        : null;
     }
     throw new Error(`Unknown part type: ${JSON.stringify(p)}`);
   };
