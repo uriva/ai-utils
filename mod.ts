@@ -15,6 +15,14 @@ export {
 } from "./src/internalMessageMetadata.ts";
 export { z } from "zod/v4";
 export * from "./src/agent.ts";
+export {
+  eventsToPlainText,
+  eventToPlainText,
+  groupToolCallPairs,
+  type HistorySegment,
+  partitionSegments,
+  segmentHistoryEvents,
+} from "./src/compaction.ts";
 export { injectCacher } from "./src/cacher.ts";
 export {
   ensureGeminiAttachmentIsActive,
