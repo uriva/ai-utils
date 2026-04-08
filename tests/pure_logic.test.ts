@@ -4,7 +4,6 @@ import { z } from "zod/v4";
 import { tool } from "../mod.ts";
 import {
   createSkillTools,
-  getToolDetailsToolName,
   type HistoryEvent,
   injectAccessHistory,
   injectOutputEvent,
@@ -353,7 +352,7 @@ Deno.test("tool_call with non-empty thoughtSignature preserves it in API request
 });
 
 Deno.test(
-  "learn_skill returns lightweight payload without parameter schemas",
+  "learn_skill returns full payload with parameter schemas",
   async () => {
     const skillTools = createSkillTools([{
       name: "weather",
@@ -393,83 +392,12 @@ Deno.test(
     assertEquals(parsed.tools[0].name, "get_forecast");
     assertEquals(parsed.tools[0].description, "Get weather forecast");
     assert(
-      !("parameters" in parsed.tools[0]),
-      "learn_skill should NOT include parameters",
+      "parameters" in parsed.tools[0],
+      "learn_skill should include parameters",
     );
     assert(
-      !("parameters" in parsed.tools[1]),
-      "learn_skill should NOT include parameters",
-    );
-  },
-);
-
-Deno.test(
-  "get_tool_details returns concise typing string for a specific tool",
-  async () => {
-    const skillTools = createSkillTools([{
-      name: "weather",
-      description: "Weather information service",
-      instructions: "Always ask for location before checking weather",
-      tools: [
-        {
-          name: "get_forecast",
-          description: "Get weather forecast",
-          parameters: z.object({ location: z.string(), days: z.number() }),
-          handler: () => Promise.resolve("Sunny"),
-        },
-      ],
-    }]);
-    const getDetailsTool = skillTools.find((t) =>
-      t.name === getToolDetailsToolName
-    )!;
-
-    assert(getDetailsTool, "get_tool_details tool should exist");
-
-    const result = await getDetailsTool.handler(
-      { toolPath: "weather/get_forecast" },
-      "test-call-id",
-    ) as string;
-
-    assert(result.includes("get_forecast"), "Should include tool name");
-    assert(
-      result.includes("Get weather forecast"),
-      "Should include description",
-    );
-    assert(
-      result.includes("location: string"),
-      "Should include location param",
-    );
-    assert(result.includes("days: number"), "Should include days param");
-    assert(!result.includes('"type"'), "Should NOT be JSON Schema format");
-  },
-);
-
-Deno.test(
-  "get_tool_details returns error for nonexistent tool",
-  async () => {
-    const skillTools = createSkillTools([{
-      name: "weather",
-      description: "Weather information service",
-      instructions: "test",
-      tools: [{
-        name: "get_forecast",
-        description: "Get weather forecast",
-        parameters: z.object({ location: z.string() }),
-        handler: () => Promise.resolve("Sunny"),
-      }],
-    }]);
-    const getDetailsTool = skillTools.find((t) =>
-      t.name === getToolDetailsToolName
-    )!;
-
-    const result = await getDetailsTool.handler(
-      { toolPath: "weather/nonexistent" },
-      "test-call-id",
-    );
-
-    assert(
-      (result as string).includes("not found"),
-      "Should return not found message",
+      "parameters" in parsed.tools[1],
+      "learn_skill should include parameters",
     );
   },
 );
