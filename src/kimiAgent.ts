@@ -214,7 +214,7 @@ async (e: KimiHistoryEvent): Promise<ChatCompletionMessageParam[]> => {
       ? `${text || ""}\n${attachmentDescriptions}`.trim()
       : (text || "");
 
-    return [{ role: "assistant", content: fullContent }];
+    return [{ role: "assistant", content: fullContent || " " }];
   }
 
   if (e.type === "tool_call") {

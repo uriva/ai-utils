@@ -429,6 +429,44 @@ runForBothProviders(
 );
 
 runForBothProviders(
+  "agent handles history containing empty text without triggering 400 error",
+  async (runAgent) => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Hello",
+      }),
+      {
+        type: "own_utterance",
+        isOwn: true,
+        id: "empty-utterance",
+        timestamp: Date.now(),
+        text: "",
+        modelMetadata: {
+          type: "gemini",
+          thoughtSignature: "",
+          responseId: "resp_id",
+        },
+      } as HistoryEvent,
+      participantUtteranceTurn({
+        name: "user",
+        text: "Are you there?",
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "You are a helpful assistant.",
+      lightModel: true,
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  },
+);
+
+runForBothProviders(
   "agent stays silent when it has nothing to say",
   async (runAgent) => {
     const mockHistory: HistoryEvent[] = [
