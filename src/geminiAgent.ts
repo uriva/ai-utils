@@ -377,7 +377,7 @@ const historyEventToContent = (
     return wrapModelContent(
       !empty(parts) ? parts : [{
         ...optionalThoughtSignature(e.modelMetadata?.thoughtSignature),
-        text: "",
+        text: " ",
       }],
     );
   }
@@ -414,7 +414,7 @@ const historyEventToContent = (
         thoughtSignature: e.modelMetadata.thoughtSignature,
       }])
       : e.modelMetadata
-      ? wrapModelContent([{ text: "" }])
+      ? wrapModelContent([{ text: " " }])
       : wrapUserContent([{
         text: stampText(`[System notification: ${e.text}]`),
       }]);
@@ -436,7 +436,7 @@ const historyEventToContent = (
   }
   if (e.type === "do_nothing") {
     return wrapModelContent([{
-      text: "",
+      text: " ",
       ...optionalThoughtSignature(e.modelMetadata?.thoughtSignature),
     }]);
   }
