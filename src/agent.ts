@@ -218,6 +218,12 @@ export const injectStreamChunk = streamChunkInjection.inject;
 export const accessStreamChunk = streamChunkInjection.access;
 export const getStreamChunk = streamChunkInjection.getStore;
 
+const abortInjection: Injection<() => Promise<boolean>> = context(
+  () => Promise.resolve(false),
+);
+export const injectShouldAbort = abortInjection.inject;
+const shouldAbort = abortInjection.access;
+
 const historyInjection: Injection<() => Promise<HistoryEvent[]>> = context(
   (): Promise<HistoryEvent[]> => {
     throw new Error("History not injected");
@@ -676,6 +682,7 @@ export const runAbstractAgent = async (
   let c = 0;
   let ephemeralHistory: HistoryEvent[] = [];
   while (true) {
+    if (await shouldAbort()) return;
     c++;
     if (c > maxIterations) {
       onMaxIterationsReached();
