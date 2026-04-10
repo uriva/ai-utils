@@ -1062,7 +1062,10 @@ export const geminiAgentCaller = ({
             : undefined,
         )];
       }
-      return geminiOutput.map(geminiOutputPartToHistoryEvent(responseId));
+      return geminiOutput.flatMap((part) => {
+        const event = geminiOutputPartToHistoryEvent(responseId)(part);
+        return event ? [event] : [];
+      });
     },
   )(events);
 
@@ -1073,7 +1076,8 @@ export const stripEmbeddedThoughtPatterns = (text: string): string =>
   text.replace(embeddedThoughtPattern, "").trim();
 
 const geminiOutputPartToHistoryEvent =
-  (responseId: string) => (p: GeminiPartOfInterest): GeminiHistoryEvent => {
+  (responseId: string) =>
+  (p: GeminiPartOfInterest): GeminiHistoryEvent | null => {
     if (p.type === "text") {
       const metadata: GeminiMetadata = {
         type: "gemini",
@@ -1092,6 +1096,7 @@ const geminiOutputPartToHistoryEvent =
       }
 
       const cleanedText = stripEmbeddedThoughtPatterns(stripped);
+      if (!cleanedText) return null;
 
       return p.thought
         ? ownThoughtTurnWithMetadata<GeminiMetadata>(cleanedText, metadata)
