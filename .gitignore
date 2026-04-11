@@ -3,3 +3,4 @@ deno.lock
 .worktrees/
 artifacts/
 models.json
+bug.json
