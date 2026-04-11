@@ -489,9 +489,7 @@ const isEmptyUtterance = (event: HistoryEvent) =>
   (empty(event.attachments ?? []));
 
 const reclassifyEmptyUtterances = (output: HistoryEvent[]): HistoryEvent[] =>
-  output.map((event) =>
-    isEmptyUtterance(event) ? doNothingEvent(undefined) : event
-  );
+  output.filter((event) => !isEmptyUtterance(event));
 
 const participantNamesFromHistory = (history: HistoryEvent[]): Set<string> =>
   new Set(
@@ -741,9 +739,7 @@ export const runAbstractAgent = async (
         !(emit.some((ev: HistoryEvent) => ev.type === "tool_call")) &&
         nonempty(updatedHistory) &&
         last(updatedHistory).isOwn &&
-        !emit.every((ev: HistoryEvent) =>
-          ev.type === "own_thought" || ev.type === "do_nothing"
-        )
+        !emit.every((ev: HistoryEvent) => ev.type === "own_thought")
       ) return;
     } else {
       // Nothing was emitted to the outside world, accumulate the internal state (e.g., thoughts)

@@ -621,3 +621,44 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "intentional do_nothing from model stops the agent",
+  async () => {
+    const history: HistoryEvent[] = [];
+    let callCount = 0;
+
+    const mockCallModel = (_h: HistoryEvent[]): Promise<HistoryEvent[]> => {
+      callCount++;
+      return Promise.resolve([{
+        type: "do_nothing" as const,
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        isOwn: true as const,
+      }]);
+    };
+
+    await injectAccessHistory(() => Promise.resolve(history))(
+      injectOutputEvent((event) => {
+        history.push(event);
+        return Promise.resolve();
+      })(runAbstractAgent),
+    )(
+      {
+        maxIterations: 5,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        prompt: "test",
+        rewriteHistory: async () => {},
+        timezoneIANA: "UTC",
+      },
+      mockCallModel,
+    );
+
+    assertEquals(callCount, 1, "should call model only once and stop");
+    assert(
+      history.some((e) => e.type === "do_nothing"),
+      "should emit the do_nothing event",
+    );
+  },
+);
