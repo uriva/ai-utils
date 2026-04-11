@@ -1,5 +1,5 @@
 import { context, type Injection } from "@uri/inject";
-import { coerce, each, filter, last, nonempty, timeit } from "gamla";
+import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
 import { zodToTypingString } from "./gemini.ts";
 import {
@@ -483,6 +483,16 @@ const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
       : event;
   });
 
+const isEmptyUtterance = (event: HistoryEvent) =>
+  (event.type === "own_utterance" || event.type === "own_edit_message") &&
+  !event.text.trim() &&
+  (empty(event.attachments ?? []));
+
+const reclassifyEmptyUtterances = (output: HistoryEvent[]): HistoryEvent[] =>
+  output.map((event) =>
+    isEmptyUtterance(event) ? doNothingEvent(undefined) : event
+  );
+
 const participantNamesFromHistory = (history: HistoryEvent[]): Set<string> =>
   new Set(
     history
@@ -534,7 +544,8 @@ export const sanitizeModelOutput = (
     participantNamesFromHistory(history),
     sanitized,
   );
-  const safe = reclassifyLeakedThoughts(withoutFabrications);
+  const withoutEmpty = reclassifyEmptyUtterances(withoutFabrications);
+  const safe = reclassifyLeakedThoughts(withoutEmpty);
   return { emit: safe, internal: safe };
 };
 
@@ -730,7 +741,9 @@ export const runAbstractAgent = async (
         !(emit.some((ev: HistoryEvent) => ev.type === "tool_call")) &&
         nonempty(updatedHistory) &&
         last(updatedHistory).isOwn &&
-        !emit.every((ev: HistoryEvent) => ev.type === "own_thought")
+        !emit.every((ev: HistoryEvent) =>
+          ev.type === "own_thought" || ev.type === "do_nothing"
+        )
       ) return;
     } else {
       // Nothing was emitted to the outside world, accumulate the internal state (e.g., thoughts)

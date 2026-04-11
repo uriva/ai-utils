@@ -462,3 +462,162 @@ Deno.test(
     }
   },
 );
+
+Deno.test(
+  "empty own_utterance from model is not emitted to user",
+  async () => {
+    const history: HistoryEvent[] = [];
+    let callCount = 0;
+
+    const mockCallModel = (_h: HistoryEvent[]): Promise<HistoryEvent[]> => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve([{
+          type: "own_utterance" as const,
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          isOwn: true as const,
+          text: "",
+        }]);
+      }
+      return Promise.resolve([{
+        type: "own_utterance" as const,
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        isOwn: true as const,
+        text: "Real response",
+      }]);
+    };
+
+    await injectAccessHistory(() => Promise.resolve(history))(
+      injectOutputEvent((event) => {
+        history.push(event);
+        return Promise.resolve();
+      })(runAbstractAgent),
+    )(
+      {
+        maxIterations: 5,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        prompt: "test",
+        rewriteHistory: async () => {},
+        timezoneIANA: "UTC",
+      },
+      mockCallModel,
+    );
+
+    const emptyUtterances = history.filter(
+      (e) => e.type === "own_utterance" && !e.text.trim(),
+    );
+    assertEquals(
+      emptyUtterances.length,
+      0,
+      "should not emit empty own_utterance events",
+    );
+    assert(
+      history.some((e) =>
+        e.type === "own_utterance" && e.text === "Real response"
+      ),
+      "should emit the real response",
+    );
+  },
+);
+
+Deno.test(
+  "whitespace-only own_utterance from model is not emitted to user",
+  async () => {
+    const history: HistoryEvent[] = [];
+    let callCount = 0;
+
+    const mockCallModel = (_h: HistoryEvent[]): Promise<HistoryEvent[]> => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve([{
+          type: "own_utterance" as const,
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          isOwn: true as const,
+          text: "   \n  ",
+        }]);
+      }
+      return Promise.resolve([{
+        type: "own_utterance" as const,
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        isOwn: true as const,
+        text: "Real response",
+      }]);
+    };
+
+    await injectAccessHistory(() => Promise.resolve(history))(
+      injectOutputEvent((event) => {
+        history.push(event);
+        return Promise.resolve();
+      })(runAbstractAgent),
+    )(
+      {
+        maxIterations: 5,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        prompt: "test",
+        rewriteHistory: async () => {},
+        timezoneIANA: "UTC",
+      },
+      mockCallModel,
+    );
+
+    const emptyUtterances = history.filter(
+      (e) => e.type === "own_utterance" && !e.text.trim(),
+    );
+    assertEquals(
+      emptyUtterances.length,
+      0,
+      "should not emit whitespace-only own_utterance events",
+    );
+  },
+);
+
+Deno.test(
+  "own_utterance with empty text but attachments is preserved",
+  async () => {
+    const history: HistoryEvent[] = [];
+
+    const mockCallModel = (_h: HistoryEvent[]): Promise<HistoryEvent[]> =>
+      Promise.resolve([{
+        type: "own_utterance" as const,
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        isOwn: true as const,
+        text: "",
+        attachments: [{
+          kind: "inline" as const,
+          mimeType: "image/png",
+          dataBase64: "iVBORw0KGgo=",
+        }],
+      }]);
+
+    await injectAccessHistory(() => Promise.resolve(history))(
+      injectOutputEvent((event) => {
+        history.push(event);
+        return Promise.resolve();
+      })(runAbstractAgent),
+    )(
+      {
+        maxIterations: 2,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        prompt: "test",
+        rewriteHistory: async () => {},
+        timezoneIANA: "UTC",
+      },
+      mockCallModel,
+    );
+
+    const utterances = history.filter((e) => e.type === "own_utterance");
+    assertEquals(
+      utterances.length,
+      1,
+      "should preserve utterance with attachments",
+    );
+  },
+);
