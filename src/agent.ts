@@ -483,10 +483,12 @@ const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
       : event;
   });
 
-const isEmptyUtterance = (event: HistoryEvent) =>
-  (event.type === "own_utterance" || event.type === "own_edit_message") &&
-  !event.text.trim() &&
-  (empty(event.attachments ?? []));
+const isEmptyUtterance = (event: HistoryEvent) => {
+  if (event.type !== "own_utterance" && event.type !== "own_edit_message") {
+    return false;
+  }
+  return !event.text.trim() && empty(event.attachments ?? []);
+};
 
 const reclassifyEmptyUtterances = (output: HistoryEvent[]): HistoryEvent[] =>
   output.filter((event) => !isEmptyUtterance(event));
@@ -557,6 +559,11 @@ export const handleFunctionCalls =
     )(output);
     let hadDeferred = false;
     await each(async (t: ToolUse<Record<string, unknown>>) => {
+      if (t.name === doNothingToolName) {
+        hadDeferred = true;
+        await outputEvent(doNothingEvent(undefined));
+        return;
+      }
       const fc: FunctionCall = { name: t.name, args: t.parameters, id: t.id };
       const callResult = await callToResult(tools)(fc);
       if (callResult === undefined) {
@@ -572,6 +579,18 @@ export const handleFunctionCalls =
 
 export const runCommandToolName = "run_command";
 export const learnSkillToolName = "learn_skill";
+
+export const doNothingToolName = "do_nothing";
+
+export const doNothingTool: Tool<
+  z.ZodObject<{ reason: z.ZodOptional<z.ZodString> }>
+> = {
+  name: doNothingToolName,
+  description:
+    "Call this tool when you have nothing to say and should not respond. Use this instead of writing an empty message, HTML comment, or any placeholder text.",
+  parameters: z.object({ reason: z.string().optional() }),
+  handler: () => Promise.resolve(""),
+};
 
 export const tool = <ParametersSchema extends z.ZodObject<z.ZodRawShape>>(
   tool: Tool<ParametersSchema>,
@@ -691,9 +710,12 @@ export const runAbstractAgent = async (
     AgentSpec,
   callModel: (history: HistoryEvent[]) => Promise<HistoryEvent[]>,
 ) => {
-  const allTools = skills && skills.length > 0
-    ? [...tools, ...createSkillTools(skills)]
-    : tools;
+  const allTools = [
+    doNothingTool,
+    ...(skills && skills.length > 0
+      ? [...tools, ...createSkillTools(skills)]
+      : tools),
+  ];
   let c = 0;
   let emojiFloodRetries = 0;
   let ephemeralHistory: HistoryEvent[] = [];

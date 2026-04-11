@@ -662,3 +662,55 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "calling do_nothing tool emits do_nothing event and stops the agent",
+  async () => {
+    const history: HistoryEvent[] = [];
+
+    const mockCallModel = (_h: HistoryEvent[]): Promise<HistoryEvent[]> =>
+      Promise.resolve([{
+        type: "tool_call" as const,
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        isOwn: true as const,
+        name: "do_nothing",
+        parameters: {},
+        modelMetadata: undefined,
+      }]);
+
+    await injectAccessHistory(() => Promise.resolve(history))(
+      injectOutputEvent((event) => {
+        history.push(event);
+        return Promise.resolve();
+      })(runAbstractAgent),
+    )(
+      {
+        maxIterations: 5,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        prompt: "test",
+        rewriteHistory: async () => {},
+        timezoneIANA: "UTC",
+      },
+      mockCallModel,
+    );
+
+    const visibleUtterances = history.filter(
+      (e) => e.type === "own_utterance" && e.text.trim() !== "",
+    );
+    assertEquals(
+      visibleUtterances.length,
+      0,
+      "should have no visible utterance",
+    );
+    assert(
+      history.some((e) => e.type === "do_nothing"),
+      "should emit a do_nothing event",
+    );
+    assert(
+      !history.some((e) => e.type === "tool_result"),
+      "should not emit a tool_result for do_nothing",
+    );
+  },
+);
