@@ -1008,6 +1008,9 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
 
 const maxHistoryTokens = 800_000;
 
+const noResponseInstruction =
+  "\n\nWhen you have nothing to say (e.g. the message is irrelevant), respond with exactly [no response] and nothing else.";
+
 export const geminiAgentCaller = ({
   lightModel,
   prompt,
@@ -1032,11 +1035,11 @@ export const geminiAgentCaller = ({
         imageGen,
         lightModel,
         skills && skills.length > 0
-          ? `${prompt}\n\nAvailable skills:\n${
+          ? `${prompt}${noResponseInstruction}\n\nAvailable skills:\n${
             skills.map((skill) => `- ${skill.name}: ${skill.description}`)
               .join("\n")
           }`
-          : prompt,
+          : `${prompt}${noResponseInstruction}`,
         [
           ...tools,
           ...(skills && skills.length > 0 ? createSkillTools(skills) : []),

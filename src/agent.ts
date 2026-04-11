@@ -483,6 +483,23 @@ const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
       : event;
   });
 
+const noResponsePattern = /^\[no response\]\s*$/i;
+
+const isNoResponseUtterance = (event: HistoryEvent) =>
+  (event.type === "own_utterance" || event.type === "own_edit_message") &&
+  noResponsePattern.test(event.text.trim());
+
+const reclassifyNoResponse = (output: HistoryEvent[]): HistoryEvent[] =>
+  output.map((event) =>
+    isNoResponseUtterance(event)
+      ? doNothingEvent(
+        (event as Extract<HistoryEvent, { type: "own_utterance" }>)
+          .modelMetadata ??
+          undefined,
+      )
+      : event
+  );
+
 const isEmptyUtterance = (event: HistoryEvent) => {
   if (event.type !== "own_utterance" && event.type !== "own_edit_message") {
     return false;
@@ -544,7 +561,8 @@ export const sanitizeModelOutput = (
     participantNamesFromHistory(history),
     sanitized,
   );
-  const withoutEmpty = reclassifyEmptyUtterances(withoutFabrications);
+  const withoutNoResponse = reclassifyNoResponse(withoutFabrications);
+  const withoutEmpty = reclassifyEmptyUtterances(withoutNoResponse);
   const safe = reclassifyLeakedThoughts(withoutEmpty);
   return { emit: safe, internal: safe };
 };
@@ -710,12 +728,9 @@ export const runAbstractAgent = async (
     AgentSpec,
   callModel: (history: HistoryEvent[]) => Promise<HistoryEvent[]>,
 ) => {
-  const allTools = [
-    doNothingTool,
-    ...(skills && skills.length > 0
-      ? [...tools, ...createSkillTools(skills)]
-      : tools),
-  ];
+  const allTools = skills && skills.length > 0
+    ? [...tools, ...createSkillTools(skills)]
+    : tools;
   let c = 0;
   let emojiFloodRetries = 0;
   let ephemeralHistory: HistoryEvent[] = [];
