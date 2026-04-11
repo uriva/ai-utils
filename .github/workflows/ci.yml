@@ -8,6 +8,10 @@ on:
 jobs:
   check-and-test:
     runs-on: ubuntu-latest
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
@@ -16,4 +20,4 @@ jobs:
       - name: Check
         run: deno task check
       - name: Test
-        run: deno task test
+        run: deno test -A tests/
