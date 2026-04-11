@@ -9,7 +9,9 @@ import {
   sortCompare,
   sum,
 } from "gamla";
+import { z } from "zod/v4";
 import { estimateTokens, type HistoryEvent } from "./agent.ts";
+import { geminiGenJson } from "./gemini.ts";
 
 export type HistorySegment = {
   events: HistoryEvent[];
@@ -188,3 +190,58 @@ export const eventsToPlainText: (events: HistoryEvent[]) => string = pipe(
   map(eventToPlainText),
   join("\n\n"),
 );
+
+const structuredSummarySchema = z.object({
+  entities: z.string().describe(
+    "Key people, organizations, or named things mentioned. One line per entity.",
+  ),
+  decisions: z.string().describe(
+    "Agreements, choices, or conclusions reached during the conversation.",
+  ),
+  actions: z.string().describe(
+    "Actions taken via tools or by the assistant, with outcomes.",
+  ),
+  pendingItems: z.string().describe(
+    "Open questions, unresolved requests, or next steps the user expects.",
+  ),
+  context: z.string().describe(
+    "Any other important context needed to continue the conversation coherently.",
+  ),
+});
+
+const formatStructuredSummary = ({
+  entities,
+  decisions,
+  actions,
+  pendingItems,
+  context,
+}: z.infer<typeof structuredSummarySchema>) =>
+  [
+    "Past conversation history was compacted into a structured summary.",
+    "",
+    "## Key Entities",
+    entities,
+    "",
+    "## Decisions & Agreements",
+    decisions,
+    "",
+    "## Actions Taken",
+    actions,
+    "",
+    "## Pending Items",
+    pendingItems,
+    "",
+    "## Context",
+    context,
+  ].join("\n");
+
+export const summarizeEvents = async (
+  events: HistoryEvent[],
+): Promise<string> =>
+  formatStructuredSummary(
+    await geminiGenJson(
+      { mini: false },
+      `Summarize the following conversation into structured sections. Write from the assistant's perspective. Be concise but preserve all important details, especially names, numbers, and specific facts that would be needed to continue the conversation.`,
+      structuredSummarySchema,
+    )(eventsToPlainText(events)),
+  );

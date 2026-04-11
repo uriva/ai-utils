@@ -22,6 +22,7 @@ export {
   type HistorySegment,
   partitionSegments,
   segmentHistoryEvents,
+  summarizeEvents,
 } from "./src/compaction.ts";
 export { injectCacher } from "./src/cacher.ts";
 export {
