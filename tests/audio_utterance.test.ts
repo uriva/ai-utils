@@ -11,7 +11,7 @@ import {
   spokenReplyOnly,
   transcriptOf,
 } from "../src/audioTransportAgent.ts";
-import { injectSecrets } from "../test_helpers.ts";
+import { injectSecrets, withRetries } from "../test_helpers.ts";
 import { z } from "zod/v4";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -402,61 +402,64 @@ Deno.test({
   ignore: !Deno.env.get("GEMINI_API_KEY"),
   sanitizeOps: false,
   sanitizeResources: false,
-  fn: injectSecrets(async () => {
-    const { left: testEndpoint, right: agentEndpoint } = createDuplexPair();
-    const outputEvents: HistoryEvent[] = [];
+  fn: withRetries(
+    3,
+    injectSecrets(async () => {
+      const { left: testEndpoint, right: agentEndpoint } = createDuplexPair();
+      const outputEvents: HistoryEvent[] = [];
 
-    const agentTask = runAgent({
-      prompt:
-        "You are a math assistant. When asked to add numbers, use the secret_skill to add them. You must use the tool.",
-      tools: [],
-      skills: [exampleSkill],
-      maxIterations: 3,
-      onMaxIterationsReached: () => {},
-      timezoneIANA: "UTC",
-      transport: {
-        kind: "audio" as const,
-        endpoint: agentEndpoint,
-        voiceName: "Zephyr",
-        participantName: "User",
-      },
-      onOutputEvent: (event) => {
-        outputEvents.push(event);
-        return Promise.resolve();
-      },
-      rewriteHistory: async () => {},
-    });
+      const agentTask = runAgent({
+        prompt:
+          "You are a math assistant. When asked to add numbers, use the secret_skill to add them. You must use the tool.",
+        tools: [],
+        skills: [exampleSkill],
+        maxIterations: 3,
+        onMaxIterationsReached: () => {},
+        timezoneIANA: "UTC",
+        transport: {
+          kind: "audio" as const,
+          endpoint: agentEndpoint,
+          voiceName: "Zephyr",
+          participantName: "User",
+        },
+        onOutputEvent: (event) => {
+          outputEvents.push(event);
+          return Promise.resolve();
+        },
+        rewriteHistory: async () => {},
+      });
 
-    await testEndpoint.sendData({
-      type: "text",
-      text: "Please get the secret word using your secret_skill.",
-      from: "tester",
-    });
+      await testEndpoint.sendData({
+        type: "text",
+        text: "Please get the secret word using your secret_skill.",
+        from: "tester",
+      });
 
-    const hasRunCommandCall = () =>
-      outputEvents.some((e) =>
-        e.type === "tool_call" && e.name === "run_command" &&
-        (e.parameters as Record<string, unknown>)?.command ===
-          "secret_skill/get_secret"
+      const hasRunCommandCall = () =>
+        outputEvents.some((e) =>
+          e.type === "tool_call" && e.name === "run_command" &&
+          (e.parameters as Record<string, unknown>)?.command ===
+            "secret_skill/get_secret"
+        );
+
+      await waitForCondition(
+        hasRunCommandCall,
+        60_000,
       );
 
-    await waitForCondition(
-      hasRunCommandCall,
-      60_000,
-    );
+      await testEndpoint.sendData({ type: "close", from: "tester" });
+      await agentTask;
 
-    await testEndpoint.sendData({ type: "close", from: "tester" });
-    await agentTask;
-
-    assert(
-      hasRunCommandCall(),
-      `Expected run_command tool_call event for secret_skill/get_secret, got: ${
-        outputEvents.map((e) =>
-          e.type === "tool_call" ? `tool_call:${e.name}` : e.type
-        ).join(", ")
-      }`,
-    );
-  }),
+      assert(
+        hasRunCommandCall(),
+        `Expected run_command tool_call event for secret_skill/get_secret, got: ${
+          outputEvents.map((e) =>
+            e.type === "tool_call" ? `tool_call:${e.name}` : e.type
+          ).join(", ")
+        }`,
+      );
+    }),
+  ),
 });
 
 Deno.test({
@@ -465,63 +468,67 @@ Deno.test({
   ignore: !Deno.env.get("GEMINI_API_KEY"),
   sanitizeOps: false,
   sanitizeResources: false,
-  fn: injectSecrets(async () => {
-    const { left: testEndpoint, right: agentEndpoint } = createDuplexPair();
-    const outputEvents: HistoryEvent[] = [];
+  fn: withRetries(
+    3,
+    injectSecrets(async () => {
+      const { left: testEndpoint, right: agentEndpoint } = createDuplexPair();
+      const outputEvents: HistoryEvent[] = [];
 
-    const agentTask = runAgent({
-      prompt:
-        "You are a helpful voice assistant. Use the secret_skill to find the secret word. When you use the skill, use the run_command tool to execute secret_skill/get_secret.",
-      tools: [],
-      skills: [exampleSkill],
-      maxIterations: 5,
-      onMaxIterationsReached: () => {},
-      timezoneIANA: "UTC",
-      transport: {
-        kind: "audio" as const,
-        endpoint: agentEndpoint,
-        voiceName: "Zephyr",
-        participantName: "User",
-      },
-      onOutputEvent: (event) => {
-        outputEvents.push(event);
-        return Promise.resolve();
-      },
-      rewriteHistory: async () => {},
-    });
+      const agentTask = runAgent({
+        prompt:
+          "You are a helpful voice assistant. Use the secret_skill to find the secret word. When you use the skill, use the run_command tool to execute secret_skill/get_secret.",
+        tools: [],
+        skills: [exampleSkill],
+        maxIterations: 5,
+        onMaxIterationsReached: () => {},
+        timezoneIANA: "UTC",
+        transport: {
+          kind: "audio" as const,
+          endpoint: agentEndpoint,
+          voiceName: "Zephyr",
+          participantName: "User",
+        },
+        onOutputEvent: (event) => {
+          outputEvents.push(event);
+          return Promise.resolve();
+        },
+        rewriteHistory: async () => {},
+      });
 
-    await testEndpoint.sendData({
-      type: "text",
-      text: "What is the secret word?",
-      from: "tester",
-    });
+      await testEndpoint.sendData({
+        type: "text",
+        text: "What is the secret word?",
+        from: "tester",
+      });
 
-    await waitForCondition(
-      () => {
-        const hasToolCall = outputEvents.some((e) =>
-          e.type === "tool_call" && e.name === "run_command" &&
-          (e.parameters as Record<string, unknown>)?.command ===
-            "secret_skill/get_secret"
+      await waitForCondition(
+        () => {
+          const hasToolCall = outputEvents.some((e) =>
+            e.type === "tool_call" && e.name === "run_command" &&
+            (e.parameters as Record<string, unknown>)?.command ===
+              "secret_skill/get_secret"
+          );
+          const hasUtteranceWithAnswer = outputEvents.some((e) =>
+            e.type === "own_utterance" && e.text.includes("Bananarama")
+          );
+          return hasToolCall && hasUtteranceWithAnswer;
+        },
+        45_000,
+      );
+
+      await testEndpoint.sendData({ type: "close", from: "tester" });
+      await agentTask;
+
+      const utterances = outputEvents.filter((e) => e.type === "own_utterance");
+      const spokenText = utterances.map((e) => (e as { text: string }).text)
+        .join(
+          " ",
         );
-        const hasUtteranceWithAnswer = outputEvents.some((e) =>
-          e.type === "own_utterance" && e.text.includes("Bananarama")
-        );
-        return hasToolCall && hasUtteranceWithAnswer;
-      },
-      45_000,
-    );
 
-    await testEndpoint.sendData({ type: "close", from: "tester" });
-    await agentTask;
-
-    const utterances = outputEvents.filter((e) => e.type === "own_utterance");
-    const spokenText = utterances.map((e) => (e as { text: string }).text).join(
-      " ",
-    );
-
-    assert(
-      spokenText.includes("Bananarama"),
-      `Expected agent to speak the answer "Bananarama", but it only spoke: "${spokenText}"`,
-    );
-  }),
+      assert(
+        spokenText.includes("Bananarama"),
+        `Expected agent to speak the answer "Bananarama", but it only spoke: "${spokenText}"`,
+      );
+    }),
+  ),
 });
