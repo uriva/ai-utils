@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import type { Content } from "@google/genai";
 import { z } from "zod/v4";
 import { tool } from "../mod.ts";
@@ -16,6 +16,7 @@ import {
   filterOrphanedToolResults,
   stripEmbeddedThoughtPatterns,
 } from "../src/geminiAgent.ts";
+import { isEmojiFlood } from "../src/utils.ts";
 
 Deno.test("filterOrphanedToolResults logic", () => {
   const baseAuth = { isOwn: true, id: "msg-id", timestamp: 100 } as const;
@@ -349,3 +350,115 @@ Deno.test("tool_call with non-empty thoughtSignature preserves it in API request
   }
   assert(foundFc, "Expected to find a functionCall part");
 });
+
+Deno.test("isEmojiFlood returns false for normal text", () => {
+  assertEquals(isEmojiFlood("Hello world! This is normal text."), false);
+  assertEquals(isEmojiFlood("Some emojis are fine 😀🎉👍"), false);
+});
+
+Deno.test("isEmojiFlood returns true for emoji flood", () => {
+  const flood = "😀".repeat(101);
+  assertEquals(isEmojiFlood(flood), true);
+});
+
+Deno.test("isEmojiFlood returns false at exactly 100 emojis", () => {
+  assertEquals(isEmojiFlood("😀".repeat(100)), false);
+});
+
+Deno.test(
+  "emoji flood in model response causes retry and eventual throw",
+  async () => {
+    const history: HistoryEvent[] = [];
+    const emojiFlood = "🤖".repeat(200);
+    let callCount = 0;
+
+    const mockCallModel = (_h: HistoryEvent[]): Promise<HistoryEvent[]> => {
+      callCount++;
+      return Promise.resolve([{
+        type: "own_utterance" as const,
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        isOwn: true as const,
+        text: emojiFlood,
+      }]);
+    };
+
+    await assertRejects(
+      () =>
+        injectAccessHistory(() => Promise.resolve(history))(
+          injectOutputEvent((event) => {
+            history.push(event);
+            return Promise.resolve();
+          })(runAbstractAgent),
+        )(
+          {
+            maxIterations: 10,
+            onMaxIterationsReached: () => {},
+            tools: [],
+            prompt: "test",
+            rewriteHistory: async () => {},
+            timezoneIANA: "UTC",
+          },
+          mockCallModel,
+        ),
+      Error,
+      "model keeps producing emoji flood responses",
+    );
+
+    assertEquals(callCount, 3, "should have retried exactly 3 times");
+    assertEquals(history.length, 0, "no events should have been emitted");
+  },
+);
+
+Deno.test(
+  "emoji flood recovery: model succeeds after initial flood",
+  async () => {
+    const history: HistoryEvent[] = [];
+    let callCount = 0;
+
+    const mockCallModel = (_h: HistoryEvent[]): Promise<HistoryEvent[]> => {
+      callCount++;
+      if (callCount <= 2) {
+        return Promise.resolve([{
+          type: "own_utterance" as const,
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          isOwn: true as const,
+          text: "🤖".repeat(200),
+        }]);
+      }
+      return Promise.resolve([{
+        type: "own_utterance" as const,
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        isOwn: true as const,
+        text: "A normal response",
+      }]);
+    };
+
+    await injectAccessHistory(() => Promise.resolve(history))(
+      injectOutputEvent((event) => {
+        history.push(event);
+        return Promise.resolve();
+      })(runAbstractAgent),
+    )(
+      {
+        maxIterations: 10,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        prompt: "test",
+        rewriteHistory: async () => {},
+        timezoneIANA: "UTC",
+      },
+      mockCallModel,
+    );
+
+    assertEquals(callCount, 3, "should have called model 3 times");
+    assertEquals(history.length, 1, "should have emitted the normal response");
+    const emitted = history[0];
+    assertEquals(emitted.type, "own_utterance");
+    if (emitted.type === "own_utterance") {
+      assertEquals(emitted.text, "A normal response");
+    }
+  },
+);

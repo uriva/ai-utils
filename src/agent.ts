@@ -6,6 +6,7 @@ import {
   hasInternalSentTimestampSuffix,
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
+import { isEmojiFlood } from "./utils.ts";
 export type MediaAttachment =
   | { kind: "inline"; mimeType: string; dataBase64: string; caption?: string }
   | { kind: "file"; mimeType: string; fileUri: string; caption?: string };
@@ -671,6 +672,11 @@ export type AgentSpec = {
   };
 };
 
+const hasEmojiFlood = (events: HistoryEvent[]) =>
+  events.some((e) => e.type === "own_utterance" && isEmojiFlood(e.text));
+
+const maxEmojiFloodRetries = 3;
+
 export const runAbstractAgent = async (
   { maxIterations, tools, skills, onMaxIterationsReached, prompt: _prompt }:
     AgentSpec,
@@ -680,6 +686,7 @@ export const runAbstractAgent = async (
     ? [...tools, ...createSkillTools(skills)]
     : tools;
   let c = 0;
+  let emojiFloodRetries = 0;
   let ephemeralHistory: HistoryEvent[] = [];
   while (true) {
     if (await shouldAbort()) return;
@@ -694,6 +701,16 @@ export const runAbstractAgent = async (
     const modelResponse = await timeit(reportTimeElapsedMs, callModel)(
       effectiveHistory,
     );
+    if (hasEmojiFlood(modelResponse)) {
+      emojiFloodRetries++;
+      console.warn(
+        `[emoji-flood] detected emoji flood in model response (attempt ${emojiFloodRetries}/${maxEmojiFloodRetries})`,
+      );
+      if (emojiFloodRetries >= maxEmojiFloodRetries) {
+        throw new Error("model keeps producing emoji flood responses");
+      }
+      continue;
+    }
     const { emit, internal } = sanitizeModelOutput(
       effectiveHistory,
       modelResponse,

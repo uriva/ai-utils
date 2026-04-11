@@ -35,3 +35,11 @@ export const isRateLimitError = (error: unknown) => errorStatus(error) === 429;
 
 export const isRetryableError = (error: unknown) =>
   isServerError(error) || isRateLimitError(error);
+
+const emojiPattern =
+  /\p{Emoji_Presentation}|\p{Extended_Pictographic}|\p{Regional_Indicator}/gu;
+
+const maxEmojis = 100;
+
+export const isEmojiFlood = (text: string) =>
+  (text.match(emojiPattern)?.length ?? 0) > maxEmojis;
