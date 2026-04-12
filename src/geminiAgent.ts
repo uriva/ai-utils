@@ -16,6 +16,7 @@ import {
   pipe,
   sum,
 } from "gamla";
+import { isRetryableError } from "./utils.ts";
 import type { ZodType } from "zod/v4";
 import {
   type AgentSpec,
@@ -63,10 +64,6 @@ const normalizeError = (error: unknown): Error => {
   }
   return new Error(String(error));
 };
-
-const isServerError = (error: unknown) =>
-  error instanceof Error && "status" in error &&
-  (error as { status: number }).status >= 500;
 
 const alternateModel = (model: string) =>
   model === geminiProVersion
@@ -287,7 +284,7 @@ const rawCallGemini = async ({
   });
 };
 
-const callGeminiWithRetry = conditionalRetry(isServerError)(
+const callGeminiWithRetry = conditionalRetry(isRetryableError)(
   1000,
   4,
   rawCallGemini,
@@ -298,7 +295,7 @@ const callGemini = (
   disableStreaming?: boolean,
 ): Promise<GeminiOutput> =>
   callGeminiWithRetry({ req, disableStreaming }).catch((err) => {
-    if (!isServerError(err)) throw err;
+    if (!isRetryableError(err)) throw err;
     return rawCallGemini({
       req: {
         ...req,
