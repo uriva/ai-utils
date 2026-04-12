@@ -292,7 +292,15 @@ export const callToResult =
     if (!parseResult.ok) {
       return {
         toolCallId,
-        result: `Invalid arguments: ${JSON.stringify(parseResult.error)}`,
+        result: `Invalid arguments: ${
+          parseResult.error instanceof z.ZodError
+            ? parseResult.error.issues
+              .map((i) =>
+                `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
+              )
+              .join(", ")
+            : parseResult.error.message
+        }`,
       };
     }
     const out = await handler(parseResult.result, toolCallId ?? "");
@@ -302,7 +310,13 @@ export const callToResult =
       throw new Error(
         `Tool "${name}" handler returned invalid value (args: ${
           JSON.stringify(args)
-        }): ${JSON.stringify(parsed.error)}`,
+        }): ${
+          parsed.error instanceof z.ZodError
+            ? parsed.error.issues.map((i) =>
+              `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
+            ).join(", ")
+            : parsed.error.message
+        }`,
       );
     }
     const validated = parsed.result;
@@ -655,7 +669,13 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         }
         const parseResult = parseWithCatch(tool.parameters, params);
         if (!parseResult.ok) {
-          return `Invalid parameters for ${fullToolName}: ${parseResult.error.message}`;
+          return `Invalid parameters for ${fullToolName}: ${
+            parseResult.error instanceof z.ZodError
+              ? parseResult.error.issues.map((i) =>
+                `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
+              ).join(", ")
+              : parseResult.error.message
+          }`;
         }
         return await tool.handler(parseResult.result, toolCallId);
       },
