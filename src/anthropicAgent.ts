@@ -88,6 +88,16 @@ type AnthropicOutputPart =
     thinkingContent?: string;
   };
 
+type StreamingOutputPart =
+  | { type: "text"; text: string; index: number }
+  | {
+    type: "function_call";
+    id: string;
+    name: string;
+    input: string;
+    index: number;
+  };
+
 type AnthropicRequestParams = {
   model: string;
   system: string;
@@ -354,6 +364,36 @@ const toolResultIdsInMessage = (
       : [],
   );
 
+const toContentBlocks = (
+  content: Anthropic.Messages.MessageParam["content"],
+): Anthropic.Messages.ContentBlockParam[] =>
+  typeof content === "string"
+    ? [{ type: "text" as const, text: content }]
+    : content;
+
+const isToolResultBlock = (
+  block: Anthropic.Messages.ContentBlockParam,
+): block is Anthropic.Messages.ToolResultBlockParam =>
+  "type" in block && block.type === "tool_result";
+
+const orderToolResultsFirst = (
+  useIds: string[],
+  content: Anthropic.Messages.MessageParam["content"],
+): Anthropic.Messages.ContentBlockParam[] => {
+  const blocks = toContentBlocks(content);
+  const toolResults = blocks.filter(isToolResultBlock);
+  const prioritized = useIds.flatMap((id) =>
+    toolResults.filter((block) => block.tool_use_id === id)
+  );
+  const prioritizedIds = new Set(prioritized.map((block) => block.tool_use_id));
+  return [
+    ...prioritized,
+    ...blocks.filter((block) =>
+      !isToolResultBlock(block) || !prioritizedIds.has(block.tool_use_id)
+    ),
+  ];
+};
+
 const syntheticToolResult = (
   toolUseId: string,
 ): Anthropic.Messages.ToolResultBlockParam => ({
@@ -396,21 +436,28 @@ const ensureToolResultsForToolUses = (
     const next = cleaned[i + 1];
     const existingIds = next ? toolResultIdsInMessage(next) : new Set();
     const missingIds = useIds.filter((id) => !existingIds.has(id));
-    if (empty(missingIds)) continue;
-    const synthetics = missingIds.map(syntheticToolResult);
     if (next && next.role === "user") {
-      const existing = Array.isArray(next.content)
-        ? next.content
-        : [{ type: "text" as const, text: next.content }];
+      const existing = orderToolResultsFirst(useIds, next.content);
+      if (empty(missingIds)) {
+        cleaned[i + 1] = {
+          role: "user",
+          content: existing,
+        };
+        continue;
+      }
       cleaned[i + 1] = {
         role: "user",
         content: [
-          ...synthetics,
+          ...missingIds.map(syntheticToolResult),
           ...existing,
         ] as Anthropic.Messages.ContentBlockParam[],
       };
     } else {
-      result.push({ role: "user", content: synthetics });
+      if (empty(missingIds)) continue;
+      result.push({
+        role: "user",
+        content: missingIds.map(syntheticToolResult),
+      });
     }
   }
   return result;
@@ -537,58 +584,85 @@ const rawCallAnthropic = async ({
     system,
   } as Anthropic.Messages.MessageCreateParamsStreaming);
 
-  const accumulatedText: string[] = [];
   const accumulatedThinking: string[] = [];
-  const toolCalls = new Map<
-    string,
-    { id: string; name: string; input: string }
-  >();
+  const parts = new Map<number, StreamingOutputPart>();
   let currentToolId: string | null = null;
+  let currentToolIndex: number | null = null;
+  let currentTextIndex: number | null = null;
 
   for await (const event of stream) {
     if (event.type === "content_block_start") {
       const block = event.content_block;
+      if (block.type === "text") {
+        currentTextIndex = event.index;
+        parts.set(event.index, {
+          type: "text",
+          text: block.text,
+          index: event.index,
+        });
+      }
       if (block.type === "tool_use") {
         currentToolId = block.id;
-        toolCalls.set(block.id, { id: block.id, name: block.name, input: "" });
+        currentToolIndex = event.index;
+        parts.set(event.index, {
+          type: "function_call",
+          id: block.id,
+          name: block.name,
+          input: "",
+          index: event.index,
+        });
       }
     } else if (event.type === "content_block_delta") {
       const delta = event.delta;
       if (delta.type === "text_delta") {
         await handleStreamChunk(delta.text);
-        accumulatedText.push(delta.text);
+        if (currentTextIndex !== null) {
+          const existing = parts.get(currentTextIndex);
+          if (existing?.type === "text") {
+            existing.text += delta.text;
+          }
+        }
       } else if (delta.type === "thinking_delta") {
         accumulatedThinking.push(delta.thinking);
       } else if (delta.type === "input_json_delta" && currentToolId) {
-        const existing = toolCalls.get(currentToolId);
-        if (existing) {
+        const existing = currentToolIndex !== null
+          ? parts.get(currentToolIndex)
+          : undefined;
+        if (
+          existing?.type === "function_call" && existing.id === currentToolId
+        ) {
           existing.input += delta.partial_json;
         }
       }
     } else if (event.type === "content_block_stop") {
       currentToolId = null;
+      currentToolIndex = null;
+      currentTextIndex = null;
     }
   }
 
   const thinkingContent = accumulatedThinking.join("") || undefined;
 
-  if (toolCalls.size > 0) {
-    return Array.from(toolCalls.values()).map((
-      tc,
-    ): AnthropicOutputPart => ({
-      type: "function_call",
-      id: tc.id,
-      name: tc.name,
-      arguments: JSON.parse(tc.input || "{}"),
-      thinkingContent,
-    }));
-  }
+  const output = Array.from(parts.values())
+    .sort((a, b) => a.index - b.index)
+    .map((part): AnthropicOutputPart =>
+      part.type === "text"
+        ? {
+          type: "text",
+          text: part.text,
+          thinkingContent,
+        }
+        : {
+          type: "function_call",
+          id: part.id,
+          name: part.name,
+          arguments: JSON.parse(part.input || "{}"),
+          thinkingContent,
+        }
+    )
+    .filter((part) => part.type !== "text" || part.text);
 
-  return [{
-    type: "text",
-    text: accumulatedText.join(""),
-    thinkingContent,
-  }];
+  return output.length > 0 ? output : [{ type: "text", text: "" }];
 };
 
 const callAnthropicWithRetry = conditionalRetry(isRetryableError)(

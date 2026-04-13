@@ -17,6 +17,7 @@ import {
   noopRewriteHistory,
   someTool,
   toolResult,
+  withRetries,
 } from "../test_helpers.ts";
 
 Deno.test(
@@ -303,6 +304,170 @@ runForAllProviders(
       timezoneIANA: "UTC",
     });
   },
+);
+
+runForAllProviders(
+  "handles orphaned tool_results between assistant messages without crashing",
+  async (runAgent) => {
+    const now = Date.now();
+    const toolCallId1 = crypto.randomUUID();
+    const toolCallId2 = crypto.randomUUID();
+    const orphanedId1 = crypto.randomUUID();
+    const orphanedId2 = crypto.randomUUID();
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Save contact John and look up info.",
+      }),
+      {
+        type: "tool_call",
+        isOwn: true,
+        timestamp: now,
+        name: "doSomethingUnique",
+        parameters: { foo: "bar" },
+        id: toolCallId1,
+      },
+      {
+        type: "tool_result",
+        isOwn: true,
+        timestamp: now + 1,
+        result: "orphaned result",
+        toolCallId: orphanedId1,
+        id: crypto.randomUUID(),
+      },
+      ownUtteranceTurn("I found the information."),
+      {
+        type: "tool_result",
+        isOwn: true,
+        timestamp: now + 3,
+        result: "another orphaned result",
+        toolCallId: orphanedId2,
+        id: crypto.randomUUID(),
+      },
+      {
+        type: "tool_call",
+        isOwn: true,
+        timestamp: now + 4,
+        name: "doSomethingUnique",
+        parameters: { foo: "baz" },
+        id: toolCallId2,
+      },
+      {
+        type: "tool_result",
+        isOwn: true,
+        timestamp: now + 5,
+        result: "valid result",
+        toolCallId: toolCallId2,
+        id: crypto.randomUUID(),
+      },
+      participantUtteranceTurn({
+        name: "user",
+        text: "What did you find?",
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [someTool],
+      prompt: "You are an AI assistant.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  },
+);
+
+runForAllProviders(
+  "does not throw when tool_result is not adjacent in raw history",
+  async (runAgent) => {
+    const now = Date.now();
+    const toolCallId = crypto.randomUUID();
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Save contact John.",
+      }),
+      {
+        type: "tool_call",
+        isOwn: true,
+        timestamp: now,
+        name: "doSomethingUnique",
+        parameters: {},
+        id: toolCallId,
+      },
+      participantUtteranceTurn({
+        name: "user",
+        text: "Additional context before the tool result.",
+      }),
+      {
+        type: "tool_result",
+        isOwn: true,
+        timestamp: now + 1,
+        result: toolResult,
+        toolCallId,
+        id: crypto.randomUUID(),
+      },
+      participantUtteranceTurn({
+        name: "user",
+        text: "What was the result?",
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [someTool],
+      prompt: "You are an AI assistant.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  },
+);
+
+Deno.test(
+  "anthropic streams text before tool calls when the model explains first",
+  injectSecrets(withRetries(3, async () => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text:
+          "First explain what you are about to do in one short sentence, then call the doSomethingUnique tool.",
+      }),
+    ];
+    let streamedText = "";
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 5,
+      onMaxIterationsReached: () => {},
+      tools: [someTool],
+      prompt:
+        "You are an AI assistant. Before any tool call, first say exactly 'Checking now.' in a normal message, then call the tool.",
+      onStreamChunk: (chunk) => {
+        streamedText += chunk;
+      },
+      provider: "anthropic",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+
+    const firstTextIndex = mockHistory.findIndex((event) =>
+      event.type === "own_utterance" && event.text.includes("Checking now")
+    );
+    const firstToolIndex = mockHistory.findIndex((event) =>
+      event.type === "tool_call" && event.name === someTool.name
+    );
+
+    assert(firstTextIndex >= 0, "AI should emit the pre-tool text message");
+    assert(firstToolIndex >= 0, "AI should call the tool");
+    assert(
+      firstTextIndex < firstToolIndex,
+      "Pre-tool text should come before the tool call",
+    );
+    assert(
+      streamedText.includes("Checking now"),
+      `Expected stream to include pre-tool text, got: ${streamedText}`,
+    );
+  })),
 );
 
 runForAllProviders(
