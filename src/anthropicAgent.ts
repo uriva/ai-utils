@@ -108,6 +108,9 @@ type AnthropicRequestParams = {
   thinking?: { type: "enabled"; budget_tokens: number };
 };
 
+const anthropicThinkingBudget = (maxTokens: number) =>
+  Math.max(1024, Math.min(10000, maxTokens - 1));
+
 type AnthropicMediaType =
   | "image/jpeg"
   | "image/png"
@@ -500,6 +503,9 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
 
   const effectiveMaxTokens = maxOutputTokens ?? 16000;
   const thinkingEnabled = effectiveMaxTokens > 1024;
+  const thinkingBudget = thinkingEnabled
+    ? anthropicThinkingBudget(effectiveMaxTokens)
+    : undefined;
 
   // When thinking is enabled, Anthropic does not allow assistant prefill
   // (last message must be from user)
@@ -518,8 +524,10 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
     messages,
     stream: false,
     max_tokens: effectiveMaxTokens,
-    ...(thinkingEnabled
-      ? { thinking: { type: "enabled" as const, budget_tokens: 10000 } }
+    ...(thinkingEnabled && thinkingBudget
+      ? {
+        thinking: { type: "enabled" as const, budget_tokens: thinkingBudget },
+      }
       : {}),
     ...(allTools.length > 0 ? { tools: allTools.map(actionToTool) } : {}),
   };

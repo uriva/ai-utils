@@ -36,3 +36,32 @@ Deno.test(
     );
   })),
 );
+
+Deno.test(
+  "anthropic agent works when thinking is enabled with a small maxOutputTokens",
+  injectSecrets(withRetries(3, async () => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "What is 13 * 17? Think step by step, then give the answer.",
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runWithProvider("anthropic"))({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "You are a helpful assistant. Think carefully before answering.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+      maxOutputTokens: 2048,
+    });
+
+    const answer = findTextualAnswer(mockHistory);
+    assert(answer, "Expected an own_utterance response from Anthropic");
+    assert(
+      answer.text.includes("221"),
+      `Expected answer to contain '221' but got: "${answer.text}"`,
+    );
+  })),
+);
