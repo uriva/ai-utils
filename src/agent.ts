@@ -725,7 +725,7 @@ export type AgentSpec = {
   onMaxIterationsReached: () => any;
   lightModel?: boolean;
   disableStreaming?: boolean;
-  provider?: "google" | "moonshot";
+  provider?: "google" | "moonshot" | "anthropic";
   imageGen?: boolean;
   rewriteHistory: (replacements: Record<string, HistoryEvent>) => Promise<void>;
   timezoneIANA: string;

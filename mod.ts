@@ -4,6 +4,7 @@ import {
   injectStreamChunk,
   runAbstractAgent,
 } from "./src/agent.ts";
+import { anthropicAgentCaller } from "./src/anthropicAgent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
 import { geminiAgentCaller } from "./src/geminiAgent.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
@@ -39,6 +40,7 @@ export {
   type TokenUsage,
 } from "./src/geminiAgent.ts";
 export { injectKimiToken } from "./src/kimiAgent.ts";
+export { injectAnthropicToken } from "./src/anthropicAgent.ts";
 export {
   injectOpenAiToken,
   openAiGenJson,
@@ -65,6 +67,11 @@ const getCaller = (
 ) => Promise<import("./src/agent.ts").HistoryEvent[]> => {
   if (spec.provider === "moonshot") {
     return kimiAgentCaller(spec) as (
+      history: import("./src/agent.ts").HistoryEvent[],
+    ) => Promise<import("./src/agent.ts").HistoryEvent[]>;
+  }
+  if (spec.provider === "anthropic") {
+    return anthropicAgentCaller(spec) as (
       history: import("./src/agent.ts").HistoryEvent[],
     ) => Promise<import("./src/agent.ts").HistoryEvent[]>;
   }

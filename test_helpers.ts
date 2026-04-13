@@ -2,6 +2,7 @@ import type { Injector } from "@uri/inject";
 import { pipe } from "gamla";
 import { z } from "zod/v4";
 import {
+  injectAnthropicToken,
   injectCacher,
   injectGeminiToken,
   injectKimiToken,
@@ -25,6 +26,7 @@ export const injectSecrets = pipe(
   ),
   injectGeminiToken(Deno.env.get("GEMINI_API_KEY") ?? ""),
   injectKimiToken(Deno.env.get("KIMI_API_KEY") ?? ""),
+  injectAnthropicToken(Deno.env.get("ANTHROPIC_API_KEY") ?? ""),
 );
 
 export const agentDeps = (inMemoryHistory: HistoryEvent[]): Injector =>
@@ -38,7 +40,7 @@ export const agentDeps = (inMemoryHistory: HistoryEvent[]): Injector =>
 
 // Run agent with a specific provider
 export const runWithProvider =
-  (provider: "google" | "moonshot" | undefined) =>
+  (provider: "google" | "moonshot" | "anthropic" | undefined) =>
   (spec: AgentSpec): Promise<void> => runAgent({ ...spec, provider });
 
 // Run the same test with both Google and Moonshot providers

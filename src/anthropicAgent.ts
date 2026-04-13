@@ -1,0 +1,632 @@
+import Anthropic from "@anthropic-ai/sdk";
+import { context, type Injection, type Injector } from "@uri/inject";
+import { conditionalRetry, empty, map, sum } from "gamla";
+import type { ZodType } from "zod/v4";
+import { zodToGeminiParameters } from "./gemini.ts";
+import {
+  type AgentSpec,
+  createSkillTools,
+  doNothingEvent,
+  estimateTokens,
+  generateId,
+  getStreamChunk,
+  type HistoryEventWithMetadata,
+  type MediaAttachment,
+  type MessageId,
+  ownThoughtTurnWithMetadata,
+  ownUtteranceTurnWithMetadata,
+  type Tool,
+  toolUseTurnWithMetadata,
+} from "./agent.ts";
+import {
+  appendInternalSentTimestamp,
+  stripInternalSentTimestampSuffix,
+} from "./internalMessageMetadata.ts";
+import { isRetryableError, normalizeError } from "./utils.ts";
+
+import { encodeBase64 } from "@std/encoding/base64";
+
+const fetchFileAttachment = async (
+  attachment: MediaAttachment,
+): Promise<string | null> => {
+  if (attachment.kind !== "file" || !attachment.fileUri) return null;
+
+  try {
+    const response = await fetch(attachment.fileUri);
+    if (!response.ok) {
+      console.error(`Failed to fetch attachment: ${response.status}`);
+      return null;
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    return encodeBase64(new Uint8Array(arrayBuffer));
+  } catch (e) {
+    console.error("Error fetching file attachment:", e);
+    return null;
+  }
+};
+
+const anthropicApiKeyInjection: Injection<() => string> = context(
+  (): string => {
+    throw new Error("no anthropic API key injected");
+  },
+);
+
+export const injectAnthropicToken = (token: string): Injector =>
+  anthropicApiKeyInjection.inject(() => token);
+
+const anthropicModel = (lightModel?: boolean) =>
+  lightModel ? "claude-sonnet-4-6" : "claude-opus-4-6";
+
+const isTokenLimitExceeded = (error: Error) =>
+  "status" in error && (error as { status: number }).status === 400 &&
+  (error.message.includes("too long") ||
+    error.message.includes("token") ||
+    error.message.includes("max_tokens"));
+
+const dropOldestHalf = <T extends { type: string }>(events: T[]): T[] => {
+  if (events.length <= 2) return events;
+  const half = Math.floor(events.length / 2);
+  return events.slice(half);
+};
+
+type AnthropicMetadata = {
+  type: "anthropic";
+  responseId: string;
+  thinkingContent?: string | null;
+};
+
+type AnthropicHistoryEvent = HistoryEventWithMetadata<AnthropicMetadata>;
+
+type AnthropicOutputPart =
+  | { type: "text"; text: string; thinkingContent?: string }
+  | {
+    type: "function_call";
+    name: string;
+    arguments: Record<string, unknown>;
+    id?: string;
+    thinkingContent?: string;
+  };
+
+type AnthropicRequestParams = {
+  model: string;
+  system: string;
+  messages: Anthropic.Messages.MessageParam[];
+  tools?: Anthropic.Messages.Tool[];
+  max_tokens: number;
+  stream: boolean;
+};
+
+type AnthropicMediaType =
+  | "image/jpeg"
+  | "image/png"
+  | "image/gif"
+  | "image/webp";
+
+const isImageMimeType = (
+  mimeType: string,
+): mimeType is AnthropicMediaType =>
+  ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(mimeType);
+
+const attachmentsToContentBlocks = async (
+  attachments?: MediaAttachment[],
+): Promise<Anthropic.Messages.ContentBlockParam[] | undefined> => {
+  if (!attachments || empty(attachments)) return undefined;
+
+  const blocks: Anthropic.Messages.ContentBlockParam[] = [];
+
+  for (const att of attachments) {
+    if (att.kind === "inline") {
+      if (isImageMimeType(att.mimeType)) {
+        blocks.push({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: att.mimeType,
+            data: att.dataBase64,
+          },
+        });
+      } else {
+        blocks.push({
+          type: "text",
+          text: `[Attachment: ${att.caption || att.mimeType}]`,
+        });
+      }
+    } else if (att.kind === "file" && att.fileUri) {
+      const base64 = await fetchFileAttachment(att);
+      if (base64 && isImageMimeType(att.mimeType)) {
+        blocks.push({
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: att.mimeType,
+            data: base64,
+          },
+        });
+      } else {
+        blocks.push({
+          type: "text",
+          text: `[File: ${att.caption || att.fileUri}]`,
+        });
+      }
+    }
+  }
+
+  return blocks;
+};
+
+const historyEventToMessage = (
+  eventById: (id: string) => AnthropicHistoryEvent | undefined,
+  timezoneIANA: string,
+) =>
+async (
+  e: AnthropicHistoryEvent,
+): Promise<Anthropic.Messages.MessageParam[]> => {
+  const getRefText = (onMessage: MessageId): string => {
+    const msg = eventById(onMessage);
+    return typeof msg === "object" && "text" in msg ? msg.text : "";
+  };
+
+  const stampText = (text: string) =>
+    appendInternalSentTimestamp(text, e.timestamp, timezoneIANA);
+
+  if (
+    e.type === "participant_utterance" || e.type === "participant_edit_message"
+  ) {
+    const text = e.type === "participant_edit_message"
+      ? `${e.name} edited message "${
+        getRefText(e.onMessage).slice(0, 100)
+      }" to: ${e.text}`
+      : e.text
+      ? `${e.name}: ${e.text}`
+      : "";
+
+    const contentBlocks = await attachmentsToContentBlocks(e.attachments);
+
+    if (contentBlocks && contentBlocks.length > 0) {
+      const textBlock: Anthropic.Messages.TextBlockParam = {
+        type: "text",
+        text: stampText(text) || "<message with attachments>",
+      };
+      return [{
+        role: "user",
+        content: [textBlock, ...contentBlocks],
+      }];
+    }
+
+    return [{ role: "user", content: stampText(text) }];
+  }
+
+  if (e.type === "own_utterance" || e.type === "own_edit_message") {
+    const text = e.type === "own_edit_message"
+      ? `You edited message "${
+        getRefText(e.onMessage).slice(0, 100)
+      }" to: ${e.text}`
+      : e.text;
+
+    const contentBlocks = await attachmentsToContentBlocks(e.attachments);
+    const attachmentDescriptions = contentBlocks
+      ? contentBlocks
+        .filter((p): p is Anthropic.Messages.TextBlockParam =>
+          p.type === "text"
+        )
+        .map((p) => p.text)
+        .join("\n")
+      : "";
+
+    const fullContent = attachmentDescriptions
+      ? `${text || ""}\n${attachmentDescriptions}`.trim()
+      : (text || "");
+
+    return [{ role: "assistant", content: fullContent || " " }];
+  }
+
+  if (e.type === "tool_call") {
+    return [{
+      role: "assistant",
+      content: [{
+        type: "tool_use",
+        id: e.id,
+        name: e.name,
+        input: e.parameters as Record<string, unknown>,
+      } as Anthropic.Messages.ToolUseBlockParam],
+    }];
+  }
+
+  if (e.type === "tool_result") {
+    return [{
+      role: "user",
+      content: [{
+        type: "tool_result",
+        tool_use_id: e.toolCallId || e.id,
+        content: stampText(e.result),
+      } as Anthropic.Messages.ToolResultBlockParam],
+    }];
+  }
+
+  if (e.type === "own_thought") {
+    return e.modelMetadata
+      ? []
+      : [{ role: "user", content: `[System notification: ${e.text}]` }];
+  }
+
+  if (e.type === "own_reaction") {
+    return [{
+      role: "assistant",
+      content: `You reacted ${e.reaction} to message: ${
+        getRefText(e.onMessage).slice(0, 100)
+      }`,
+    }];
+  }
+
+  if (e.type === "participant_reaction") {
+    return [{
+      role: "user",
+      content: `${e.name} reacted ${e.reaction} to message: ${
+        getRefText(e.onMessage).slice(0, 100)
+      }`,
+    }];
+  }
+
+  if (e.type === "do_nothing") {
+    return [{
+      role: "assistant",
+      content: " ",
+    }];
+  }
+
+  throw new Error(
+    `Unknown history event type: ${JSON.stringify(e, null, 2)}`,
+  );
+};
+
+const actionToTool = (
+  { name, description, parameters }: Tool<ZodType>,
+): Anthropic.Messages.Tool => {
+  const schema = zodToGeminiParameters(parameters);
+  return {
+    name,
+    description,
+    input_schema: schema as unknown as Anthropic.Messages.Tool.InputSchema,
+  };
+};
+
+type BuildReqFn = (
+  events: AnthropicHistoryEvent[],
+) => Promise<AnthropicRequestParams>;
+
+const mergeConsecutiveSameRole = (
+  messages: Anthropic.Messages.MessageParam[],
+): Anthropic.Messages.MessageParam[] => {
+  if (messages.length === 0) return messages;
+
+  const merged: Anthropic.Messages.MessageParam[] = [messages[0]];
+
+  for (let i = 1; i < messages.length; i++) {
+    const prev = merged[merged.length - 1];
+    const curr = messages[i];
+
+    if (prev.role === curr.role) {
+      const prevContent = typeof prev.content === "string"
+        ? [{ type: "text" as const, text: prev.content }]
+        : prev.content;
+      const currContent = typeof curr.content === "string"
+        ? [{ type: "text" as const, text: curr.content }]
+        : curr.content;
+      merged[merged.length - 1] = {
+        role: prev.role,
+        content: [...prevContent, ...currContent],
+      };
+    } else {
+      merged.push(curr);
+    }
+  }
+
+  return merged;
+};
+
+const buildReq = (
+  systemPrompt: string,
+  tools: Tool<ZodType>[],
+  skills: AgentSpec["skills"],
+  timezoneIANA: string,
+  maxOutputTokens: number | undefined,
+  lightModel: boolean | undefined,
+): BuildReqFn =>
+async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
+  const eventById = (id: MessageId) => events.find((e) => e.id === id);
+
+  const filteredEvents = events.filter((e) => e.type !== "do_nothing");
+
+  const rawMessages: Anthropic.Messages.MessageParam[] = (await Promise.all(
+    filteredEvents.map(historyEventToMessage(eventById, timezoneIANA)),
+  )).flat();
+
+  const merged = mergeConsecutiveSameRole(rawMessages);
+
+  // Anthropic requires the first message to be from the user
+  const messages = merged.length > 0 && merged[0].role !== "user"
+    ? [{ role: "user" as const, content: "<conversation started>" }, ...merged]
+    : merged;
+
+  const allTools = skills && skills.length > 0
+    ? [...tools, ...createSkillTools(skills)]
+    : tools;
+
+  return {
+    model: anthropicModel(lightModel),
+    system: systemPrompt,
+    messages,
+    stream: false,
+    max_tokens: maxOutputTokens ?? 4096,
+    ...(allTools.length > 0 ? { tools: allTools.map(actionToTool) } : {}),
+  };
+};
+
+const rawCallAnthropic = async ({
+  req,
+  disableStreaming,
+}: {
+  req: AnthropicRequestParams;
+  disableStreaming?: boolean;
+}): Promise<AnthropicOutputPart[]> => {
+  const handleStreamChunk = getStreamChunk();
+
+  const client = new Anthropic({
+    apiKey: anthropicApiKeyInjection.access(),
+  });
+
+  if (disableStreaming) {
+    const { system, stream: _stream, ...rest } = req;
+    const response = await client.messages.create({
+      ...rest,
+      system,
+      stream: false,
+    } as Anthropic.Messages.MessageCreateParamsNonStreaming);
+
+    const parts: AnthropicOutputPart[] = [];
+
+    for (const block of response.content) {
+      if (block.type === "text") {
+        if (block.text) {
+          await handleStreamChunk(block.text);
+        }
+        parts.push({ type: "text", text: block.text });
+      } else if (block.type === "tool_use") {
+        parts.push({
+          type: "function_call",
+          id: block.id,
+          name: block.name,
+          arguments: block.input as Record<string, unknown>,
+        });
+      }
+    }
+
+    return parts.length > 0 ? parts : [{ type: "text", text: "" }];
+  }
+
+  // Streaming mode
+  const { system, stream: _stream, ...rest } = req;
+  const stream = client.messages.stream({
+    ...rest,
+    system,
+  } as Anthropic.Messages.MessageCreateParamsStreaming);
+
+  const accumulatedText: string[] = [];
+  const toolCalls = new Map<
+    string,
+    { id: string; name: string; input: string }
+  >();
+  let currentToolId: string | null = null;
+
+  for await (const event of stream) {
+    if (event.type === "content_block_start") {
+      const block = event.content_block;
+      if (block.type === "tool_use") {
+        currentToolId = block.id;
+        toolCalls.set(block.id, { id: block.id, name: block.name, input: "" });
+      }
+    } else if (event.type === "content_block_delta") {
+      const delta = event.delta;
+      if (delta.type === "text_delta") {
+        await handleStreamChunk(delta.text);
+        accumulatedText.push(delta.text);
+      } else if (delta.type === "input_json_delta" && currentToolId) {
+        const existing = toolCalls.get(currentToolId);
+        if (existing) {
+          existing.input += delta.partial_json;
+        }
+      }
+    } else if (event.type === "content_block_stop") {
+      currentToolId = null;
+    }
+  }
+
+  if (toolCalls.size > 0) {
+    return Array.from(toolCalls.values()).map((
+      tc,
+    ): AnthropicOutputPart => ({
+      type: "function_call",
+      id: tc.id,
+      name: tc.name,
+      arguments: JSON.parse(tc.input || "{}"),
+    }));
+  }
+
+  return [{ type: "text", text: accumulatedText.join("") }];
+};
+
+const callAnthropicWithRetry = conditionalRetry(isRetryableError)(
+  1000,
+  4,
+  rawCallAnthropic,
+);
+
+const callAnthropic = async (
+  req: AnthropicRequestParams,
+  disableStreaming?: boolean,
+): Promise<AnthropicOutputPart[]> => {
+  try {
+    return await callAnthropicWithRetry({ req, disableStreaming });
+  } catch (error) {
+    const err = normalizeError(error);
+    if (isRetryableError(err)) {
+      return rawCallAnthropic({ req, disableStreaming });
+    }
+    throw err;
+  }
+};
+
+const callAnthropicWithFixHistory = (
+  _rewriteHistory: AgentSpec["rewriteHistory"],
+  eventsToRequest: BuildReqFn,
+  disableStreaming?: boolean,
+) =>
+async (events: AnthropicHistoryEvent[]): Promise<AnthropicOutputPart[]> => {
+  try {
+    return await callAnthropic(
+      await eventsToRequest(events),
+      disableStreaming,
+    );
+  } catch (error) {
+    const err = normalizeError(error);
+
+    if (isTokenLimitExceeded(err)) {
+      const totalTokens = sum(map(estimateTokens)(events));
+      console.warn(
+        `Token limit exceeded (estimated ${totalTokens} tokens, ${events.length} events). Dropping oldest half.`,
+      );
+      const truncated = dropOldestHalf(events);
+      if (truncated.length === events.length) throw err;
+      return callAnthropic(
+        await eventsToRequest(truncated),
+        disableStreaming,
+      );
+    }
+
+    throw err;
+  }
+};
+
+export const noResponseTag = "<no response>";
+
+const didNothing = (output: AnthropicOutputPart[]) =>
+  output.length === 0 ||
+  (output.length === 1 &&
+    output[0].type === "text" &&
+    (!output[0].text.replace(/[\s\u200B\u200C\u200D\uFEFF]/g, "") ||
+      output[0].text.trim().toLowerCase() === noResponseTag));
+
+const anthropicOutputPartToHistoryEvents =
+  (responseId: string) => (p: AnthropicOutputPart): AnthropicHistoryEvent[] => {
+    const metadata: AnthropicMetadata = {
+      type: "anthropic",
+      responseId,
+      thinkingContent: p.thinkingContent,
+    };
+
+    const thoughtEvent = p.thinkingContent
+      ? [
+        ownThoughtTurnWithMetadata<AnthropicMetadata>(
+          p.thinkingContent,
+          metadata,
+        ),
+      ]
+      : [];
+
+    if (p.type === "text") {
+      const text = p.text || "";
+      const stripped = stripInternalSentTimestampSuffix(text);
+
+      const thoughtRegex =
+        /^\[Internal thought, visible only to you: ([\s\S]*?)\]$/;
+      const match = stripped.match(thoughtRegex);
+
+      if (match) {
+        return [
+          ...thoughtEvent,
+          ownThoughtTurnWithMetadata<AnthropicMetadata>(match[1], metadata),
+        ];
+      }
+
+      const notificationRegex = /^\[System notification: ([\s\S]*?)\]$/;
+      const notificationMatch = stripped.match(notificationRegex);
+
+      if (notificationMatch) {
+        return [
+          ...thoughtEvent,
+          ownThoughtTurnWithMetadata<AnthropicMetadata>(
+            notificationMatch[1],
+            metadata,
+          ),
+        ];
+      }
+
+      return [
+        ...thoughtEvent,
+        ownUtteranceTurnWithMetadata<AnthropicMetadata>(stripped, metadata),
+      ];
+    }
+
+    if (p.type === "function_call") {
+      return [
+        ...thoughtEvent,
+        toolUseTurnWithMetadata(
+          { name: p.name, args: p.arguments, id: p.id },
+          metadata,
+        ),
+      ];
+    }
+
+    throw new Error(
+      `Unknown Anthropic output part type: ${JSON.stringify(p)}`,
+    );
+  };
+
+export const anthropicAgentCaller = ({
+  lightModel,
+  prompt,
+  tools,
+  skills,
+  rewriteHistory,
+  timezoneIANA,
+  maxOutputTokens,
+  disableStreaming,
+}: AgentSpec) =>
+async (events: AnthropicHistoryEvent[]): Promise<AnthropicHistoryEvent[]> => {
+  const enhancedPrompt = [
+    prompt,
+    ...(skills && skills.length > 0
+      ? [
+        `Available skills:\n${
+          skills.map((skill) => `- ${skill.name}: ${skill.description}`).join(
+            "\n",
+          )
+        }`,
+      ]
+      : []),
+    `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,
+  ].join("\n\n");
+
+  const anthropicOutput = await callAnthropicWithFixHistory(
+    rewriteHistory,
+    buildReq(
+      enhancedPrompt,
+      tools,
+      skills,
+      timezoneIANA,
+      maxOutputTokens,
+      lightModel,
+    ),
+    disableStreaming,
+  )(events);
+
+  const responseId = generateId();
+
+  if (didNothing(anthropicOutput)) {
+    return [doNothingEvent({ type: "anthropic", responseId })];
+  }
+
+  return anthropicOutput.flatMap(
+    anthropicOutputPartToHistoryEvents(responseId),
+  );
+};
