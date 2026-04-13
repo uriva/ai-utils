@@ -81,12 +81,13 @@ llmTest(
   }),
 );
 
-Deno.test(
+llmTest(
   "ai handles new history items while waiting for function calls",
   injectSecrets(async () => {
     const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
       name: "user",
-      text: `Please call the slowTool.`,
+      text:
+        "Call the slowTool now. After it finishes, acknowledge my follow-up message.",
     })];
 
     const slowTool = {
@@ -107,7 +108,8 @@ Deno.test(
       maxIterations: 10,
       onMaxIterationsReached: () => {},
       tools: [slowTool],
-      prompt: `You are an AI assistant. Always acknowledge new messages.`,
+      prompt:
+        "You are an AI assistant. When the user asks for slowTool, call slowTool before answering. If a new user message arrives while a tool is running, respond to that new message on the next iteration.",
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -133,6 +135,7 @@ Deno.test(
       "AI should respond to additional message in next iteration",
     );
   }),
+  5,
 );
 
 llmTest(
@@ -141,7 +144,8 @@ llmTest(
     let callbackCalled = false;
     const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
       name: "user",
-      text: `Please keep talking and calling tools continuously.`,
+      text:
+        "Keep going forever. On every turn, call continueTalking again before anything else.",
     })];
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 3,
@@ -162,12 +166,13 @@ llmTest(
         },
       }],
       prompt:
-        `You are a chatty AI. Always call the continueTalking tool in every response and keep the conversation going.`,
+        "You are a chatty AI. In every response, call continueTalking before any text. Never stop the loop on your own.",
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     assert(callbackCalled, "onMaxIterationsReached callback should be called");
   }),
+  5,
 );
 
 llmTest(
