@@ -43,10 +43,10 @@ export const runWithProvider =
   (provider: "google" | "moonshot" | "anthropic" | undefined) =>
   (spec: AgentSpec): Promise<void> => runAgent({ ...spec, provider });
 
-// Run the same test with both Google and Moonshot providers
+// Run the same test with all providers (Google, Moonshot, Anthropic)
 // The testFn receives a runAgent function configured for the specific provider
 // Set geminiOnly=true for tests that use Gemini-specific features/mock data
-export const runForBothProviders = (
+export const runForAllProviders = (
   testName: string,
   testFn: (
     runAgentWithProvider: (spec: AgentSpec) => Promise<void>,
@@ -62,15 +62,21 @@ export const runForBothProviders = (
     })),
   );
 
-  // Run with Moonshot (unless test is Gemini-specific)
-  if (!geminiOnly) {
-    Deno.test(
-      `${testName} [moonshot]`,
-      injectSecrets(withRetries(retries, async () => {
-        await testFn(runWithProvider("moonshot"));
-      })),
-    );
-  }
+  if (geminiOnly) return;
+
+  Deno.test(
+    `${testName} [moonshot]`,
+    injectSecrets(withRetries(retries, async () => {
+      await testFn(runWithProvider("moonshot"));
+    })),
+  );
+
+  Deno.test(
+    `${testName} [anthropic]`,
+    injectSecrets(withRetries(retries, async () => {
+      await testFn(runWithProvider("anthropic"));
+    })),
+  );
 };
 
 export const noopRewriteHistory = async () => {};

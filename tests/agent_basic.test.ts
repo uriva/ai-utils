@@ -8,11 +8,11 @@ import {
 import {
   agentDeps,
   noopRewriteHistory,
-  runForBothProviders,
+  runForAllProviders,
   someTool,
 } from "../test_helpers.ts";
 
-runForBothProviders(
+runForAllProviders(
   "agent can run when history starts with only a model message",
   async (runAgent) => {
     await agentDeps([ownUtteranceTurn("Priming without user turn")])(runAgent)({
@@ -27,7 +27,7 @@ runForBothProviders(
   },
 );
 
-runForBothProviders(
+runForAllProviders(
   "agent can start an empty conversation",
   async (runAgent) => {
     await agentDeps([])(runAgent)({
@@ -41,7 +41,7 @@ runForBothProviders(
   },
 );
 
-runForBothProviders(
+runForAllProviders(
   "maxOutputTokens limits output length",
   async (runAgent) => {
     const mockHistory: HistoryEvent[] = [
@@ -67,7 +67,7 @@ runForBothProviders(
   },
 );
 
-runForBothProviders(
+runForAllProviders(
   "agent with history starting with only tool doesn't trigger 400",
   async (runAgent) => {
     const mockHistory: HistoryEvent[] = [{
@@ -91,7 +91,7 @@ runForBothProviders(
   true, // Gemini-only: test uses orphaned tool_result which Kimi rejects
 );
 
-runForBothProviders(
+runForAllProviders(
   "tool_call with empty thoughtSignature is filtered along with its tool_result",
   async (runAgent) => {
     const mockHistory: HistoryEvent[] = [
@@ -136,7 +136,7 @@ runForBothProviders(
   true, // Gemini-only: test uses Gemini-specific thoughtSignature metadata
 );
 
-runForBothProviders(
+runForAllProviders(
   "tool_call with empty thoughtSignature filters out other events from the same responseId",
   async (runAgent) => {
     let rewriteReplacements: Record<string, HistoryEvent> = {};
@@ -209,7 +209,7 @@ runForBothProviders(
   true, // Gemini-only: test uses Gemini-specific thoughtSignature metadata
 );
 
-runForBothProviders(
+runForAllProviders(
   "agent filters unsupported attachments before api call",
   async (runAgent) => {
     const mockHistory: HistoryEvent[] = [
@@ -237,7 +237,7 @@ runForBothProviders(
   },
 );
 
-runForBothProviders(
+runForAllProviders(
   "handles 403 file permission errors and replaces history items",
   async (runAgent) => {
     const replacedItems = new Map<string, HistoryEvent>();
@@ -286,7 +286,7 @@ runForBothProviders(
   },
 );
 
-runForBothProviders(
+runForAllProviders(
   "handles unsupported MIME type by stripping attachment and rewriting history",
   async (runAgent) => {
     const replacedItems = new Map<string, HistoryEvent>();
@@ -341,7 +341,7 @@ runForBothProviders(
   true, // Gemini-only: test relies on Gemini-specific MIME type filtering behavior
 );
 
-runForBothProviders(
+runForAllProviders(
   "agent streams output chunk by chunk",
   async (runAgent) => {
     let streamedText = "";
@@ -373,7 +373,7 @@ runForBothProviders(
   },
 );
 
-runForBothProviders(
+runForAllProviders(
   "agent outputs complete text in one chunk when disableStreaming is true",
   async (runAgent) => {
     let streamedText = "";
@@ -407,7 +407,7 @@ runForBothProviders(
   },
 );
 
-runForBothProviders(
+runForAllProviders(
   "handles do_nothing events in history",
   async (runAgent) => {
     const history = [
@@ -428,7 +428,7 @@ runForBothProviders(
   },
 );
 
-runForBothProviders(
+runForAllProviders(
   "agent handles history containing empty text without triggering 400 error",
   async (runAgent) => {
     const mockHistory: HistoryEvent[] = [
@@ -466,7 +466,7 @@ runForBothProviders(
   },
 );
 
-runForBothProviders(
+runForAllProviders(
   "agent stays silent when it has nothing to say",
   async (runAgent) => {
     const mockHistory: HistoryEvent[] = [

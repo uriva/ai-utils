@@ -2,7 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import { sleep } from "gamla";
 import { z } from "zod/v4";
 import { runAgent } from "../mod.ts";
-import { runForBothProviders } from "../test_helpers.ts";
+import { runForAllProviders } from "../test_helpers.ts";
 import {
   type DeferredTool,
   type HistoryEvent,
@@ -242,7 +242,7 @@ Deno.test(
   }),
 );
 
-runForBothProviders(
+runForAllProviders(
   "does not throw when there is an orphaned tool call",
   async (runAgent) => {
     const mockHistory: HistoryEvent[] = [
@@ -275,7 +275,7 @@ runForBothProviders(
   },
 );
 
-runForBothProviders(
+runForAllProviders(
   "does not throw when own_thought with modelMetadata is in history",
   async (runAgent) => {
     const mockHistory: HistoryEvent[] = [
@@ -305,7 +305,7 @@ runForBothProviders(
   },
 );
 
-runForBothProviders(
+runForAllProviders(
   "does not throw when tool_call id mismatches tool_result toolCallId",
   async (runAgent) => {
     const now = Date.now();
@@ -347,7 +347,7 @@ runForBothProviders(
   },
 );
 
-runForBothProviders(
+runForAllProviders(
   "does not throw when tool_result is missing (compaction dropped it)",
   async (runAgent) => {
     const now = Date.now();
@@ -381,7 +381,7 @@ runForBothProviders(
   },
 );
 
-runForBothProviders(
+runForAllProviders(
   "handles consecutive tool_calls with missing tool_results after compaction",
   async (runAgent) => {
     const now = Date.now();
@@ -431,7 +431,7 @@ runForBothProviders(
   },
 );
 
-runForBothProviders(
+runForAllProviders(
   "handles consecutive tool_calls with all tool_results present",
   async (runAgent) => {
     const now = Date.now();

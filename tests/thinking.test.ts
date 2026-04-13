@@ -3,10 +3,10 @@ import { participantUtteranceTurn } from "../src/agent.ts";
 import {
   agentDeps,
   noopRewriteHistory,
-  runForBothProviders,
+  runForAllProviders,
 } from "../test_helpers.ts";
 
-runForBothProviders(
+runForAllProviders(
   "agent returns own_thought events when thinking is enabled",
   async (runAgent) => {
     const mockHistory = [
