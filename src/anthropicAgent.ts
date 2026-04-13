@@ -35,6 +35,7 @@ const fetchFileAttachment = async (
     const response = await fetch(attachment.fileUri);
     if (!response.ok) {
       console.error(`Failed to fetch attachment: ${response.status}`);
+      await response.body?.cancel();
       return null;
     }
     const arrayBuffer = await response.arrayBuffer();
@@ -94,6 +95,7 @@ type AnthropicRequestParams = {
   tools?: Anthropic.Messages.Tool[];
   max_tokens: number;
   stream: boolean;
+  thinking?: { type: "enabled"; budget_tokens: number };
 };
 
 type AnthropicMediaType =
@@ -106,6 +108,9 @@ const isImageMimeType = (
   mimeType: string,
 ): mimeType is AnthropicMediaType =>
   ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(mimeType);
+
+const sanitizeToolId = (id: string): string =>
+  id.replace(/[^a-zA-Z0-9_-]/g, "_");
 
 const attachmentsToContentBlocks = async (
   attachments?: MediaAttachment[],
@@ -217,7 +222,8 @@ async (
       ? `${text || ""}\n${attachmentDescriptions}`.trim()
       : (text || "");
 
-    return [{ role: "assistant", content: fullContent || " " }];
+    if (!fullContent.trim()) return [];
+    return [{ role: "assistant", content: fullContent }];
   }
 
   if (e.type === "tool_call") {
@@ -225,7 +231,7 @@ async (
       role: "assistant",
       content: [{
         type: "tool_use",
-        id: e.id,
+        id: sanitizeToolId(e.id),
         name: e.name,
         input: e.parameters as Record<string, unknown>,
       } as Anthropic.Messages.ToolUseBlockParam],
@@ -237,7 +243,7 @@ async (
       role: "user",
       content: [{
         type: "tool_result",
-        tool_use_id: e.toolCallId || e.id,
+        tool_use_id: sanitizeToolId(e.toolCallId || e.id),
         content: stampText(e.result),
       } as Anthropic.Messages.ToolResultBlockParam],
     }];
@@ -356,15 +362,38 @@ const syntheticToolResult = (
   content: "[Tool result unavailable]",
 });
 
+const allToolUseIds = (
+  messages: Anthropic.Messages.MessageParam[],
+): Set<string> => new Set(messages.flatMap(toolUseIdsInMessage));
+
+const stripOrphanedToolResults = (
+  messages: Anthropic.Messages.MessageParam[],
+): Anthropic.Messages.MessageParam[] => {
+  const validIds = allToolUseIds(messages);
+  return messages.flatMap((msg) => {
+    if (msg.role !== "user" || !Array.isArray(msg.content)) return [msg];
+    const filtered = (msg.content as Anthropic.Messages.ContentBlockParam[])
+      .filter((b) =>
+        !("type" in b && b.type === "tool_result") ||
+        validIds.has(
+          (b as Anthropic.Messages.ToolResultBlockParam).tool_use_id,
+        )
+      );
+    if (empty(filtered)) return [];
+    return [{ role: "user" as const, content: filtered }];
+  });
+};
+
 const ensureToolResultsForToolUses = (
   messages: Anthropic.Messages.MessageParam[],
 ): Anthropic.Messages.MessageParam[] => {
+  const cleaned = stripOrphanedToolResults(messages);
   const result: Anthropic.Messages.MessageParam[] = [];
-  for (let i = 0; i < messages.length; i++) {
-    result.push(messages[i]);
-    const useIds = toolUseIdsInMessage(messages[i]);
+  for (let i = 0; i < cleaned.length; i++) {
+    result.push(cleaned[i]);
+    const useIds = toolUseIdsInMessage(cleaned[i]);
     if (empty(useIds)) continue;
-    const next = messages[i + 1];
+    const next = cleaned[i + 1];
     const existingIds = next ? toolResultIdsInMessage(next) : new Set();
     const missingIds = useIds.filter((id) => !existingIds.has(id));
     if (empty(missingIds)) continue;
@@ -373,7 +402,7 @@ const ensureToolResultsForToolUses = (
       const existing = Array.isArray(next.content)
         ? next.content
         : [{ type: "text" as const, text: next.content }];
-      messages[i + 1] = {
+      cleaned[i + 1] = {
         role: "user",
         content: [
           ...synthetics,
@@ -409,13 +438,28 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
   const withToolResults = ensureToolResultsForToolUses(merged);
 
   // Anthropic requires the first message to be from the user
-  const messages =
+  const withUserFirst =
     withToolResults.length > 0 && withToolResults[0].role !== "user"
       ? [{
         role: "user" as const,
         content: "<conversation started>",
       }, ...withToolResults]
       : withToolResults;
+
+  // Anthropic requires at least one message
+  const nonEmpty = empty(withUserFirst)
+    ? [{ role: "user" as const, content: "<conversation started>" }]
+    : withUserFirst;
+
+  const effectiveMaxTokens = maxOutputTokens ?? 16000;
+  const thinkingEnabled = effectiveMaxTokens > 1024;
+
+  // When thinking is enabled, Anthropic does not allow assistant prefill
+  // (last message must be from user)
+  const messages = thinkingEnabled &&
+      nonEmpty[nonEmpty.length - 1].role === "assistant"
+    ? [...nonEmpty, { role: "user" as const, content: "<continue>" }]
+    : nonEmpty;
 
   const allTools = skills && skills.length > 0
     ? [...tools, ...createSkillTools(skills)]
@@ -426,7 +470,10 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
     system: systemPrompt,
     messages,
     stream: false,
-    max_tokens: maxOutputTokens ?? 4096,
+    max_tokens: effectiveMaxTokens,
+    ...(thinkingEnabled
+      ? { thinking: { type: "enabled" as const, budget_tokens: 10000 } }
+      : {}),
     ...(allTools.length > 0 ? { tools: allTools.map(actionToTool) } : {}),
   };
 };
@@ -453,20 +500,30 @@ const rawCallAnthropic = async ({
     } as Anthropic.Messages.MessageCreateParamsNonStreaming);
 
     const parts: AnthropicOutputPart[] = [];
+    let lastThinkingContent: string | undefined;
 
     for (const block of response.content) {
-      if (block.type === "text") {
+      if (block.type === "thinking") {
+        lastThinkingContent = block.thinking;
+      } else if (block.type === "text") {
         if (block.text) {
           await handleStreamChunk(block.text);
         }
-        parts.push({ type: "text", text: block.text });
+        parts.push({
+          type: "text",
+          text: block.text,
+          thinkingContent: lastThinkingContent,
+        });
+        lastThinkingContent = undefined;
       } else if (block.type === "tool_use") {
         parts.push({
           type: "function_call",
           id: block.id,
           name: block.name,
           arguments: block.input as Record<string, unknown>,
+          thinkingContent: lastThinkingContent,
         });
+        lastThinkingContent = undefined;
       }
     }
 
@@ -481,6 +538,7 @@ const rawCallAnthropic = async ({
   } as Anthropic.Messages.MessageCreateParamsStreaming);
 
   const accumulatedText: string[] = [];
+  const accumulatedThinking: string[] = [];
   const toolCalls = new Map<
     string,
     { id: string; name: string; input: string }
@@ -499,6 +557,8 @@ const rawCallAnthropic = async ({
       if (delta.type === "text_delta") {
         await handleStreamChunk(delta.text);
         accumulatedText.push(delta.text);
+      } else if (delta.type === "thinking_delta") {
+        accumulatedThinking.push(delta.thinking);
       } else if (delta.type === "input_json_delta" && currentToolId) {
         const existing = toolCalls.get(currentToolId);
         if (existing) {
@@ -510,6 +570,8 @@ const rawCallAnthropic = async ({
     }
   }
 
+  const thinkingContent = accumulatedThinking.join("") || undefined;
+
   if (toolCalls.size > 0) {
     return Array.from(toolCalls.values()).map((
       tc,
@@ -518,10 +580,15 @@ const rawCallAnthropic = async ({
       id: tc.id,
       name: tc.name,
       arguments: JSON.parse(tc.input || "{}"),
+      thinkingContent,
     }));
   }
 
-  return [{ type: "text", text: accumulatedText.join("") }];
+  return [{
+    type: "text",
+    text: accumulatedText.join(""),
+    thinkingContent,
+  }];
 };
 
 const callAnthropicWithRetry = conditionalRetry(isRetryableError)(

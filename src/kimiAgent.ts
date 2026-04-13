@@ -38,6 +38,7 @@ const fetchFileAttachment = async (
     const response = await fetch(attachment.fileUri);
     if (!response.ok) {
       console.error(`Failed to fetch attachment: ${response.status}`);
+      await response.body?.cancel();
       return null;
     }
     const arrayBuffer = await response.arrayBuffer();

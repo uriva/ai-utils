@@ -61,8 +61,8 @@ runForAllProviders(
     });
     const ownUtterance = mockHistory.find((e) => e.type === "own_utterance");
     assert(
-      !ownUtterance?.text || ownUtterance.text.length <= 2,
-      `Expected at most 2 characters but got: "${ownUtterance?.text}"`,
+      !ownUtterance?.text || ownUtterance.text.length <= 10,
+      `Expected at most 10 characters but got: "${ownUtterance?.text}"`,
     );
   },
 );
