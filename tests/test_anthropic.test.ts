@@ -6,6 +6,7 @@ import {
   injectSecrets,
   noopRewriteHistory,
   runWithProvider,
+  someTool,
   withRetries,
 } from "../test_helpers.ts";
 
@@ -34,5 +35,38 @@ Deno.test(
       answer.text.includes("4"),
       `Expected answer to contain '4' but got: "${answer.text}"`,
     );
+  })),
+);
+
+Deno.test(
+  "anthropic does not throw when there is an orphaned tool call",
+  injectSecrets(withRetries(3, async () => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please do something.",
+      }),
+      {
+        type: "tool_call",
+        isOwn: true,
+        timestamp: Date.now(),
+        name: "doSomethingUnique",
+        parameters: { param: "value" },
+        id: "call_123",
+      },
+      participantUtteranceTurn({
+        name: "user",
+        text: "What were the contact names?",
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runWithProvider("anthropic"))({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [someTool],
+      prompt: "You are an AI assistant.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
   })),
 );

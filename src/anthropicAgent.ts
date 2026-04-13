@@ -324,6 +324,69 @@ const mergeConsecutiveSameRole = (
   return merged;
 };
 
+const toolUseIdsInMessage = (
+  msg: Anthropic.Messages.MessageParam,
+): string[] =>
+  msg.role === "assistant" && Array.isArray(msg.content)
+    ? (msg.content as Anthropic.Messages.ContentBlockParam[])
+      .filter((b): b is Anthropic.Messages.ToolUseBlockParam =>
+        "type" in b && b.type === "tool_use"
+      )
+      .map((b) => b.id)
+    : [];
+
+const toolResultIdsInMessage = (
+  msg: Anthropic.Messages.MessageParam,
+): Set<string> =>
+  new Set(
+    msg.role === "user" && Array.isArray(msg.content)
+      ? (msg.content as Anthropic.Messages.ContentBlockParam[])
+        .filter((b): b is Anthropic.Messages.ToolResultBlockParam =>
+          "type" in b && b.type === "tool_result"
+        )
+        .map((b) => b.tool_use_id)
+      : [],
+  );
+
+const syntheticToolResult = (
+  toolUseId: string,
+): Anthropic.Messages.ToolResultBlockParam => ({
+  type: "tool_result" as const,
+  tool_use_id: toolUseId,
+  content: "[Tool result unavailable]",
+});
+
+const ensureToolResultsForToolUses = (
+  messages: Anthropic.Messages.MessageParam[],
+): Anthropic.Messages.MessageParam[] => {
+  const result: Anthropic.Messages.MessageParam[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    result.push(messages[i]);
+    const useIds = toolUseIdsInMessage(messages[i]);
+    if (empty(useIds)) continue;
+    const next = messages[i + 1];
+    const existingIds = next ? toolResultIdsInMessage(next) : new Set();
+    const missingIds = useIds.filter((id) => !existingIds.has(id));
+    if (empty(missingIds)) continue;
+    const synthetics = missingIds.map(syntheticToolResult);
+    if (next && next.role === "user") {
+      const existing = Array.isArray(next.content)
+        ? next.content
+        : [{ type: "text" as const, text: next.content }];
+      messages[i + 1] = {
+        role: "user",
+        content: [
+          ...synthetics,
+          ...existing,
+        ] as Anthropic.Messages.ContentBlockParam[],
+      };
+    } else {
+      result.push({ role: "user", content: synthetics });
+    }
+  }
+  return result;
+};
+
 const buildReq = (
   systemPrompt: string,
   tools: Tool<ZodType>[],
@@ -343,10 +406,16 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
 
   const merged = mergeConsecutiveSameRole(rawMessages);
 
+  const withToolResults = ensureToolResultsForToolUses(merged);
+
   // Anthropic requires the first message to be from the user
-  const messages = merged.length > 0 && merged[0].role !== "user"
-    ? [{ role: "user" as const, content: "<conversation started>" }, ...merged]
-    : merged;
+  const messages =
+    withToolResults.length > 0 && withToolResults[0].role !== "user"
+      ? [{
+        role: "user" as const,
+        content: "<conversation started>",
+      }, ...withToolResults]
+      : withToolResults;
 
   const allTools = skills && skills.length > 0
     ? [...tools, ...createSkillTools(skills)]
