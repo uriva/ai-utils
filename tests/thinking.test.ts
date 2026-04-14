@@ -35,3 +35,39 @@ runForAllProviders(
     );
   },
 );
+
+runForAllProviders(
+  "onStreamThinkingChunk receives thinking content during streaming",
+  async (runAgent) => {
+    let thinkingText = "";
+    let thinkingChunkCount = 0;
+
+    await agentDeps([
+      participantUtteranceTurn({
+        name: "user",
+        text: "What is 137 * 248? Think step by step.",
+      }),
+    ])(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "You are a helpful assistant. Think carefully before answering.",
+      lightModel: true,
+      onStreamThinkingChunk: (chunk) => {
+        thinkingText += chunk;
+        thinkingChunkCount++;
+      },
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+
+    assert(
+      thinkingChunkCount > 0,
+      `Expected at least one thinking stream chunk, got ${thinkingChunkCount}`,
+    );
+    assert(
+      thinkingText.length > 10,
+      `Expected substantial thinking text, got ${thinkingText.length} chars`,
+    );
+  },
+);

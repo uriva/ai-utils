@@ -10,6 +10,7 @@ import {
   estimateTokens,
   generateId,
   getStreamChunk,
+  getStreamThinkingChunk,
   type HistoryEventWithMetadata,
   type MediaAttachment,
   type MessageId,
@@ -541,6 +542,7 @@ const rawCallAnthropic = async ({
   disableStreaming?: boolean;
 }): Promise<AnthropicOutputPart[]> => {
   const handleStreamChunk = getStreamChunk();
+  const handleStreamThinkingChunk = getStreamThinkingChunk();
 
   const client = new Anthropic({
     apiKey: anthropicApiKeyInjection.access(),
@@ -560,6 +562,7 @@ const rawCallAnthropic = async ({
     for (const block of response.content) {
       if (block.type === "thinking") {
         lastThinkingContent = block.thinking;
+        await handleStreamThinkingChunk(block.thinking);
       } else if (block.type === "text") {
         if (block.text) {
           await handleStreamChunk(block.text);
@@ -632,6 +635,7 @@ const rawCallAnthropic = async ({
         }
       } else if (delta.type === "thinking_delta") {
         accumulatedThinking.push(delta.thinking);
+        await handleStreamThinkingChunk(delta.thinking);
       } else if (delta.type === "input_json_delta" && currentToolId) {
         const existing = currentToolIndex !== null
           ? parts.get(currentToolIndex)

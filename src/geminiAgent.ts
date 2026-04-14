@@ -25,6 +25,7 @@ import {
   estimateTokens,
   generateId,
   getStreamChunk,
+  getStreamThinkingChunk,
   type HistoryEventWithMetadata,
   type MediaAttachment,
   type MessageId,
@@ -189,6 +190,7 @@ const rawCallGemini = async ({
   disableStreaming?: boolean;
 }): Promise<GeminiOutput> => {
   const handleStreamChunk = getStreamChunk();
+  const handleStreamThinkingChunk = getStreamThinkingChunk();
   const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
   let finalUsageMetadata: TokenUsage | undefined;
   const accumulatedParts: Part[] = [];
@@ -202,6 +204,9 @@ const rawCallGemini = async ({
         typeof part.text === "string" && !part.thought
       ) {
         await handleStreamChunk(part.text);
+      }
+      if (typeof part.text === "string" && part.thought) {
+        await handleStreamThinkingChunk(part.text);
       }
       accumulatedParts.push(part);
     }
@@ -219,6 +224,9 @@ const rawCallGemini = async ({
           !part.thoughtSignature
         ) {
           await handleStreamChunk(part.text);
+        }
+        if (typeof part.text === "string" && part.thought) {
+          await handleStreamThinkingChunk(part.text);
         }
 
         if (typeof part.text === "string") {

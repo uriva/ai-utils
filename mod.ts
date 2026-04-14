@@ -2,6 +2,7 @@ import {
   type AgentSpec,
   injectOutputEvent,
   injectStreamChunk,
+  injectStreamThinkingChunk,
   runAbstractAgent,
 } from "./src/agent.ts";
 import { anthropicAgentCaller } from "./src/anthropicAgent.ts";
@@ -93,6 +94,9 @@ export const runAgent = (spec: AgentSpec): Promise<void> => {
   }
   if (spec.onStreamChunk) {
     runner = injectStreamChunk(spec.onStreamChunk)(runner);
+  }
+  if (spec.onStreamThinkingChunk) {
+    runner = injectStreamThinkingChunk(spec.onStreamThinkingChunk)(runner);
   }
   return runner();
 };

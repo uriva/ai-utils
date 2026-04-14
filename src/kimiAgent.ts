@@ -14,6 +14,7 @@ import {
   estimateTokens,
   generateId,
   getStreamChunk,
+  getStreamThinkingChunk,
   type HistoryEventWithMetadata,
   type MediaAttachment,
   type MessageId,
@@ -393,6 +394,7 @@ const rawCallKimi = async ({
   disableStreaming?: boolean;
 }): Promise<KimiOutputPart[]> => {
   const handleStreamChunk = getStreamChunk();
+  const handleStreamThinkingChunk = getStreamThinkingChunk();
 
   const client = new OpenAI({
     apiKey: kimiApiKeyInjection.access(),
@@ -412,6 +414,10 @@ const rawCallKimi = async ({
       .reasoning_content as
         | string
         | undefined;
+
+    if (reasoning) {
+      await handleStreamThinkingChunk(reasoning);
+    }
 
     if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
       return choice.message.tool_calls.map((tc, i): KimiOutputPart => ({
@@ -455,6 +461,7 @@ const rawCallKimi = async ({
     const deltaRecord = delta as unknown as Record<string, unknown>;
     if (typeof deltaRecord.reasoning_content === "string") {
       accumulatedReasoning.push(deltaRecord.reasoning_content);
+      await handleStreamThinkingChunk(deltaRecord.reasoning_content);
     }
 
     if (delta.content) {

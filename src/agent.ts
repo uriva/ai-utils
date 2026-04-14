@@ -219,6 +219,12 @@ export const injectStreamChunk = streamChunkInjection.inject;
 export const accessStreamChunk = streamChunkInjection.access;
 export const getStreamChunk = streamChunkInjection.getStore;
 
+const streamThinkingChunkInjection: Injection<
+  (chunk: string) => Promise<void> | void
+> = context((_chunk: string) => {});
+export const injectStreamThinkingChunk = streamThinkingChunkInjection.inject;
+export const getStreamThinkingChunk = streamThinkingChunkInjection.getStore;
+
 const abortInjection: Injection<() => Promise<boolean>> = context(
   () => Promise.resolve(false),
 );
@@ -720,6 +726,7 @@ export type AgentSpec = {
   prompt: string;
   onOutputEvent?: (event: HistoryEvent) => Promise<void>;
   onStreamChunk?: (chunk: string) => Promise<void> | void;
+  onStreamThinkingChunk?: (chunk: string) => Promise<void> | void;
   maxIterations: number;
   // deno-lint-ignore no-explicit-any
   onMaxIterationsReached: () => any;
