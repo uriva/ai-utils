@@ -105,12 +105,11 @@ type AnthropicRequestParams = {
   messages: Anthropic.Messages.MessageParam[];
   tools?: Anthropic.Messages.Tool[];
   max_tokens: number;
-  stream: boolean;
   thinking?: { type: "enabled"; budget_tokens: number };
 };
 
 const anthropicThinkingBudget = (maxTokens: number) =>
-  Math.max(1024, Math.min(10000, maxTokens - 1));
+  Math.min(1024, maxTokens - 1);
 
 type AnthropicMediaType =
   | "image/jpeg"
@@ -523,7 +522,6 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
     model: anthropicModel(lightModel),
     system: systemPrompt,
     messages,
-    stream: false,
     max_tokens: effectiveMaxTokens,
     ...(thinkingEnabled && thinkingBudget
       ? {
@@ -549,7 +547,7 @@ const rawCallAnthropic = async ({
   });
 
   if (disableStreaming) {
-    const { system, stream: _stream, ...rest } = req;
+    const { system, ...rest } = req;
     const response = await client.messages.create({
       ...rest,
       system,
@@ -589,7 +587,7 @@ const rawCallAnthropic = async ({
   }
 
   // Streaming mode
-  const { system, stream: _stream, ...rest } = req;
+  const { system, ...rest } = req;
   const stream = client.messages.stream({
     ...rest,
     system,
