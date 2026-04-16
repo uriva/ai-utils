@@ -613,7 +613,18 @@ export const normalizeHistoryForModel = (
     const matchedResults = (groupedResults.get(event.id) ?? [])
       .filter((result) => !consumedResultIds.has(result.id));
     matchedResults.forEach((result) => consumedResultIds.add(result.id));
-    return [...acc, event, ...matchedResults];
+    if (nonempty(matchedResults)) {
+      return [...acc, event, ...matchedResults];
+    }
+    const syntheticResult: ToolResult = {
+      type: "tool_result",
+      isOwn: true,
+      id: `${event.id}-synthetic-result`,
+      timestamp: event.timestamp,
+      result: "[Tool result unavailable]",
+      toolCallId: event.id,
+    };
+    return [...acc, event, syntheticResult];
   }, []);
 
   const orphanedResults = history.filter((event): event is ToolResult => {
