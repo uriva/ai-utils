@@ -587,6 +587,45 @@ export const sanitizeModelOutput = (
   return { emit: safe, internal: safe };
 };
 
+const hasToolCall = (history: HistoryEvent[], toolCallId: string): boolean =>
+  history.some((event) =>
+    event.type === "tool_call" && event.id === toolCallId
+  );
+
+const toolResultsByCallId = (
+  history: HistoryEvent[],
+): Map<string, ToolResult[]> =>
+  history.reduce((acc, event) => {
+    if (event.type !== "tool_result" || !event.toolCallId) return acc;
+    const existing = acc.get(event.toolCallId) ?? [];
+    return acc.set(event.toolCallId, [...existing, event]);
+  }, new Map<string, ToolResult[]>());
+
+export const normalizeHistoryForModel = (
+  history: HistoryEvent[],
+): HistoryEvent[] => {
+  const groupedResults = toolResultsByCallId(history);
+  const consumedResultIds = new Set<string>();
+
+  const interleaved = history.reduce<HistoryEvent[]>((acc, event) => {
+    if (event.type === "tool_result") return acc;
+    if (event.type !== "tool_call") return [...acc, event];
+    const matchedResults = (groupedResults.get(event.id) ?? [])
+      .filter((result) => !consumedResultIds.has(result.id));
+    matchedResults.forEach((result) => consumedResultIds.add(result.id));
+    return [...acc, event, ...matchedResults];
+  }, []);
+
+  const orphanedResults = history.filter((event): event is ToolResult => {
+    if (event.type !== "tool_result") return false;
+    if (consumedResultIds.has(event.id)) return false;
+    if (!event.toolCallId) return true;
+    return !hasToolCall(history, event.toolCallId);
+  });
+
+  return [...interleaved, ...orphanedResults];
+};
+
 export const handleFunctionCalls =
   // deno-lint-ignore no-explicit-any
   (tools: Tool<any>[], onToolResult?: (event: HistoryEvent) => void) =>
@@ -770,9 +809,10 @@ export const runAbstractAgent = async (
     }
     const history = await getHistory();
     const effectiveHistory = [...history, ...ephemeralHistory];
-    await reportHistoryForDebug(effectiveHistory);
+    const normalizedHistory = normalizeHistoryForModel(effectiveHistory);
+    await reportHistoryForDebug(normalizedHistory);
     const modelResponse = await timeit(reportTimeElapsedMs, callModel)(
-      effectiveHistory,
+      normalizedHistory,
     );
     if (hasEmojiFlood(modelResponse)) {
       emojiFloodRetries++;
@@ -785,7 +825,7 @@ export const runAbstractAgent = async (
       continue;
     }
     const { emit, internal } = sanitizeModelOutput(
-      effectiveHistory,
+      normalizedHistory,
       modelResponse,
     );
 

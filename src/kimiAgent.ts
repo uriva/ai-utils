@@ -232,10 +232,9 @@ async (e: KimiHistoryEvent): Promise<ChatCompletionMessageParam[]> => {
           arguments: JSON.stringify(e.parameters),
         },
       }],
-      // Kimi-specific: include reasoning_content for thinking mode
-      ...(metadata?.reasoningContent !== undefined
-        ? { reasoning_content: metadata.reasoningContent }
-        : {}),
+      // Kimi-specific: reasoning_content is required for tool call messages in thinking mode.
+      reasoning_content: metadata?.reasoningContent ??
+        "[No reasoning content available]",
     } as ChatCompletionMessageParam];
   }
 
