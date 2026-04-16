@@ -57,7 +57,7 @@ export const injectAnthropicToken = (token: string): Injector =>
   anthropicApiKeyInjection.inject(() => token);
 
 const anthropicModel = (lightModel?: boolean) =>
-  lightModel ? "claude-sonnet-4-6" : "claude-opus-4-6";
+  lightModel ? "claude-sonnet-4-6" : "claude-opus-4-7";
 
 const isTokenLimitExceeded = (error: Error) =>
   "status" in error && (error as { status: number }).status === 400 &&
