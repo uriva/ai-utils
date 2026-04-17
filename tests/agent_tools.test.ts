@@ -493,6 +493,8 @@ runForAllProviders(
 runForAllProviders(
   "anthropic streams text before tool calls when the model explains first",
   async (runAgentWithProvider) => {
+    if (Deno.env.get("TEST_PROVIDER") !== "anthropic") return;
+
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
