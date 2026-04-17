@@ -130,27 +130,32 @@ export const runForAllProviders = (
   retries = 3,
   geminiOnly = false,
 ): void => {
-  // Run with Google (default provider)
-  Deno.test(
-    `${testName} [google]`,
-    injectSecrets(withRetries(retries, async () => {
-      await testFn(runWithProvider(undefined));
-    })),
-  );
+  const requestedProvider = Deno.env.get("TEST_PROVIDER");
+  if (!requestedProvider) return;
 
-  if (geminiOnly) return;
+  const normalizedProvider = requestedProvider === "gemini"
+    ? "google"
+    : requestedProvider;
+  if (
+    normalizedProvider !== "google" && normalizedProvider !== "moonshot" &&
+    normalizedProvider !== "anthropic"
+  ) {
+    throw new Error(
+      `Invalid TEST_PROVIDER: ${requestedProvider}. Expected one of: google, moonshot, anthropic, gemini.`,
+    );
+  }
+
+  if (normalizedProvider === "moonshot" && geminiOnly) return;
+  if (normalizedProvider === "anthropic" && geminiOnly) return;
+
+  const runWithSelectedProvider = normalizedProvider === "google"
+    ? runWithProvider(undefined)
+    : runWithProvider(normalizedProvider);
 
   Deno.test(
-    `${testName} [moonshot]`,
+    `${testName} [${normalizedProvider}]`,
     injectSecrets(withRetries(retries, async () => {
-      await testFn(runWithProvider("moonshot"));
-    })),
-  );
-
-  Deno.test(
-    `${testName} [anthropic]`,
-    injectSecrets(withRetries(retries, async () => {
-      await testFn(runWithProvider("anthropic"));
+      await testFn(runWithSelectedProvider);
     })),
   );
 };
