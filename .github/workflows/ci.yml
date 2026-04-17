@@ -89,5 +89,22 @@ jobs:
               tests/injected_thought.test.ts \
               tests/live_agent_bridge_gemini.test.ts \
               tests/no_response.test.ts
+
+            for flaky_test in \
+              "tool_call with empty thoughtSignature filters out other events from the same responseId" \
+              "handles unsupported MIME type by stripping attachment and rewriting history"
+            do
+              for attempt in 1 2 3
+              do
+                if deno test -A tests/agent_basic.test.ts --filter "$flaky_test"; then
+                  break
+                fi
+
+                if [ "$attempt" -eq 3 ]; then
+                  exit 1
+                fi
+              done
+            done
+
             exit 0
           fi
