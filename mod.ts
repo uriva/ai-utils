@@ -1,5 +1,8 @@
 import {
+  accessCallModel,
+  accessCallModelWrapper,
   type AgentSpec,
+  type CallModel,
   injectOutputEvent,
   injectStreamChunk,
   injectStreamThinkingChunk,
@@ -61,31 +64,36 @@ export {
   type DuplexMessage,
 } from "./src/duplex.ts";
 
-const getCaller = (
-  spec: AgentSpec,
-): (
-  history: import("./src/agent.ts").HistoryEvent[],
-) => Promise<import("./src/agent.ts").HistoryEvent[]> => {
-  if (spec.provider === "moonshot") {
-    return kimiAgentCaller(spec) as (
-      history: import("./src/agent.ts").HistoryEvent[],
-    ) => Promise<import("./src/agent.ts").HistoryEvent[]>;
-  }
-  if (spec.provider === "anthropic") {
-    return anthropicAgentCaller(spec) as (
-      history: import("./src/agent.ts").HistoryEvent[],
-    ) => Promise<import("./src/agent.ts").HistoryEvent[]>;
-  }
+// deno-lint-ignore no-explicit-any
+const widen = (caller: (events: any) => Promise<any>): CallModel => caller;
+
+const providerCaller = (spec: AgentSpec): CallModel => {
+  if (spec.provider === "moonshot") return widen(kimiAgentCaller(spec));
+  if (spec.provider === "anthropic") return widen(anthropicAgentCaller(spec));
   // Default to Gemini for audio transport or when provider is "google" or undefined
-  return geminiAgentCaller(spec) as (
-    history: import("./src/agent.ts").HistoryEvent[],
-  ) => Promise<import("./src/agent.ts").HistoryEvent[]>;
+  return widen(geminiAgentCaller(spec));
+};
+
+// Picks the CallModel to use for this agent run.
+// - injectCallModel(fake) wins outright (tests use this to bypass providers).
+// - otherwise the provider-based caller is chosen from spec.provider.
+// Then injectCallModelWrapper wraps whatever was chosen (tests use this to
+// add rmmbr caching around a real provider caller).
+const resolveCallModel = (spec: AgentSpec): CallModel => {
+  const base: CallModel = (events) => {
+    try {
+      return accessCallModel(events);
+    } catch {
+      return providerCaller(spec)(events);
+    }
+  };
+  return accessCallModelWrapper({ provider: spec.provider, inner: base });
 };
 
 const runAgentInner = (spec: AgentSpec): Promise<void> =>
   spec.transport?.kind === "audio"
     ? runAudioTransportAgent(spec)
-    : runAbstractAgent(spec, getCaller(spec));
+    : runAbstractAgent(spec, resolveCallModel(spec));
 
 export const runAgent = (spec: AgentSpec): Promise<void> => {
   let runner = () => runAgentInner(spec);

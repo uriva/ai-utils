@@ -4,20 +4,44 @@ import { cache, waitAllWrites } from "rmmbr";
 import { z } from "zod/v4";
 import {
   injectAnthropicToken,
-  injectCacher,
   injectGeminiToken,
   injectKimiToken,
   injectOpenAiToken,
+  overrideIdGenerator,
+  overrideTime,
   runAgent,
   tool,
 } from "./mod.ts";
 import {
   type AgentSpec,
+  type CallModelWrapper,
   type HistoryEvent,
   injectAccessHistory,
+  injectCallModelWrapper,
   injectOutputEvent,
   type ToolReturn,
 } from "./src/agent.ts";
+
+// Deterministic id and timestamp so rmmbr cache keys stable across runs.
+// Each call increments, so multiple events inside a single test get different
+// ids, but across runs the sequence is identical.
+const makeCounter = (prefix: string) => {
+  let n = 0;
+  return () => `${prefix}-${++n}`;
+};
+
+let timestampCounter = 0;
+const deterministicTimestamp = () => {
+  timestampCounter++;
+  return 1_700_000_000_000 + timestampCounter;
+};
+
+const cachingCallModelWrapper: CallModelWrapper = ({ provider, inner }) => {
+  const cached = rmmbrCache(`callModel-${provider ?? "google"}-v2`)(
+    (events: HistoryEvent[]) => inner(events),
+  );
+  return (events) => cached(events);
+};
 
 const requireEnv = (name: string) => {
   const v = Deno.env.get(name);
@@ -27,13 +51,13 @@ const requireEnv = (name: string) => {
 
 const rmmbrToken = requireEnv("RMMBR_TOKEN");
 
-const rmmbrCacher = (cacheId: string) =>
+const rmmbrCache = (cacheId: string) =>
   cache({
     cacheId,
     ttl: 60 * 60 * 24 * 30,
     url: "https://rmmbr.net",
     token: rmmbrToken,
-  }) as Injector;
+  });
 
 const flushRmmbr = (f: () => Promise<void>) => async () => {
   try {
@@ -43,9 +67,18 @@ const flushRmmbr = (f: () => Promise<void>) => async () => {
   }
 };
 
+// Reset per-test so each test produces the same sequence of ids/timestamps
+// regardless of ordering with other tests. Each test opens a fresh scope.
+const injectDeterministic = (f: () => Promise<void>) => async () => {
+  timestampCounter = 0;
+  const id = makeCounter("id");
+  await overrideIdGenerator(id)(overrideTime(deterministicTimestamp)(f))();
+};
+
 export const injectSecrets = pipe(
   flushRmmbr,
-  injectCacher(rmmbrCacher),
+  injectDeterministic,
+  injectCallModelWrapper(cachingCallModelWrapper),
   injectOpenAiToken(requireEnv("OPENAI_API_KEY")),
   injectGeminiToken(requireEnv("GEMINI_API_KEY")),
   injectKimiToken(requireEnv("KIMI_API_KEY")),
@@ -61,13 +94,13 @@ export const agentDeps = (inMemoryHistory: HistoryEvent[]): Injector =>
     }),
   );
 
-// Run agent with a specific provider
+// Run agent with a specific provider. Caching (via injectSecrets) applies
+// regardless of which path is used; the wrapper reads provider from spec.
 export const runWithProvider =
   (provider: "google" | "moonshot" | "anthropic" | undefined) =>
   (spec: AgentSpec): Promise<void> => runAgent({ ...spec, provider });
 
-// Run the same test with all providers (Google, Moonshot, Anthropic)
-// The testFn receives a runAgent function configured for the specific provider
+// Run the same test with all providers (Google, Moonshot, Anthropic).
 // Set geminiOnly=true for tests that use Gemini-specific features/mock data
 export const runForAllProviders = (
   testName: string,

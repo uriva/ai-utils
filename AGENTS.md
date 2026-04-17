@@ -78,10 +78,35 @@ silent fallback hides configuration bugs, produces non-deterministic test
 results, and burns API tokens on every push. Missing token → loud crash before
 any test runs.
 
-**The main agent path (`rawCallGemini`, `callAnthropic`, `callKimi`) is wired
-through `makeCache`.** When you add a new provider call path, wrap it with
-`makeCache` the same way so agent-level tests for it are cached. If you see a
-remote call that isn't cached, that's a bug — fix it.
+**Caching is a test-only concern, injected via `injectCallModelWrapper`.**
+`test_helpers.ts` wraps whatever `CallModel` `runAgent` resolves with an rmmbr
+cache (keyed on `provider + events`). Production does not inject this wrapper,
+so real calls are never cached in prod. When you add a new provider, make sure
+the `callModel` you expose flows through `resolveCallModel` in `mod.ts` so the
+injected wrapper applies — do not add ad-hoc caching layers inside the provider
+files.
+
+**Determinism is a prerequisite for caching.** `injectSecrets` wires
+deterministic `overrideIdGenerator` and `overrideTime` so events created inside
+the test have stable ids and timestamps across runs. If you add code that
+produces a new source of randomness in any event passed to `CallModel`, you must
+make it deterministic under test too, or caching breaks.
+
+**`agent.ts` is provider-agnostic.** It must not import any provider-specific
+file (`geminiAgent.ts`, `anthropicAgent.ts`, `kimiAgent.ts`). Provider dispatch
+lives in `mod.ts` under `providerCaller`. If you find yourself needing provider-
+specific behavior inside the agent loop, factor it behind an injection point and
+let the provider implementation supply it.
+
+**Provider-agnostic behavior tests inject a fake `CallModel`.** Tests that
+verify invariants of `runAgent` itself (streaming contract, iteration logic,
+event emission, etc.) should NOT run against the live providers. Use
+`injectCallModel(fake)` to supply a deterministic in-memory model that fires
+whatever chunks / returns whatever events the test needs. This is fast, stable,
+and provider-agnostic. See
+`tests/thinking.test.ts:"onStreamThinkingChunk receives thinking chunks fired
+during callModel"`
+for the canonical example.
 
 When running tests after changes, run only the tests affected by your changes.
 Do not run the full local test suite for final verification - CI will run the

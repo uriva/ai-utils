@@ -1,7 +1,7 @@
 import { context, type Injection } from "@uri/inject";
 import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
-import { zodToTypingString } from "./gemini.ts";
+import { zodToTypingString } from "./toolTyping.ts";
 import {
   hasInternalSentTimestampSuffix,
   stripInternalSentTimestampSuffix,
@@ -240,6 +240,36 @@ const historyInjection: Injection<() => Promise<HistoryEvent[]>> = context(
 const getHistory = historyInjection.access;
 export const injectAccessHistory = historyInjection.inject;
 export const accessHistory = historyInjection.access;
+
+export type CallModel = (events: HistoryEvent[]) => Promise<HistoryEvent[]>;
+
+const callModelInjection: Injection<CallModel> = context(
+  (_events: HistoryEvent[]): Promise<HistoryEvent[]> => {
+    throw new Error(
+      "no callModel injected; runAgent usually wires this from the provider",
+    );
+  },
+);
+
+export const injectCallModel = callModelInjection.inject;
+export const accessCallModel = callModelInjection.access;
+
+// Wraps the resolved CallModel. Used e.g. by test_helpers to add rmmbr
+// caching around whatever provider caller runAgent picks. The wrapper gets
+// the provider name so it can key caches per-provider.
+export type Provider = "google" | "moonshot" | "anthropic" | undefined;
+
+export type CallModelWrapper = (args: {
+  provider: Provider;
+  inner: CallModel;
+}) => CallModel;
+
+const callModelWrapperInjection: Injection<CallModelWrapper> = context(
+  ({ inner }) => inner,
+);
+
+export const injectCallModelWrapper = callModelWrapperInjection.inject;
+export const accessCallModelWrapper = callModelWrapperInjection.access;
 
 const parseWithCatch = <T extends ZodType>(
   parameters: T,

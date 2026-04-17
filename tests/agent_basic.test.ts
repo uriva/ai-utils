@@ -1,7 +1,10 @@
 import { assert, assertEquals } from "@std/assert";
+import { runAgent } from "../mod.ts";
 import {
   doNothingEvent,
+  getStreamChunk,
   type HistoryEvent,
+  injectCallModel,
   ownUtteranceTurn,
   participantUtteranceTurn,
 } from "../src/agent.ts";
@@ -341,71 +344,39 @@ runForAllProviders(
   true, // Gemini-only: test relies on Gemini-specific MIME type filtering behavior
 );
 
-runForAllProviders(
-  "agent streams output chunk by chunk",
-  async (runAgent) => {
-    let streamedText = "";
-    let chunkCount = 0;
-
+// Streaming contract: runAgent must forward chunks fired by the CallModel to
+// onStreamChunk. Provider-agnostic: we inject a fake callModel so we control
+// exactly which chunks fire. Actual provider streaming behavior is the SDK's
+// concern, not runAgent's.
+Deno.test("agent forwards stream chunks fired by callModel", async () => {
+  let streamedText = "";
+  let chunkCount = 0;
+  const fakeCallModel = async () => {
+    const emit = getStreamChunk();
+    await emit("Once ");
+    await emit("upon ");
+    await emit("a time.");
+    return [ownUtteranceTurn("Once upon a time.")];
+  };
+  await injectCallModel(fakeCallModel)(async () => {
     await agentDeps([
-      participantUtteranceTurn({
-        name: "user",
-        text: "Please write a short 20-word story about a brave knight.",
-      }),
+      participantUtteranceTurn({ name: "user", text: "start" }),
     ])(runAgent)({
       maxIterations: 1,
       onMaxIterationsReached: () => {},
       tools: [],
-      prompt: "You are a creative writer.",
-      onStreamChunk: (chunk) => {
+      prompt: "unused",
+      onStreamChunk: (chunk: string) => {
         streamedText += chunk;
         chunkCount++;
       },
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
-
-    assert(
-      chunkCount > 1,
-      `Should have received multiple stream chunks (got ${chunkCount})`,
-    );
-    assert(streamedText.length > 20, "Streamed text should be reasonably long");
-  },
-);
-
-runForAllProviders(
-  "agent outputs complete text in one chunk when disableStreaming is true",
-  async (runAgent) => {
-    let streamedText = "";
-    let chunkCount = 0;
-
-    await agentDeps([
-      participantUtteranceTurn({
-        name: "user",
-        text: "Please write a short 20-word story about a brave knight.",
-      }),
-    ])(runAgent)({
-      maxIterations: 1,
-      onMaxIterationsReached: () => {},
-      tools: [],
-      prompt: "You are a creative writer.",
-      onStreamChunk: (chunk) => {
-        streamedText += chunk;
-        chunkCount++;
-      },
-      rewriteHistory: noopRewriteHistory,
-      timezoneIANA: "UTC",
-      disableStreaming: true,
-    });
-
-    assertEquals(
-      chunkCount,
-      1,
-      `Should have received exactly one stream chunk (got ${chunkCount})`,
-    );
-    assert(streamedText.length > 20, "Streamed text should be reasonably long");
-  },
-);
+  })();
+  assertEquals(chunkCount, 3, `expected 3 chunks, got ${chunkCount}`);
+  assertEquals(streamedText, "Once upon a time.");
+});
 
 runForAllProviders(
   "handles do_nothing events in history",

@@ -19,7 +19,6 @@ import {
   type Tool,
   toolUseTurnWithMetadata,
 } from "./agent.ts";
-import { makeCache } from "./cacher.ts";
 import {
   appendInternalSentTimestamp,
   stripInternalSentTimestampSuffix,
@@ -529,7 +528,7 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
   };
 };
 
-const uncachedRawCallAnthropic = async ({
+const rawCallAnthropic = async ({
   req,
   disableStreaming,
 }: {
@@ -671,12 +670,6 @@ const uncachedRawCallAnthropic = async ({
 
   return output.length > 0 ? output : [{ type: "text", text: "" }];
 };
-
-const rawCallAnthropic = (args: {
-  req: AnthropicRequestParams;
-  disableStreaming?: boolean;
-}): Promise<AnthropicOutputPart[]> =>
-  makeCache("rawCallAnthropic-v1")(uncachedRawCallAnthropic)(args);
 
 const callAnthropicWithRetry = conditionalRetry(isRetryableError)(
   1000,
