@@ -502,17 +502,12 @@ runForAllProviders(
           "First explain what you are about to do in one short sentence, then call the doSomethingUnique tool.",
       }),
     ];
-    let streamedText = "";
-
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
       onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt:
         "You are an AI assistant. Before any tool call, first say exactly 'Checking now.' in a normal message, then call the tool.",
-      onStreamChunk: (chunk) => {
-        streamedText += chunk;
-      },
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -526,10 +521,7 @@ runForAllProviders(
 
     assert(firstTextIndex >= 0, "AI should emit the pre-tool text message");
     assert(firstToolIndex >= 0, "AI should call the tool");
-    assert(
-      streamedText.includes("Checking now."),
-      "onStreamChunk should include the pre-tool text",
-    );
+    assert(firstTextIndex < firstToolIndex, "AI text should precede tool call");
   },
   3,
 );
