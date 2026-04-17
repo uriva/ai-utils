@@ -19,10 +19,28 @@ const isRedundantAnyMember = (x: any) =>
   Object.keys(x).length === 1 && typeof (x.not) === "object" &&
   Object.keys(x.not).length === 0;
 
+// Fields marked with `.default()` in Zod end up in the JSON Schema `required`
+// array. That's technically fine per JSON Schema semantics, but our downstream
+// consumers (tool-typing strings, strict validators on prompt2bot) treat
+// `required` as "caller must provide". Strip those fields from `required` so
+// they're presented as optional to the model and to strict validators.
+// deno-lint-ignore no-explicit-any
+const pruneDefaultsFromRequired = (schema: any) => {
+  if (!schema?.properties || !Array.isArray(schema.required)) return schema;
+  // deno-lint-ignore no-explicit-any
+  const withDefault = (key: string) => (schema.properties[key] as any)?.default;
+  return {
+    ...schema,
+    required: schema.required.filter((k: string) =>
+      withDefault(k) === undefined
+    ),
+  };
+};
+
 // deno-lint-ignore no-explicit-any
 const removeAdditionalProperties = <T>(obj: Record<string, any>) => {
   if (typeof obj === "object" && obj !== null) {
-    let newObj = { ...obj };
+    let newObj = pruneDefaultsFromRequired({ ...obj });
     if (obj.anyOf) {
       // deno-lint-ignore no-explicit-any
       newObj.anyOf = obj.anyOf.filter((x: any) =>
@@ -78,8 +96,9 @@ const jsonSchemaNodeToTyping = (node: any): string => {
 
 // deno-lint-ignore no-explicit-any
 const jsonSchemaObjectToTyping = (schema: any): string => {
-  const required = new Set(schema.required || []);
-  const entries = Object.entries(schema.properties || {}).map(
+  const pruned = pruneDefaultsFromRequired(schema);
+  const required = new Set(pruned.required || []);
+  const entries = Object.entries(pruned.properties || {}).map(
     // deno-lint-ignore no-explicit-any
     ([key, prop]: [string, any]) => {
       const opt = required.has(key) ? "" : "?";
