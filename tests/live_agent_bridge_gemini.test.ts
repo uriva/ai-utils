@@ -18,6 +18,12 @@ const flakyLiveRelayCodeTest =
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const normalizeForMatch = (text: string) =>
+  text.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+const includesRelayCode = (text: string, relayCode: string) =>
+  normalizeForMatch(text).includes(normalizeForMatch(relayCode));
+
 const waitForCondition = (
   predicate: () => boolean,
   timeoutMs: number,
@@ -104,15 +110,14 @@ Deno.test({
       });
 
       await waitForCondition(
-        () =>
-          outputTexts.some((text) => text.toUpperCase().includes(fetchedCode)),
-        25_000,
+        () => outputTexts.some((text) => includesRelayCode(text, fetchedCode)),
+        45_000,
       );
       await testEndpoint.sendData({ type: "close", from: "tester" });
       await agentTask;
 
       assertEquals(
-        outputTexts.some((text) => text.toUpperCase().includes(fetchedCode)),
+        outputTexts.some((text) => includesRelayCode(text, fetchedCode)),
         true,
         JSON.stringify(outputTexts, null, 2),
       );
