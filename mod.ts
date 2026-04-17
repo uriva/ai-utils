@@ -3,6 +3,7 @@ import {
   accessCallModelWrapper,
   type AgentSpec,
   type CallModel,
+  type HistoryEvent,
   injectOutputEvent,
   injectStreamChunk,
   injectStreamThinkingChunk,
@@ -10,7 +11,7 @@ import {
 } from "./src/agent.ts";
 import { anthropicAgentCaller } from "./src/anthropicAgent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
-import { geminiAgentCaller } from "./src/geminiAgent.ts";
+import { geminiAgentCaller, prepareGeminiHistory } from "./src/geminiAgent.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
 export {
   appendInternalSentTimestamp,
@@ -74,6 +75,24 @@ const providerCaller = (spec: AgentSpec): CallModel => {
   return widen(geminiAgentCaller(spec));
 };
 
+// Provider-specific pre-filter that runs OUTSIDE the cached `callModel`
+// boundary. Any history normalization that has an observable side effect
+// (e.g. `rewriteHistory`) must live here — otherwise cached test runs replay
+// the cache and skip the side effect entirely. Inside the provider caller
+// the same filters still run for correctness; the duplication is an
+// idempotent no-op on an already-prepared history.
+// deno-lint-ignore no-explicit-any
+const widenPrepare = (fn: (events: any) => Promise<any>) =>
+  fn as (events: HistoryEvent[]) => Promise<HistoryEvent[]>;
+
+const prepareHistory =
+  (spec: AgentSpec) => (events: HistoryEvent[]): Promise<HistoryEvent[]> => {
+    if (spec.provider === "moonshot" || spec.provider === "anthropic") {
+      return Promise.resolve(events);
+    }
+    return widenPrepare(prepareGeminiHistory(spec.rewriteHistory))(events);
+  };
+
 // Picks the CallModel to use for this agent run.
 // - injectCallModel(fake) wins outright (tests use this to bypass providers).
 // - otherwise the provider-based caller is chosen from spec.provider.
@@ -87,7 +106,12 @@ const resolveCallModel = (spec: AgentSpec): CallModel => {
       return providerCaller(spec)(events);
     }
   };
-  return accessCallModelWrapper({ provider: spec.provider, inner: base });
+  const wrapped = accessCallModelWrapper({
+    provider: spec.provider,
+    inner: base,
+  });
+  const prepare = prepareHistory(spec);
+  return async (events) => wrapped(await prepare(events));
 };
 
 const runAgentInner = (spec: AgentSpec): Promise<void> =>

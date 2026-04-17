@@ -562,44 +562,78 @@ const didNothing = (output: GeminiOutput) =>
     p.type === "file_data"
   );
 
+// MIME types Gemini rejects with "Unsupported MIME type". Keeping this list
+// explicit (rather than waiting for the API to 400 us) lets us strip the
+// attachment once, up front, and persist the rewrite via `rewriteHistory` on
+// the first call — which matters for cached test runs where the reactive
+// error path in `stripAllUnsupportedMimeTypes` never fires.
+const knownUnsupportedGeminiMimeTypes = new Set<string>([
+  "application/octet-stream",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-excel",
+  "application/vnd.ms-powerpoint",
+  "application/msword",
+]);
+
 const isUnsupportedGeminiMimeType = (mimeType: string | undefined): boolean => {
   if (!mimeType) return true;
   const normalized = mimeType.trim().toLowerCase();
   if (!normalized) return true;
-  if (normalized === "application/octet-stream") return true;
-  return false;
+  return knownUnsupportedGeminiMimeTypes.has(normalized);
 };
 
 const filterDoNothing = (
   history: GeminiHistoryEvent[],
 ): GeminiHistoryEvent[] => history.filter((e) => e.type !== "do_nothing");
 
+const stripUnsupportedAttachmentsFromEvent = (
+  event: GeminiHistoryEvent,
+): { event: GeminiHistoryEvent; changed: boolean } => {
+  if (!("attachments" in event)) return { event, changed: false };
+  const attachments = event.attachments ?? [];
+  if (empty(attachments)) return { event, changed: false };
+  const kept = attachments.filter((att) =>
+    !isUnsupportedGeminiMimeType(att.mimeType)
+  );
+  if (kept.length === attachments.length) return { event, changed: false };
+  const removed = attachments.filter((att) =>
+    isUnsupportedGeminiMimeType(att.mimeType)
+  );
+  console.warn(
+    `Warning: Filtering out unsupported Gemini attachment mime types on event ${event.id}: ${
+      removed.map((att) => att.mimeType).join(", ")
+    }`,
+  );
+  return {
+    event: { ...event, attachments: empty(kept) ? undefined : kept },
+    changed: true,
+  };
+};
+
 const filterUnsupportedGeminiAttachments = (
   history: GeminiHistoryEvent[],
 ): GeminiHistoryEvent[] =>
-  history.map((event) => {
-    if (!("attachments" in event)) return event;
-    const attachments = event.attachments ?? [];
-    if (empty(attachments)) return event;
-    const kept = attachments.filter((att) =>
-      !isUnsupportedGeminiMimeType(att.mimeType)
-    );
-    if (kept.length === attachments.length) return event;
-    const removed = attachments.filter((att) =>
-      isUnsupportedGeminiMimeType(att.mimeType)
-    );
-    if (!empty(removed)) {
-      console.warn(
-        `Warning: Filtering out unsupported Gemini attachment mime types on event ${event.id}: ${
-          removed.map((att) => att.mimeType).join(", ")
-        }`,
+  history.map((event) => stripUnsupportedAttachmentsFromEvent(event).event);
+
+// Same stripping as `filterUnsupportedGeminiAttachments` but records
+// replacements so callers can persist them via `rewriteHistory`. Runs outside
+// the cached `callModel` boundary so side effects fire even on cache hits.
+export const filterAndRewriteUnsupportedGeminiAttachments =
+  (rewriteHistory: AgentSpec["rewriteHistory"]) =>
+  async (history: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> => {
+    const replacements: Record<string, GeminiHistoryEvent> = {};
+    const result = history.map((event) => {
+      const { event: stripped, changed } = stripUnsupportedAttachmentsFromEvent(
+        event,
       );
-    }
-    return {
-      ...event,
-      attachments: empty(kept) ? undefined : kept,
-    };
-  });
+      if (changed) replacements[event.id] = stripped;
+      return stripped;
+    });
+    if (!empty(Object.keys(replacements))) await rewriteHistory(replacements);
+    return result;
+  };
 
 export const filterOrphanedToolResults = (
   history: GeminiHistoryEvent[],
@@ -676,65 +710,95 @@ const textToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
   }]`,
 });
 
+const computeInvalidToolCallReplacements = (
+  history: GeminiHistoryEvent[],
+): {
+  filtered: GeminiHistoryEvent[];
+  replacements: Record<string, GeminiHistoryEvent>;
+} => {
+  const toolCallsByResponseId = new Map<string, GeminiHistoryEvent[]>();
+  for (const e of history) {
+    if (e.type === "tool_call") {
+      const id = getOriginalId(e);
+      const group = toolCallsByResponseId.get(id) || [];
+      group.push(e);
+      toolCallsByResponseId.set(id, group);
+    }
+  }
+
+  // A response group is tainted if it contains tool calls, but NONE of them
+  // have a thoughtSignature. (In parallel calls, only the first gets a signature).
+  const taintedResponseIds = new Set<string>();
+  for (const [responseId, toolCalls] of toolCallsByResponseId.entries()) {
+    const hasSignature = toolCalls.some((e) =>
+      "modelMetadata" in e && e.modelMetadata?.thoughtSignature?.trim()
+    );
+    if (!hasSignature) taintedResponseIds.add(responseId);
+  }
+
+  if (taintedResponseIds.size === 0) {
+    return { filtered: history, replacements: {} };
+  }
+
+  const isTainted = (e: GeminiHistoryEvent) =>
+    taintedResponseIds.has(getOriginalId(e));
+
+  const replacements: Record<string, GeminiHistoryEvent> = {};
+  const filtered = history.filter((e) => {
+    if (e.type === "tool_call" && isTainted(e)) {
+      replacements[e.id] = toolCallToOwnThought(e);
+      return false;
+    }
+    if (e.type === "tool_result" && "toolCallId" in e && e.toolCallId) {
+      const parentCall = history.find((h) => h.id === e.toolCallId);
+      if (parentCall && isTainted(parentCall)) {
+        replacements[e.id] = toolResultToOwnThought(e);
+        return false;
+      }
+    }
+    if (
+      (e.type === "own_utterance" || e.type === "own_thought") && isTainted(e)
+    ) {
+      replacements[e.id] = textToOwnThought(e);
+      return false;
+    }
+    return true;
+  });
+
+  return { filtered, replacements };
+};
+
+// Synchronous filter used inside the cached provider caller so the filter is
+// applied deterministically on every run (including on cache hits inside the
+// inner call, though in practice the pre-filter runs first and this is a
+// no-op). The `rewriteHistory` side-effect is fire-and-forget here because it
+// has already been awaited outside the cache boundary in
+// `prepareGeminiHistory`.
 export const filterAndRewriteInvalidToolCalls =
   (rewriteHistory: AgentSpec["rewriteHistory"]) =>
   (history: GeminiHistoryEvent[]): GeminiHistoryEvent[] => {
-    // Group all tool calls by their original response ID
-    const toolCallsByResponseId = new Map<string, GeminiHistoryEvent[]>();
-    for (const e of history) {
-      if (e.type === "tool_call") {
-        const id = getOriginalId(e);
-        const group = toolCallsByResponseId.get(id) || [];
-        group.push(e);
-        toolCallsByResponseId.set(id, group);
-      }
-    }
-
-    // A response group is tainted if it contains tool calls, but NONE of them
-    // have a thoughtSignature. (In parallel calls, only the first gets a signature).
-    const taintedResponseIds = new Set<string>();
-    for (const [responseId, toolCalls] of toolCallsByResponseId.entries()) {
-      const hasSignature = toolCalls.some((e) =>
-        "modelMetadata" in e && e.modelMetadata?.thoughtSignature?.trim()
-      );
-      if (!hasSignature) {
-        taintedResponseIds.add(responseId);
-      }
-    }
-
-    if (taintedResponseIds.size === 0) return history;
-
-    const isTainted = (e: GeminiHistoryEvent) =>
-      taintedResponseIds.has(getOriginalId(e));
-
-    const replacements: Record<string, GeminiHistoryEvent> = {};
-    const filtered = history.filter((e) => {
-      if (e.type === "tool_call" && isTainted(e)) {
-        replacements[e.id] = toolCallToOwnThought(e);
-        return false;
-      }
-      if (
-        e.type === "tool_result" && "toolCallId" in e && e.toolCallId
-      ) {
-        // Find if the parent tool call was tainted
-        const parentCall = history.find((h) => h.id === e.toolCallId);
-        if (parentCall && isTainted(parentCall)) {
-          replacements[e.id] = toolResultToOwnThought(e);
-          return false;
-        }
-      }
-      if (
-        (e.type === "own_utterance" || e.type === "own_thought") && isTainted(e)
-      ) {
-        replacements[e.id] = textToOwnThought(e);
-        return false;
-      }
-      return true;
-    });
-
-    rewriteHistory(replacements).catch((err) =>
-      console.warn("Failed to rewrite history for invalid tool calls:", err)
+    const { filtered, replacements } = computeInvalidToolCallReplacements(
+      history,
     );
+    if (!empty(Object.keys(replacements))) {
+      rewriteHistory(replacements).catch((err) =>
+        console.warn("Failed to rewrite history for invalid tool calls:", err)
+      );
+    }
+    return filtered;
+  };
+
+// Async variant invoked OUTSIDE the cached `callModel` boundary so the
+// `rewriteHistory` side effect runs even when the inner call is served from
+// the rmmbr cache. Production flows through here too; making it await means
+// downstream code can rely on the persisted history being up to date.
+export const filterAndRewriteInvalidToolCallsAsync =
+  (rewriteHistory: AgentSpec["rewriteHistory"]) =>
+  async (history: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> => {
+    const { filtered, replacements } = computeInvalidToolCallReplacements(
+      history,
+    );
+    if (!empty(Object.keys(replacements))) await rewriteHistory(replacements);
     return filtered;
   };
 
@@ -1015,6 +1079,23 @@ const maxHistoryTokens = 800_000;
 
 const noResponseInstruction =
   "\n\nWhen you have nothing to say (e.g. the message is irrelevant), respond with exactly [no response] and nothing else.";
+
+// Side-effectful history normalization that MUST run outside the cached
+// `callModel` boundary. Without this, tests replay a populated rmmbr cache
+// and never see the underlying provider call — meaning the `rewriteHistory`
+// calls buried inside the Gemini caller silently skip. The same logic is
+// still applied inside `geminiAgentCaller` for correctness during cache
+// misses / production; the pre-filter here makes those paths idempotent
+// no-ops while guaranteeing the rewrite is persisted on every call.
+export const prepareGeminiHistory =
+  (rewriteHistory: AgentSpec["rewriteHistory"]) =>
+  (events: HistoryEventWithMetadata<GeminiMetadata>[]): Promise<
+    HistoryEventWithMetadata<GeminiMetadata>[]
+  > =>
+    pipe(
+      filterAndRewriteInvalidToolCallsAsync(rewriteHistory),
+      filterAndRewriteUnsupportedGeminiAttachments(rewriteHistory),
+    )(events);
 
 export const geminiAgentCaller = ({
   lightModel,
