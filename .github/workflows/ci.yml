@@ -45,4 +45,19 @@ jobs:
         with:
           deno-version: v2.x
       - name: Test
-        run: deno test -A tests/
+        run: |
+          if [ -z "$TEST_PROVIDER" ]; then
+            deno test -A \
+              tests/compaction.test.ts \
+              tests/output_sanitization.test.ts \
+              tests/pure_logic.test.ts \
+              tests/thought_duplication.test.ts \
+              tests/thought_signature.test.ts \
+              tests/token_cap.test.ts
+          else
+            deno test -A \
+              tests/agent_tools.test.ts \
+              tests/multiple_tool_calls_history.test.ts \
+              tests/thinking.test.ts \
+              --filter "\[$TEST_PROVIDER\]"
+          fi
