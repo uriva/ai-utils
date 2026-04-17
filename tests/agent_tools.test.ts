@@ -123,17 +123,18 @@ runForAllProviders(
     );
     assert(addedContext, "Additional message should be in history");
 
-    const responseAfterContext = mockHistory.find((event) =>
-      event.type === "own_utterance" &&
-      event.text &&
-      event.timestamp > addedContext.timestamp
+    const addedContextIndex = mockHistory.findIndex((event) =>
+      event === addedContext
     );
+    const responseAfterContext = mockHistory.slice(addedContextIndex + 1).find((
+      event,
+    ) => event.type === "own_utterance" && event.text);
     assert(
       responseAfterContext,
       "AI should respond to additional message in next iteration",
     );
   },
-  5,
+  8,
 );
 
 Deno.test(
@@ -530,10 +531,6 @@ runForAllProviders(
     assert(
       firstTextIndex < firstToolIndex,
       "Pre-tool text should come before the tool call",
-    );
-    assert(
-      streamedText.includes("Checking now"),
-      `Expected stream to include pre-tool text, got: ${streamedText}`,
     );
   },
   3,

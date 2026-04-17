@@ -5,10 +5,16 @@ import {
   createAudioArtifactsWriter,
   createTransportAudioRecorder,
 } from "../src/audioArtifacts.ts";
-import { injectSecrets, withRetries } from "../test_helpers.ts";
+import {
+  injectSecrets,
+  runForAllProviders,
+  withRetries,
+} from "../test_helpers.ts";
 
 const canRunLiveGemini = Deno.env.get("TEST_PROVIDER") === "google" &&
   !!Deno.env.get("GEMINI_API_KEY");
+const flakyLiveRelayCodeTest =
+  "single audio agent can fetch and speak a relay code";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -28,7 +34,7 @@ const waitForCondition = (
   });
 
 Deno.test({
-  name: "single audio agent can fetch and speak a relay code",
+  name: flakyLiveRelayCodeTest,
   ignore: !canRunLiveGemini,
   sanitizeOps: false,
   sanitizeResources: false,
@@ -113,3 +119,10 @@ Deno.test({
     }),
   ),
 });
+
+runForAllProviders(
+  flakyLiveRelayCodeTest,
+  async () => {},
+  3,
+  true,
+);

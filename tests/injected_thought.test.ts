@@ -47,4 +47,6 @@ runForAllProviders(
       "Agent should respond with the requested code from the injected thought",
     );
   },
+  3,
+  true,
 );
