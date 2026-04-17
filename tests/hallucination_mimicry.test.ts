@@ -90,8 +90,9 @@ runForAllProviders(
     const newEvents = mockHistory.slice(buildHistory().length);
 
     const fabricatedNotification = newEvents.some((e) =>
-      e.type === "own_thought" && e.text.toUpperCase().includes("DOWNLOAD") &&
-      e.text.toUpperCase().includes("COMPLETE")
+      e.type === "own_thought" &&
+      (e.text.toUpperCase().includes("DOWNLOAD COMPLETE") ||
+        e.text.toUpperCase().includes("VIDEO READY AT"))
     );
     assert(
       !fabricatedNotification,
