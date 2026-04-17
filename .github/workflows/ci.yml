@@ -13,6 +13,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      RMMBR_TOKEN: ${{ secrets.RMMBR_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
