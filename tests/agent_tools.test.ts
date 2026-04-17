@@ -296,7 +296,7 @@ runForAllProviders(
       ownUtteranceTurn("I'm doing well, thanks!"),
       participantUtteranceTurn({
         name: "user",
-        text: "What is 1+1?",
+        text: "What were the contact names?",
       }),
     ];
 
@@ -308,6 +308,59 @@ runForAllProviders(
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
+  },
+);
+
+runForAllProviders(
+  "zod .default() on a tool param is honored when the model omits it",
+  async (runAgent) => {
+    const received: { prefix: string; skip?: number }[] = [];
+    const searchTool = {
+      name: "search_items",
+      description: "Search items by a required prefix, skipping past results.",
+      parameters: z.object({
+        prefix: z.string().describe("Prefix to search for"),
+        skip: z.number().describe(
+          "How many results to skip past. Defaults to 0.",
+        ).default(0),
+      }),
+      handler: (args: { prefix: string; skip: number }) => {
+        received.push(args);
+        return Promise.resolve(`found 1 item starting with ${args.prefix}`);
+      },
+    };
+
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text:
+        `Call the search_items tool with prefix "abc". Do not include any other fields.`,
+    })];
+
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 5,
+      onMaxIterationsReached: () => {},
+      tools: [searchTool],
+      prompt: "You are an AI assistant. Call tools exactly as the user asks.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+
+    assert(
+      received.length > 0,
+      `search_items handler was never called. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+    assertEquals(
+      received[0].prefix,
+      "abc",
+      "handler should receive the prefix the model sent",
+    );
+    assertEquals(
+      received[0].skip,
+      0,
+      "handler should receive the zod default (0) for the omitted skip param",
+    );
   },
 );
 

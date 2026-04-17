@@ -1,6 +1,6 @@
 {
   "name": "@uri/ai-utils",
-  "version": "0.1.260",
+  "version": "0.1.261",
   "license": "MIT",
   "exports": "./mod.ts",
   "imports": {
@@ -12,6 +12,7 @@
     "@uri/inject": "jsr:@uri/inject@0.0.2",
     "gamla": "jsr:@uri/gamla@0.0.6",
     "openai": "npm:openai@5.2.0",
+    "rmmbr": "npm:rmmbr@0.0.26",
     "zod": "npm:zod@3.25.57"
   },
   "tasks": {

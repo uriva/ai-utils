@@ -23,6 +23,7 @@ import {
   type Tool,
   toolUseTurnWithMetadata,
 } from "./agent.ts";
+import { makeCache } from "./cacher.ts";
 import {
   appendInternalSentTimestamp,
   stripInternalSentTimestampSuffix,
@@ -385,7 +386,7 @@ async (events: KimiHistoryEvent[]): Promise<KimiRequestParams> => {
   return req;
 };
 
-const rawCallKimi = async ({
+const uncachedRawCallKimi = async ({
   req,
   disableStreaming,
 }: {
@@ -504,6 +505,12 @@ const rawCallKimi = async ({
     ...(reasoning ? { reasoningContent: reasoning } : {}),
   }];
 };
+
+const rawCallKimi = (args: {
+  req: KimiRequestParams;
+  disableStreaming?: boolean;
+}): Promise<KimiOutputPart[]> =>
+  makeCache("rawCallKimi-v1")(uncachedRawCallKimi)(args);
 
 const callKimiWithRetry = conditionalRetry(isRetryableError)(
   1000,

@@ -49,11 +49,39 @@ absolutely necessary.
 When writing tests that verify a behaviour against the api, actually call the
 api instead of mocking it. Only mock when given explicit permission by the user.
 
-Tests should verify behaviour at the agent-run level (using `runAgent` /
-`agentDeps` / `runForBothProviders`), not at the level of internal helper
-functions. A pure-logic unit test on e.g. `buildReq` output shape does not catch
-real integration issues. Prefer a test that runs the agent against the real API
-and asserts on the resulting history events.
+**All bug reproductions and behaviour tests MUST be agent-level.** Write a test
+that runs the real agent (via `runAgent` / `agentDeps` / `runForAllProviders`)
+against the real API, and asserts on the resulting history events. This is the
+only way to catch real integration issues, because bugs live in the interaction
+between Zod schemas, JSON-schema conversion, provider-specific function
+declarations, strict validators on the provider side, and our call-site code. A
+pure-logic unit test on e.g. `buildReq` output shape or a schema-transform
+function is insufficient by itself — it will pass while production still breaks.
+
+**All agent-level tests MUST run on every provider.** Use `runForAllProviders`
+unless the bug is strictly provider-specific (and state why in a comment). Only
+set `geminiOnly=true` when the test uses a Gemini-specific feature or input
+format.
+
+**All agent-level tests MUST use a real rmmbr cacher.** `test_helpers.ts` wires
+a real rmmbr cache into `injectSecrets`. Do not replace it with a passthrough
+cacher. Deterministic fixtures make test runs fast, stable, and cheap; uncached
+runs burn tokens on every push and introduce flakiness. If you add a new test
+that hits the API, make sure it's wrapped with `injectSecrets` so it picks up
+the cache.
+
+**If the rmmbr token is unavailable, the test suite MUST fail violently at
+startup.** `test_helpers.ts` reads `RMMBR_TOKEN` from the environment and throws
+immediately if it's missing. Never fall back to a passthrough cacher, an
+empty-token in-memory/on-disk cache, or skip caching "just for this run". A
+silent fallback hides configuration bugs, produces non-deterministic test
+results, and burns API tokens on every push. Missing token → loud crash before
+any test runs.
+
+**The main agent path (`rawCallGemini`, `callAnthropic`, `callKimi`) is wired
+through `makeCache`.** When you add a new provider call path, wrap it with
+`makeCache` the same way so agent-level tests for it are cached. If you see a
+remote call that isn't cached, that's a bug — fix it.
 
 When running tests after changes, run only the tests affected by your changes.
 Do not run the full local test suite for final verification - CI will run the

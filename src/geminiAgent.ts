@@ -39,6 +39,7 @@ import {
   type ToolResult,
   toolUseTurnWithMetadata,
 } from "./agent.ts";
+import { makeCache } from "./cacher.ts";
 import {
   accessGeminiToken,
   attachmentsToParts,
@@ -182,7 +183,7 @@ export const stripExpiredFile = (
   };
 };
 
-const rawCallGemini = async ({
+const uncachedRawCallGemini = async ({
   req,
   disableStreaming,
 }: {
@@ -292,6 +293,12 @@ const rawCallGemini = async ({
   });
 };
 
+const rawCallGemini = (args: {
+  req: GenerateContentParameters;
+  disableStreaming?: boolean;
+}): Promise<GeminiOutput> =>
+  makeCache("rawCallGemini-v1")(uncachedRawCallGemini)(args);
+
 const callGeminiWithRetry = conditionalRetry(isRetryableError)(
   1000,
   4,
@@ -302,7 +309,7 @@ const callGemini = (
   req: GenerateContentParameters,
   disableStreaming?: boolean,
 ): Promise<GeminiOutput> =>
-  callGeminiWithRetry({ req, disableStreaming }).catch((err) => {
+  callGeminiWithRetry({ req, disableStreaming }).catch((err: unknown) => {
     if (!isRetryableError(err)) throw err;
     return rawCallGemini({
       req: {

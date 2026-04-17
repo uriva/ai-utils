@@ -1,5 +1,6 @@
 import type { Injector } from "@uri/inject";
 import { pipe } from "gamla";
+import { cache, waitAllWrites } from "rmmbr";
 import { z } from "zod/v4";
 import {
   injectAnthropicToken,
@@ -18,15 +19,37 @@ import {
   type ToolReturn,
 } from "./src/agent.ts";
 
+const requireEnv = (name: string) => {
+  const v = Deno.env.get(name);
+  if (!v) throw new Error(`Missing required env var: ${name}`);
+  return v;
+};
+
+const rmmbrToken = requireEnv("RMMBR_TOKEN");
+
+const rmmbrCacher = (cacheId: string) =>
+  cache({
+    cacheId,
+    ttl: 60 * 60 * 24 * 30,
+    url: "https://rmmbr.net",
+    token: rmmbrToken,
+  }) as Injector;
+
+const flushRmmbr = (f: () => Promise<void>) => async () => {
+  try {
+    await f();
+  } finally {
+    await waitAllWrites();
+  }
+};
+
 export const injectSecrets = pipe(
-  // @ts-expect-error passthrough cacher is sufficient for tests
-  injectCacher(() => (f) => f),
-  injectOpenAiToken(
-    Deno.env.get("OPENAI_API_KEY") ?? "",
-  ),
-  injectGeminiToken(Deno.env.get("GEMINI_API_KEY") ?? ""),
-  injectKimiToken(Deno.env.get("KIMI_API_KEY") ?? ""),
-  injectAnthropicToken(Deno.env.get("ANTHROPIC_API_KEY") ?? ""),
+  flushRmmbr,
+  injectCacher(rmmbrCacher),
+  injectOpenAiToken(requireEnv("OPENAI_API_KEY")),
+  injectGeminiToken(requireEnv("GEMINI_API_KEY")),
+  injectKimiToken(requireEnv("KIMI_API_KEY")),
+  injectAnthropicToken(requireEnv("ANTHROPIC_API_KEY")),
 );
 
 export const agentDeps = (inMemoryHistory: HistoryEvent[]): Injector =>

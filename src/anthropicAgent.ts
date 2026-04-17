@@ -19,6 +19,7 @@ import {
   type Tool,
   toolUseTurnWithMetadata,
 } from "./agent.ts";
+import { makeCache } from "./cacher.ts";
 import {
   appendInternalSentTimestamp,
   stripInternalSentTimestampSuffix,
@@ -105,11 +106,9 @@ type AnthropicRequestParams = {
   messages: Anthropic.Messages.MessageParam[];
   tools?: Anthropic.Messages.Tool[];
   max_tokens: number;
-  thinking?: { type: "enabled"; budget_tokens: number };
+  thinking?: { type: "adaptive" };
+  output_config?: { effort: "low" | "medium" | "high" | "xhigh" | "max" };
 };
-
-const anthropicThinkingBudget = (maxTokens: number) =>
-  Math.min(1024, maxTokens - 1);
 
 type AnthropicMediaType =
   | "image/jpeg"
@@ -503,9 +502,6 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
 
   const effectiveMaxTokens = maxOutputTokens ?? 16000;
   const thinkingEnabled = effectiveMaxTokens > 1024;
-  const thinkingBudget = thinkingEnabled
-    ? anthropicThinkingBudget(effectiveMaxTokens)
-    : undefined;
 
   // When thinking is enabled, Anthropic does not allow assistant prefill
   // (last message must be from user)
@@ -523,16 +519,17 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
     system: systemPrompt,
     messages,
     max_tokens: effectiveMaxTokens,
-    ...(thinkingEnabled && thinkingBudget
+    ...(thinkingEnabled
       ? {
-        thinking: { type: "enabled" as const, budget_tokens: thinkingBudget },
+        thinking: { type: "adaptive" as const },
+        output_config: { effort: "high" as const },
       }
       : {}),
     ...(allTools.length > 0 ? { tools: allTools.map(actionToTool) } : {}),
   };
 };
 
-const rawCallAnthropic = async ({
+const uncachedRawCallAnthropic = async ({
   req,
   disableStreaming,
 }: {
@@ -674,6 +671,12 @@ const rawCallAnthropic = async ({
 
   return output.length > 0 ? output : [{ type: "text", text: "" }];
 };
+
+const rawCallAnthropic = (args: {
+  req: AnthropicRequestParams;
+  disableStreaming?: boolean;
+}): Promise<AnthropicOutputPart[]> =>
+  makeCache("rawCallAnthropic-v1")(uncachedRawCallAnthropic)(args);
 
 const callAnthropicWithRetry = conditionalRetry(isRetryableError)(
   1000,

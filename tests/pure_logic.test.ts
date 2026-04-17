@@ -11,7 +11,6 @@ import {
   runAbstractAgent,
   runCommandToolName,
 } from "../src/agent.ts";
-import { zodToGeminiParameters, zodToTypingString } from "../src/gemini.ts";
 import {
   buildReq,
   filterOrphanedToolResults,
@@ -660,44 +659,6 @@ Deno.test(
     assert(
       history.some((e) => e.type === "do_nothing"),
       "should emit the do_nothing event",
-    );
-  },
-);
-
-Deno.test(
-  "zodToTypingString: field with .default() is rendered as optional",
-  () => {
-    const schema = z.object({
-      required: z.number(),
-      withDefault: z.number().default(0),
-      optional: z.number().optional(),
-    });
-    const typing = zodToTypingString(schema);
-    assert(
-      typing.includes("withDefault?:"),
-      `field with .default() should be rendered as optional, got: ${typing}`,
-    );
-    assert(
-      typing.includes("required:") && !typing.includes("required?:"),
-      `field without default/optional should stay required, got: ${typing}`,
-    );
-  },
-);
-
-Deno.test(
-  "zodToGeminiParameters: field with .default() is omitted from required",
-  () => {
-    const schema = z.object({
-      a: z.number(),
-      b: z.number().default(0),
-    });
-    const params = zodToGeminiParameters(schema) as unknown as {
-      required?: string[];
-    };
-    assertEquals(
-      params.required,
-      ["a"],
-      `field with .default() should not appear in required array`,
     );
   },
 );
