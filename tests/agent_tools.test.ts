@@ -6,6 +6,7 @@ import { runForAllProviders } from "../test_helpers.ts";
 import {
   type DeferredTool,
   type HistoryEvent,
+  injectCallModel,
   ownThoughtTurnWithMetadata,
   ownUtteranceTurn,
   participantUtteranceTurn,
@@ -138,41 +139,54 @@ llmTest(
   5,
 );
 
-llmTest(
+Deno.test(
   "maxIterationsReached aborts the loop",
-  injectSecrets(async () => {
+  async () => {
     let callbackCalled = false;
     const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
       name: "user",
       text:
         "Keep going forever. On every turn, call continueTalking again before anything else.",
     })];
-    await agentDeps(mockHistory)(runAgent)({
-      maxIterations: 3,
-      onMaxIterationsReached: () => {
-        callbackCalled = true;
-      },
-      tools: [{
-        name: "continueTalking",
-        description: "A tool that keeps the conversation going",
-        parameters: z.object({}),
-        handler: async () => {
-          await sleep(5);
-          mockHistory.push(participantUtteranceTurn({
-            name: "user",
-            text: "Keep going, call the tool again!",
-          }));
-          return "continue";
+    let n = 0;
+    const fakeCallModel = () =>
+      Promise.resolve([
+        {
+          type: "tool_call" as const,
+          isOwn: true as const,
+          name: "continueTalking",
+          parameters: {},
+          id: `fake-tool-${++n}`,
+          timestamp: Date.now(),
         },
-      }],
-      prompt:
-        "You are a chatty AI. In every response, call continueTalking before any text. Never stop the loop on your own.",
-      rewriteHistory: noopRewriteHistory,
-      timezoneIANA: "UTC",
-    });
+      ]);
+    await injectCallModel(fakeCallModel)(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        maxIterations: 3,
+        onMaxIterationsReached: () => {
+          callbackCalled = true;
+        },
+        tools: [{
+          name: "continueTalking",
+          description: "A tool that keeps the conversation going",
+          parameters: z.object({}),
+          handler: async () => {
+            await sleep(5);
+            mockHistory.push(participantUtteranceTurn({
+              name: "user",
+              text: "Keep going, call the tool again!",
+            }));
+            return "continue";
+          },
+        }],
+        prompt:
+          "You are a chatty AI. In every response, call continueTalking before any text. Never stop the loop on your own.",
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+      });
+    })();
     assert(callbackCalled, "onMaxIterationsReached callback should be called");
-  }),
-  5,
+  },
 );
 
 llmTest(

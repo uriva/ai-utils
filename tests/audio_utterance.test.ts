@@ -383,6 +383,35 @@ Deno.test(
   },
 );
 
+Deno.test(
+  "makeSessionEventHandler emits latest utterance before tool_call boundary",
+  () => {
+    const utterances: string[] = [];
+    const handler = makeSessionEventHandler({
+      onAudio: () => {},
+      onUtterance: (text) => {
+        utterances.push(text);
+      },
+      onFlush: () => {},
+      onTurnOutput: () => {},
+    });
+
+    handler({
+      type: "output_transcript",
+      text: "ALPHA TANGO",
+      finished: false,
+    });
+    handler({
+      type: "tool_call",
+      id: "tc1",
+      name: "hangUp",
+      args: {},
+    });
+
+    assertEquals(utterances, ["ALPHA TANGO"]);
+  },
+);
+
 const exampleSkill = {
   name: "secret_skill",
   description: "A skill for getting secrets",

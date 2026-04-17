@@ -140,10 +140,12 @@ export const makeSessionEventHandler = (
       event.type === "tool_call"
     ) {
       if (
-        event.type === "turn_complete" && !interrupted &&
+        (event.type === "turn_complete" || event.type === "tool_call") &&
+        !interrupted &&
         latestOutputTranscript
       ) {
         callbacks.onUtterance(latestOutputTranscript);
+        latestOutputTranscript = "";
       }
       const sessionOutput = turnEvents;
       turnEvents = [];

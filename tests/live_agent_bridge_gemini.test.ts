@@ -9,6 +9,21 @@ import { injectSecrets, withRetries } from "../test_helpers.ts";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const waitForCondition = (
+  predicate: () => boolean,
+  timeoutMs: number,
+) =>
+  new Promise<void>((resolve) => {
+    const deadline = setTimeout(() => resolve(), timeoutMs);
+    const poll = setInterval(() => {
+      if (predicate()) {
+        clearTimeout(deadline);
+        clearInterval(poll);
+        resolve();
+      }
+    }, 500);
+  });
+
 Deno.test({
   name: "single audio agent can fetch and speak a relay code",
   ignore: !Deno.env.get("GEMINI_API_KEY"),
@@ -79,7 +94,11 @@ Deno.test({
         from: "tester",
       });
 
-      await delay(20_000);
+      await waitForCondition(
+        () =>
+          outputTexts.some((text) => text.toUpperCase().includes(fetchedCode)),
+        25_000,
+      );
       await testEndpoint.sendData({ type: "close", from: "tester" });
       await agentTask;
 
