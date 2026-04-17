@@ -107,6 +107,8 @@ runForAllProviders(
       }`,
     );
   },
+  3,
+  true,
 );
 
 runForAllProviders(
