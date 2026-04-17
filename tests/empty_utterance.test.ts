@@ -2,15 +2,14 @@ import { assert } from "@std/assert";
 import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
 import {
   agentDeps,
-  injectSecrets,
   noopRewriteHistory,
+  runForAllProviders,
   someTool,
 } from "../test_helpers.ts";
-import { runAgent } from "../mod.ts";
 
-Deno.test(
+runForAllProviders(
   "agent does not emit own_utterance with empty text",
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -18,7 +17,7 @@ Deno.test(
           `Think carefully about what you need to do, then call the doSomethingUnique tool. Make sure to reason through your approach first.`,
       }),
     ];
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
       onMaxIterationsReached: () => {},
       tools: [someTool],
@@ -40,5 +39,5 @@ Deno.test(
         ).join(", ")
       }`,
     );
-  }),
+  },
 );

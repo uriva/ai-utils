@@ -7,6 +7,9 @@ import {
 } from "../src/audioArtifacts.ts";
 import { injectSecrets, withRetries } from "../test_helpers.ts";
 
+const canRunLiveGemini = Deno.env.get("TEST_PROVIDER") === "google" &&
+  !!Deno.env.get("GEMINI_API_KEY");
+
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const waitForCondition = (
@@ -26,7 +29,7 @@ const waitForCondition = (
 
 Deno.test({
   name: "single audio agent can fetch and speak a relay code",
-  ignore: !Deno.env.get("GEMINI_API_KEY"),
+  ignore: !canRunLiveGemini,
   sanitizeOps: false,
   sanitizeResources: false,
   fn: withRetries(

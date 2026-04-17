@@ -59,30 +59,4 @@ jobs:
               --filter "onStreamThinkingChunk receives thinking chunks fired during callModel"
             exit 0
           fi
-
-          deno test -A \
-            tests/agent_basic.test.ts \
-            tests/agent_tools.test.ts \
-            tests/multiple_tool_calls_history.test.ts \
-            tests/thinking.test.ts \
-            --filter " [$TEST_PROVIDER]"
-
-          if [ "$TEST_PROVIDER" = "anthropic" ]; then
-            deno test -A tests/test_anthropic.test.ts
-            exit 0
-          fi
-
-          if [ "$TEST_PROVIDER" = "google" ]; then
-            deno test -A \
-              tests/agent_media.test.ts \
-              tests/agent_misc.test.ts \
-              tests/agent_skills.test.ts \
-              tests/audio_utterance.test.ts \
-              tests/empty_utterance.test.ts \
-              tests/fabricated_user_message.test.ts \
-              tests/hallucination_mimicry.test.ts \
-              tests/injected_thought.test.ts \
-              tests/live_agent_bridge_gemini.test.ts \
-              tests/no_response.test.ts
-            exit 0
-          fi
+          deno test -A tests/

@@ -15,6 +15,8 @@ import { injectSecrets, withRetries } from "../test_helpers.ts";
 import { z } from "zod/v4";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const canRunLiveGemini = Deno.env.get("TEST_PROVIDER") === "google" &&
+  !!Deno.env.get("GEMINI_API_KEY");
 
 const waitForCondition = (
   predicate: () => boolean,
@@ -33,7 +35,7 @@ const waitForCondition = (
 
 Deno.test({
   name: "audio agent emits own_utterance events via real Gemini session",
-  ignore: !Deno.env.get("GEMINI_API_KEY"),
+  ignore: !canRunLiveGemini,
   sanitizeOps: false,
   sanitizeResources: false,
   fn: injectSecrets(async () => {
@@ -114,7 +116,7 @@ const slowTool = tool({
 
 Deno.test({
   name: "audio agent uses fast and slow tools via real Gemini session",
-  ignore: !Deno.env.get("GEMINI_API_KEY"),
+  ignore: !canRunLiveGemini,
   sanitizeOps: false,
   sanitizeResources: false,
   fn: injectSecrets(async () => {
@@ -299,7 +301,7 @@ const runTwoBotExchange = async (): Promise<
 Deno.test({
   name:
     "two audio bots exchange speech without duplicated participant_edit_message",
-  ignore: !Deno.env.get("GEMINI_API_KEY"),
+  ignore: !canRunLiveGemini,
   sanitizeOps: false,
   sanitizeResources: false,
   fn: injectSecrets(async () => {
@@ -428,7 +430,7 @@ const exampleSkill = {
 
 Deno.test({
   name: "audio agent uses skills via real Gemini session",
-  ignore: !Deno.env.get("GEMINI_API_KEY"),
+  ignore: !canRunLiveGemini,
   sanitizeOps: false,
   sanitizeResources: false,
   fn: withRetries(
@@ -494,7 +496,7 @@ Deno.test({
 Deno.test({
   name:
     "audio agent speaks the result of a skill tool when not explicitly told to",
-  ignore: !Deno.env.get("GEMINI_API_KEY"),
+  ignore: !canRunLiveGemini,
   sanitizeOps: false,
   sanitizeResources: false,
   fn: withRetries(

@@ -3,15 +3,13 @@ import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
 import {
   agentDeps,
   findTextualAnswer,
-  injectSecrets,
   noopRewriteHistory,
-  runWithProvider,
-  withRetries,
+  runForAllProviders,
 } from "../test_helpers.ts";
 
-Deno.test(
-  "anthropic agent responds to a simple question",
-  injectSecrets(withRetries(3, async () => {
+runForAllProviders(
+  "agent responds to a simple question",
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -19,7 +17,7 @@ Deno.test(
       }),
     ];
 
-    await agentDeps(mockHistory)(runWithProvider("anthropic"))({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
       onMaxIterationsReached: () => {},
       tools: [],
@@ -34,12 +32,12 @@ Deno.test(
       answer.text.includes("4"),
       `Expected answer to contain '4' but got: "${answer.text}"`,
     );
-  })),
+  },
 );
 
-Deno.test(
-  "anthropic agent works when thinking is enabled with a small maxOutputTokens",
-  injectSecrets(withRetries(3, async () => {
+runForAllProviders(
+  "agent works when thinking is enabled with a small maxOutputTokens",
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -47,7 +45,7 @@ Deno.test(
       }),
     ];
 
-    await agentDeps(mockHistory)(runWithProvider("anthropic"))({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
       onMaxIterationsReached: () => {},
       tools: [],
@@ -63,12 +61,12 @@ Deno.test(
       answer.text.includes("221"),
       `Expected answer to contain '221' but got: "${answer.text}"`,
     );
-  })),
+  },
 );
 
-Deno.test(
-  "anthropic agent still answers when thinking is enabled with 4000 maxOutputTokens",
-  injectSecrets(withRetries(3, async () => {
+runForAllProviders(
+  "agent still answers when thinking is enabled with 4000 maxOutputTokens",
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -76,7 +74,7 @@ Deno.test(
       }),
     ];
 
-    await agentDeps(mockHistory)(runWithProvider("anthropic"))({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
       onMaxIterationsReached: () => {},
       tools: [],
@@ -92,5 +90,5 @@ Deno.test(
       answer.text.includes("221"),
       `Expected answer to contain '221' but got: "${answer.text}"`,
     );
-  })),
+  },
 );

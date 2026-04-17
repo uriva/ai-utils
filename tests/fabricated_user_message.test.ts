@@ -1,12 +1,11 @@
 import { assert } from "@std/assert";
-import { runAgent } from "../mod.ts";
 import {
   type HistoryEvent,
   ownUtteranceTurn,
   participantUtteranceTurn,
   sanitizeModelOutput,
 } from "../src/agent.ts";
-import { agentDeps, injectSecrets, withRetries } from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 const participantName = "אורח/ת";
 
@@ -34,41 +33,38 @@ const buildHistory = (): HistoryEvent[] => [
   ),
 ];
 
-Deno.test(
+runForAllProviders(
   "guard strips fabricated user messages from model output that mimics participant format",
-  withRetries(
-    3,
-    injectSecrets(async () => {
-      const mockHistory = buildHistory();
-      await agentDeps(mockHistory)(runAgent)({
-        maxIterations: 1,
-        onMaxIterationsReached: () => {},
-        tools: [],
-        prompt:
-          "You are a sales assistant for a home appliance store. Continue the conversation naturally in Hebrew. " +
-          "The customer is asking about ovens. Be helpful and provide recommendations.",
-        rewriteHistory: async () => {},
-        timezoneIANA: "Asia/Jerusalem",
-      });
+  async (runAgentWithProvider) => {
+    const mockHistory = buildHistory();
+    await agentDeps(mockHistory)(runAgentWithProvider)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt:
+        "You are a sales assistant for a home appliance store. Continue the conversation naturally in Hebrew. " +
+        "The customer is asking about ovens. Be helpful and provide recommendations.",
+      rewriteHistory: async () => {},
+      timezoneIANA: "Asia/Jerusalem",
+    });
 
-      const newEvents = mockHistory.slice(buildHistory().length);
+    const newEvents = mockHistory.slice(buildHistory().length);
 
-      const fabricatedUserMessage = newEvents.some((e) =>
-        e.type === "own_utterance" &&
-        new RegExp(`^${participantName}:\\s`, "m").test(e.text)
-      );
-      assert(
-        !fabricatedUserMessage,
-        `Guard failed to strip fabricated user message from model output:\n${
-          JSON.stringify(
-            newEvents.filter((e) => e.type === "own_utterance"),
-            null,
-            2,
-          )
-        }`,
-      );
-    }),
-  ),
+    const fabricatedUserMessage = newEvents.some((e) =>
+      e.type === "own_utterance" &&
+      new RegExp(`^${participantName}:\\s`, "m").test(e.text)
+    );
+    assert(
+      !fabricatedUserMessage,
+      `Guard failed to strip fabricated user message from model output:\n${
+        JSON.stringify(
+          newEvents.filter((e) => e.type === "own_utterance"),
+          null,
+          2,
+        )
+      }`,
+    );
+  },
 );
 
 Deno.test("sanitizeModelOutput self-corrects fabricated user message with timestamp", () => {

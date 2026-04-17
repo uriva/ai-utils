@@ -1,6 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
 import { z } from "zod/v4";
-import { runAgent } from "../mod.ts";
 import {
   type HistoryEvent,
   learnSkillToolName,
@@ -10,22 +9,21 @@ import {
 import {
   addition,
   agentDeps,
-  injectSecrets,
-  llmTest,
   multiplication,
   noopRewriteHistory,
+  runForAllProviders,
   weatherSkill,
 } from "../test_helpers.ts";
 
-Deno.test(
+runForAllProviders(
   "skills: agent can use run_command to call skill tools",
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
       name: "user",
       text: "What is 5 + 3?",
     })];
 
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
       onMaxIterationsReached: () => {},
       tools: [],
@@ -51,18 +49,18 @@ Deno.test(
       event.result === "8"
     );
     assert(hasToolResult, "Should have result of 5 + 3 = 8 from run_command");
-  }),
+  },
 );
 
-Deno.test(
+runForAllProviders(
   "skills: prompt only shows skill name and description, not individual tools",
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
       name: "user",
       text: "hello",
     })];
 
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
       onMaxIterationsReached: () => {},
       tools: [],
@@ -73,12 +71,12 @@ Deno.test(
     });
 
     assert(true, "Prompt augmentation test - implementation will verify");
-  }),
+  },
 );
 
-Deno.test(
+runForAllProviders(
   `skills: ${learnSkillToolName} returns skill information`,
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     const localWeatherSkill = {
       name: "weather",
       description: "Get weather information",
@@ -99,7 +97,7 @@ Deno.test(
       text: "Tell me about the weather skill",
     })];
 
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
       onMaxIterationsReached: () => {},
       tools: [],
@@ -124,12 +122,12 @@ Deno.test(
       );
       assert(parsedResult.tools.length > 0, "Should include tools");
     }
-  }),
+  },
 );
 
-llmTest(
+runForAllProviders(
   "skills: works alongside regular tools",
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     const regularTool = {
       name: "regularTool",
       description: "A regular tool that returns a unique string",
@@ -155,7 +153,7 @@ llmTest(
         "First call the regularTool, then use the skillset skill to call skill_tool.",
     })];
 
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 10,
       onMaxIterationsReached: () => {},
       tools: [regularTool],
@@ -179,5 +177,5 @@ llmTest(
       hasRegularResult || hasSkillResult,
       "Should be able to use both regular tools and skill tools",
     );
-  }),
+  },
 );

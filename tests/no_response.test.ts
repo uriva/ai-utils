@@ -1,11 +1,10 @@
 import { assert } from "@std/assert";
-import { participantUtteranceTurn } from "../src/agent.ts";
+import { type AgentSpec, participantUtteranceTurn } from "../src/agent.ts";
 import {
   agentDeps,
-  injectSecrets,
   noopRewriteHistory,
+  runForAllProviders,
 } from "../test_helpers.ts";
-import { runAgent } from "../mod.ts";
 
 const SOCCER_BOT_PROMPT =
   `אתה "בוט כדורגל", מנהל ההרשמה והתורנויות של קבוצת כדורגל.
@@ -20,11 +19,13 @@ const SOCCER_BOT_PROMPT =
 
 const IRRELEVANT_MESSAGE = "ברוכים הבאים לקבוצה מה שלום כולם";
 
-const runOnce = async () => {
+const runOnce = async (
+  runAgentWithProvider: (spec: AgentSpec) => Promise<void>,
+) => {
   const history = [
     participantUtteranceTurn({ name: "User", text: IRRELEVANT_MESSAGE }),
   ];
-  await agentDeps(history)(runAgent)({
+  await agentDeps(history)(runAgentWithProvider)({
     maxIterations: 3,
     onMaxIterationsReached: () => {},
     tools: [],
@@ -56,14 +57,12 @@ const runOnce = async () => {
   return visibleResponses;
 };
 
-// Runs 5 times because Gemini Flash is non-deterministic:
-// sometimes it emits visible text instead of calling do_nothing.
-Deno.test(
-  "Hebrew soccer bot (flash) does not emit visible response for irrelevant greeting",
-  injectSecrets(async () => {
+runForAllProviders(
+  "Hebrew soccer bot does not emit visible response for irrelevant greeting",
+  async (runAgentWithProvider) => {
     const allFailures: string[] = [];
     for (let i = 0; i < 5; i++) {
-      const visible = await runOnce();
+      const visible = await runOnce(runAgentWithProvider);
       if (visible.length > 0) {
         allFailures.push(visible.map((e) => e.text.slice(0, 200)).join(" | "));
       }
@@ -74,5 +73,5 @@ Deno.test(
         allFailures.map((f, i) => `  Run ${i + 1}: ${f}`).join("\n")
       }`,
     );
-  }),
+  },
 );

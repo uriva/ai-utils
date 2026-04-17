@@ -13,23 +13,20 @@ import {
 } from "../src/agent.ts";
 import {
   agentDeps,
-  injectSecrets,
-  llmTest,
   noopRewriteHistory,
   someTool,
   toolResult,
-  withRetries,
 } from "../test_helpers.ts";
 
-Deno.test(
+runForAllProviders(
   "runBot calls the tool and replies with its output",
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
       name: "user",
       text:
         `Please call the doSomethingUnique tool now and only reply with its output.`,
     })];
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
       onMaxIterationsReached: () => {},
       tools: [someTool],
@@ -45,12 +42,12 @@ Deno.test(
         JSON.stringify(mockHistory, null, 2)
       }`,
     );
-  }),
+  },
 );
 
-llmTest(
+runForAllProviders(
   "ai returns text event before calling actions",
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -58,7 +55,7 @@ llmTest(
           `Please call the doSomethingUnique tool and explain what you're doing.`,
       }),
     ];
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
       onMaxIterationsReached: () => {},
       tools: [someTool],
@@ -79,12 +76,12 @@ llmTest(
       firstTextIndex < firstToolIndex,
       "Text should come before tool call",
     );
-  }),
+  },
 );
 
-llmTest(
+runForAllProviders(
   "ai handles new history items while waiting for function calls",
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
       name: "user",
       text:
@@ -105,7 +102,7 @@ llmTest(
       },
     };
 
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 10,
       onMaxIterationsReached: () => {},
       tools: [slowTool],
@@ -135,7 +132,7 @@ llmTest(
       responseAfterContext,
       "AI should respond to additional message in next iteration",
     );
-  }),
+  },
   5,
 );
 
@@ -189,9 +186,9 @@ Deno.test(
   },
 );
 
-llmTest(
+runForAllProviders(
   "agent triggers do nothing event after conversation ends with goodbye",
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({ name: "user", text: "What is 2+2?" }),
       ownUtteranceTurn("4"),
@@ -199,7 +196,7 @@ llmTest(
       ownUtteranceTurn("Bye!"),
       participantUtteranceTurn({ name: "user", text: "\u{1F44D}" }),
     ];
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
       onMaxIterationsReached: () => {},
       tools: [],
@@ -210,12 +207,12 @@ llmTest(
       timezoneIANA: "UTC",
     });
     assertEquals(mockHistory[mockHistory.length - 1].type, "do_nothing");
-  }),
+  },
 );
 
-Deno.test(
+runForAllProviders(
   "deferred tool handler is called with toolCallId and agent exits without emitting tool_result",
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     let capturedToolCallId: string | undefined;
     const deferredTool: DeferredTool<z.ZodObject<{ ms: z.ZodNumber }>> = {
       name: "timeout-wakeup",
@@ -235,7 +232,7 @@ Deno.test(
           "Please call the timeout-wakeup tool with ms=5000. Do not say anything else.",
       }),
     ];
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
       onMaxIterationsReached: () => {},
       tools: [deferredTool],
@@ -259,7 +256,7 @@ Deno.test(
       ),
       "tool_call should be in history",
     );
-  }),
+  },
 );
 
 runForAllProviders(
@@ -496,9 +493,9 @@ runForAllProviders(
   },
 );
 
-Deno.test(
+runForAllProviders(
   "anthropic streams text before tool calls when the model explains first",
-  injectSecrets(withRetries(3, async () => {
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -508,7 +505,7 @@ Deno.test(
     ];
     let streamedText = "";
 
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
       onMaxIterationsReached: () => {},
       tools: [someTool],
@@ -517,7 +514,6 @@ Deno.test(
       onStreamChunk: (chunk) => {
         streamedText += chunk;
       },
-      provider: "anthropic",
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -539,7 +535,8 @@ Deno.test(
       streamedText.includes("Checking now"),
       `Expected stream to include pre-tool text, got: ${streamedText}`,
     );
-  })),
+  },
+  3,
 );
 
 runForAllProviders(

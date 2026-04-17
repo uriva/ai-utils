@@ -1,6 +1,5 @@
 import { assert } from "@std/assert";
 import { z } from "zod/v4";
-import { runAgent } from "../mod.ts";
 import {
   type DeferredTool,
   type HistoryEvent,
@@ -9,7 +8,7 @@ import {
   participantUtteranceTurn,
   toolResultTurn,
 } from "../src/agent.ts";
-import { agentDeps, injectSecrets, withRetries } from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 const downloadVideoTool: DeferredTool<
   z.ZodObject<{ movie: z.ZodString; time: z.ZodString }>
@@ -72,58 +71,55 @@ const buildHistory = (): HistoryEvent[] => [
   // The model must NOT fabricate a "DOWNLOAD COMPLETE" or a URL here.
 ];
 
-Deno.test(
+runForAllProviders(
   "model does not fabricate download-complete notification after seeing a prior system notification",
-  withRetries(
-    3,
-    injectSecrets(async () => {
-      const mockHistory = buildHistory();
-      await agentDeps(mockHistory)(runAgent)({
-        maxIterations: 1,
-        onMaxIterationsReached: () => {},
-        tools: [downloadVideoTool],
-        prompt:
-          "You are a helpful video assistant. You use the download_video tool to get clips. " +
-          "After calling the tool, you MUST wait for the system to notify you when the download completes. " +
-          "Never fabricate URLs or pretend a download completed.",
-        rewriteHistory: async () => {},
-        timezoneIANA: "UTC",
-      });
+  async (runAgentWithProvider) => {
+    const mockHistory = buildHistory();
+    await agentDeps(mockHistory)(runAgentWithProvider)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [downloadVideoTool],
+      prompt:
+        "You are a helpful video assistant. You use the download_video tool to get clips. " +
+        "After calling the tool, you MUST wait for the system to notify you when the download completes. " +
+        "Never fabricate URLs or pretend a download completed.",
+      rewriteHistory: async () => {},
+      timezoneIANA: "UTC",
+    });
 
-      const newEvents = mockHistory.slice(buildHistory().length);
+    const newEvents = mockHistory.slice(buildHistory().length);
 
-      const fabricatedNotification = newEvents.some((e) =>
-        e.type === "own_thought" && e.text.toUpperCase().includes("DOWNLOAD") &&
-        e.text.toUpperCase().includes("COMPLETE")
-      );
-      assert(
-        !fabricatedNotification,
-        `Model fabricated a DOWNLOAD COMPLETE notification:\n${
-          JSON.stringify(
-            newEvents.filter((e) => e.type === "own_thought"),
-            null,
-            2,
-          )
-        }`,
-      );
+    const fabricatedNotification = newEvents.some((e) =>
+      e.type === "own_thought" && e.text.toUpperCase().includes("DOWNLOAD") &&
+      e.text.toUpperCase().includes("COMPLETE")
+    );
+    assert(
+      !fabricatedNotification,
+      `Model fabricated a DOWNLOAD COMPLETE notification:\n${
+        JSON.stringify(
+          newEvents.filter((e) => e.type === "own_thought"),
+          null,
+          2,
+        )
+      }`,
+    );
 
-      const fabricatedUrl = newEvents.some((e) =>
-        (e.type === "own_utterance" || e.type === "own_thought") &&
-        "text" in e &&
-        /https?:\/\/api\.example\.com\/s\/(?!abc123)[a-z0-9]+/i.test(e.text)
-      );
-      assert(
-        !fabricatedUrl,
-        `Model fabricated a fake URL:\n${
-          JSON.stringify(
-            newEvents.filter((e) =>
-              e.type === "own_utterance" || e.type === "own_thought"
-            ),
-            null,
-            2,
-          )
-        }`,
-      );
-    }),
-  ),
+    const fabricatedUrl = newEvents.some((e) =>
+      (e.type === "own_utterance" || e.type === "own_thought") &&
+      "text" in e &&
+      /https?:\/\/api\.example\.com\/s\/(?!abc123)[a-z0-9]+/i.test(e.text)
+    );
+    assert(
+      !fabricatedUrl,
+      `Model fabricated a fake URL:\n${
+        JSON.stringify(
+          newEvents.filter((e) =>
+            e.type === "own_utterance" || e.type === "own_thought"
+          ),
+          null,
+          2,
+        )
+      }`,
+    );
+  },
 );

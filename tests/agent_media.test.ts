@@ -1,22 +1,20 @@
 import { assert } from "@std/assert";
-import { runAgent } from "../mod.ts";
 import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
 import {
   agentDeps,
   b64,
   collectAttachment,
   findTextualAnswer,
-  injectSecrets,
-  llmTest,
   mediaTool,
   mediaToolWithCaption,
   noopRewriteHistory,
   recognizedTheDog,
+  runForAllProviders,
 } from "../test_helpers.ts";
 
-Deno.test(
+runForAllProviders(
   "agent emits native image and separate agent verifies it",
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     const generationHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "creator",
@@ -25,7 +23,7 @@ Deno.test(
       }),
     ];
 
-    await agentDeps(generationHistory)(runAgent)({
+    await agentDeps(generationHistory)(runAgentWithProvider)({
       maxIterations: 4,
       onMaxIterationsReached: () => {},
       tools: [],
@@ -57,7 +55,7 @@ Deno.test(
       }),
     ];
 
-    await agentDeps(verificationHistory)(runAgent)({
+    await agentDeps(verificationHistory)(runAgentWithProvider)({
       maxIterations: 4,
       onMaxIterationsReached: () => {},
       tools: [],
@@ -74,19 +72,19 @@ Deno.test(
       answer.text.toLowerCase().includes("sunrise"),
       `Expected the response to mention sunrise, got: ${answer.text}`,
     );
-  }),
+  },
 );
 
-Deno.test(
+runForAllProviders(
   "tool result attachments are forwarded to model",
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
         text: "Please call returnMedia and then describe the image.",
       }),
     ];
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 3,
       onMaxIterationsReached: () => {},
       tools: [mediaTool],
@@ -101,12 +99,12 @@ Deno.test(
         JSON.stringify(mockHistory, null, 2)
       }`,
     );
-  }),
+  },
 );
 
-Deno.test(
+runForAllProviders(
   "user attachments are forwarded to model",
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -116,7 +114,7 @@ Deno.test(
         ],
       }),
     ];
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 3,
       onMaxIterationsReached: () => {},
       tools: [],
@@ -131,12 +129,12 @@ Deno.test(
         JSON.stringify(mockHistory, null, 2)
       }`,
     );
-  }),
+  },
 );
 
-Deno.test(
+runForAllProviders(
   "attachment captions are included in model input",
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -149,7 +147,7 @@ Deno.test(
         }],
       }),
     ];
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 3,
       onMaxIterationsReached: () => {},
       tools: [],
@@ -169,12 +167,12 @@ Deno.test(
         JSON.stringify(mockHistory, null, 2)
       }`,
     );
-  }),
+  },
 );
 
-llmTest(
+runForAllProviders(
   "tool result attachments with captions are forwarded to model",
-  injectSecrets(async () => {
+  async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -182,7 +180,7 @@ llmTest(
           "Please call returnMediaWithCaption and describe what you received including the caption.",
       }),
     ];
-    await agentDeps(mockHistory)(runAgent)({
+    await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 3,
       onMaxIterationsReached: () => {},
       tools: [mediaToolWithCaption],
@@ -202,5 +200,5 @@ llmTest(
         JSON.stringify(mockHistory, null, 2)
       }`,
     );
-  }),
+  },
 );
