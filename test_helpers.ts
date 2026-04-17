@@ -8,7 +8,6 @@ import {
   injectKimiToken,
   injectOpenAiToken,
   overrideIdGenerator,
-  overrideTime,
   runAgent,
   tool,
 } from "./mod.ts";
@@ -22,18 +21,14 @@ import {
   type ToolReturn,
 } from "./src/agent.ts";
 
-// Deterministic id and timestamp so rmmbr cache keys stable across runs.
-// Each call increments, so multiple events inside a single test get different
-// ids, but across runs the sequence is identical.
+// Deterministic id generation so rmmbr cache keys are stable across runs.
+// We do NOT override timestamp here — tests that care about time should
+// override it explicitly (see `pipe(injectSecrets, overrideTime(...))`).
+// Non-overriding tests will have wall-clock timestamps, which means their
+// cache keys churn and they effectively run uncached — acceptable for now.
 const makeCounter = (prefix: string) => {
   let n = 0;
   return () => `${prefix}-${++n}`;
-};
-
-let timestampCounter = 0;
-const deterministicTimestamp = () => {
-  timestampCounter++;
-  return 1_700_000_000_000 + timestampCounter;
 };
 
 const cachingCallModelWrapper: CallModelWrapper = ({ provider, inner }) => {
@@ -67,13 +62,10 @@ const flushRmmbr = (f: () => Promise<void>) => async () => {
   }
 };
 
-// Reset per-test so each test produces the same sequence of ids/timestamps
-// regardless of ordering with other tests. Each test opens a fresh scope.
-const injectDeterministic = (f: () => Promise<void>) => async () => {
-  timestampCounter = 0;
-  const id = makeCounter("id");
-  await overrideIdGenerator(id)(overrideTime(deterministicTimestamp)(f))();
-};
+// Fresh id counter per test so each test produces the same sequence of ids
+// regardless of ordering with other tests.
+const injectDeterministic = (f: () => Promise<void>) => () =>
+  overrideIdGenerator(makeCounter("id"))(f)();
 
 export const injectSecrets = pipe(
   flushRmmbr,
