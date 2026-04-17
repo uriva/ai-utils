@@ -86,11 +86,15 @@ the `callModel` you expose flows through `resolveCallModel` in `mod.ts` so the
 injected wrapper applies — do not add ad-hoc caching layers inside the provider
 files.
 
-**Determinism is a prerequisite for caching.** `injectSecrets` wires
-deterministic `overrideIdGenerator` and `overrideTime` so events created inside
-the test have stable ids and timestamps across runs. If you add code that
-produces a new source of randomness in any event passed to `CallModel`, you must
-make it deterministic under test too, or caching breaks.
+**Cache keys must be explicit, never implicit.** `rmmbrCacheWithKey` in
+`test_helpers.ts` refuses to run without a `customKeyFn` argument. rmmbr's
+default key function hashes all args, which silently picks up timestamps and
+random ids — every call misses the cache, every CI run burns API dollars.
+Passing an explicit key function forces you to decide which fields matter. For
+the CallModel wrapper the key strips `id` and `timestamp` from events (see
+`eventsCacheKey`). If you introduce a new source of per-run randomness into a
+HistoryEvent (a new uuid, a fresh timestamp), include it in the stripped set or
+the cache breaks.
 
 **`agent.ts` is provider-agnostic.** It must not import any provider-specific
 file (`geminiAgent.ts`, `anthropicAgent.ts`, `kimiAgent.ts`). Provider dispatch

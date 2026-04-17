@@ -31,13 +31,6 @@ const makeCounter = (prefix: string) => {
   return () => `${prefix}-${++n}`;
 };
 
-const cachingCallModelWrapper: CallModelWrapper = ({ provider, inner }) => {
-  const cached = rmmbrCache(`callModel-${provider ?? "google"}-v2`)(
-    (events: HistoryEvent[]) => inner(events),
-  );
-  return (events) => cached(events);
-};
-
 const requireEnv = (name: string) => {
   const v = Deno.env.get(name);
   if (!v) throw new Error(`Missing required env var: ${name}`);
@@ -46,13 +39,48 @@ const requireEnv = (name: string) => {
 
 const rmmbrToken = requireEnv("RMMBR_TOKEN");
 
-const rmmbrCache = (cacheId: string) =>
-  cache({
+// Forces every cache site to pass an explicit customKeyFn. rmmbr's default
+// key function hashes the raw args, which silently includes non-deterministic
+// fields (timestamps, random ids) — causing cache-miss storms that waste API
+// dollars on every CI run. Crashing loudly when no customKeyFn is given is
+// cheaper than learning about it from a bill.
+const rmmbrCacheWithKey = <Args extends unknown[], R>(
+  cacheId: string,
+  customKeyFn: (...args: Args) => unknown,
+  fn: (...args: Args) => Promise<R>,
+): (...args: Args) => Promise<R> => {
+  if (!customKeyFn) {
+    throw new Error(
+      `rmmbrCacheWithKey(${cacheId}) requires an explicit customKeyFn; ` +
+        "without one, rmmbr would hash all args (including any timestamps " +
+        "or random ids) and every call would miss the cache.",
+    );
+  }
+  return cache({
     cacheId,
     ttl: 60 * 60 * 24 * 30,
     url: "https://rmmbr.net",
     token: rmmbrToken,
-  });
+    customKeyFn: customKeyFn as (...args: unknown[]) => unknown,
+  })(fn as (...args: unknown[]) => Promise<R>) as (
+    ...args: Args
+  ) => Promise<R>;
+};
+
+// Strip timestamps and (randomly-generated) ids before hashing so stable
+// content → stable key. Only the content that semantically identifies a
+// model request is kept.
+const eventsCacheKey = (events: HistoryEvent[]) =>
+  events.map(({ id: _id, timestamp: _ts, ...rest }) => rest);
+
+const cachingCallModelWrapper: CallModelWrapper = ({ provider, inner }) => {
+  const cached = rmmbrCacheWithKey(
+    `callModel-${provider ?? "google"}-v3`,
+    (events: HistoryEvent[]) => eventsCacheKey(events),
+    (events: HistoryEvent[]) => inner(events),
+  );
+  return (events) => cached(events);
+};
 
 const flushRmmbr = (f: () => Promise<void>) => async () => {
   try {
