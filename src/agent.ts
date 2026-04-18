@@ -785,10 +785,12 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         params: z.any().describe("The parameters for the tool"),
       }),
       handler: async ({ command, params }, toolCallId) => {
-        if (!command.includes("/")) {
+        const lastSlash = command.lastIndexOf("/");
+        if (lastSlash === -1) {
           return `Invalid command format. Expected "skillName/toolName", got "${command}". Available skills: ${skillNames}`;
         }
-        const [skillName, toolName] = command.split("/");
+        const skillName = command.slice(0, lastSlash);
+        const toolName = command.slice(lastSlash + 1);
         if (!skillMap[skillName]) {
           return `Skill "${skillName}" not found. Available skills: ${skillNames}`;
         }

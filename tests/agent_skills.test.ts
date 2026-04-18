@@ -1,7 +1,9 @@
 import { assert, assertEquals } from "@std/assert";
 import { z } from "zod/v4";
+import { runAgent } from "../mod.ts";
 import {
   type HistoryEvent,
+  injectCallModel,
   learnSkillToolName,
   participantUtteranceTurn,
   runCommandToolName,
@@ -122,6 +124,68 @@ runForAllProviders(
       );
       assert(parsedResult.tools.length > 0, "Should include tools");
     }
+  },
+);
+
+// Provider-agnostic: reproduces the bug where run_command split skillName/toolName
+// on the first "/" instead of the last. Skills named like "@tank/google-calendar"
+// became unreachable because split gave skillName="@tank", toolName="google-calendar".
+Deno.test(
+  "skills: run_command routes to skill whose name contains '/'",
+  async () => {
+    const calendarSkill = {
+      name: "@tank/google-calendar",
+      description: "Google Calendar operations",
+      instructions: "Use this to manage calendar events.",
+      tools: [{
+        name: "list_calendars",
+        description: "List the user's calendars",
+        parameters: z.object({}),
+        handler: () => Promise.resolve("calendars: primary, work"),
+      }],
+    };
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "list my calendars",
+    })];
+    let callCount = 0;
+    const fakeCallModel = () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return Promise.resolve([{
+          type: "tool_call" as const,
+          isOwn: true as const,
+          name: runCommandToolName,
+          parameters: {
+            command: "@tank/google-calendar/list_calendars",
+            params: {},
+          },
+          id: "fake-call-1",
+          timestamp: Date.now(),
+        }]);
+      }
+      return Promise.resolve([]);
+    };
+    await injectCallModel(fakeCallModel)(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        maxIterations: 2,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        skills: [calendarSkill],
+        prompt: "unused in fake",
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+      });
+    })();
+    const toolResult = mockHistory.find((e) => e.type === "tool_result");
+    assert(toolResult, "expected a tool_result event");
+    assert(
+      toolResult.type === "tool_result" &&
+        toolResult.result === "calendars: primary, work",
+      `expected successful calendar list result, got: ${
+        toolResult.type === "tool_result" ? toolResult.result : "<none>"
+      }`,
+    );
   },
 );
 
