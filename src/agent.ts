@@ -600,6 +600,49 @@ export const stripFabricatedUserMessages = (
   });
 };
 
+export const maxUtteranceChars = 4000;
+
+const findSplitIndex = (text: string): number => {
+  const window = text.slice(0, maxUtteranceChars);
+  const minAccept = Math.floor(maxUtteranceChars / 2);
+  const paragraphIdx = window.lastIndexOf("\n\n");
+  if (paragraphIdx >= minAccept) return paragraphIdx + 2;
+  const newlineIdx = window.lastIndexOf("\n");
+  if (newlineIdx >= minAccept) return newlineIdx + 1;
+  const sentenceMatch = [...window.matchAll(/[.!?](?:\s|$)/g)].at(-1);
+  if (sentenceMatch && sentenceMatch.index >= minAccept) {
+    return sentenceMatch.index + sentenceMatch[0].length;
+  }
+  const whitespaceIdx = window.search(/\s\S*$/);
+  if (whitespaceIdx >= minAccept) return whitespaceIdx + 1;
+  return maxUtteranceChars;
+};
+
+const splitLongUtteranceText = (text: string): string[] => {
+  if (text.length <= maxUtteranceChars) return [text];
+  const idx = findSplitIndex(text);
+  const head = text.slice(0, idx).trimEnd();
+  const tail = text.slice(idx).trimStart();
+  return tail === "" ? [head] : [head, ...splitLongUtteranceText(tail)];
+};
+
+const splitOversizedUtterance = (
+  event: Extract<HistoryEvent, { type: "own_utterance" }>,
+): HistoryEvent[] =>
+  splitLongUtteranceText(event.text).map((chunk, i) => ({
+    ...event,
+    text: chunk,
+    id: i === 0 ? event.id : generateId(),
+    timestamp: event.timestamp + i,
+  }));
+
+const splitOversizedUtterances = (output: HistoryEvent[]): HistoryEvent[] =>
+  output.flatMap((event) =>
+    event.type === "own_utterance" && event.text.length > maxUtteranceChars
+      ? splitOversizedUtterance(event)
+      : [event]
+  );
+
 export const sanitizeModelOutput = (
   history: HistoryEvent[],
   output: HistoryEvent[],
@@ -613,7 +656,8 @@ export const sanitizeModelOutput = (
   );
   const withoutNoResponse = reclassifyNoResponse(withoutFabrications);
   const withoutEmpty = reclassifyEmptyUtterances(withoutNoResponse);
-  const safe = reclassifyLeakedThoughts(withoutEmpty);
+  const reclassified = reclassifyLeakedThoughts(withoutEmpty);
+  const safe = splitOversizedUtterances(reclassified);
   return { emit: safe, internal: safe };
 };
 

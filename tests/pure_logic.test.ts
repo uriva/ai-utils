@@ -8,8 +8,11 @@ import {
   injectAccessHistory,
   injectOutputEvent,
   learnSkillToolName,
+  maxUtteranceChars,
+  ownUtteranceTurn,
   runAbstractAgent,
   runCommandToolName,
+  sanitizeModelOutput,
 } from "../src/agent.ts";
 import {
   buildReq,
@@ -714,3 +717,45 @@ Deno.test(
     );
   },
 );
+
+const longParagraphs = (count: number, charsPerParagraph: number) =>
+  Array.from(
+    { length: count },
+    (_, i) => `Paragraph ${i + 1}: ${"x".repeat(charsPerParagraph)}`,
+  ).join("\n\n");
+
+Deno.test("sanitizeModelOutput splits over-cap own_utterance into multiple", () => {
+  const original = longParagraphs(6, 1500);
+  assert(original.length > maxUtteranceChars);
+  const { emit } = sanitizeModelOutput([], [ownUtteranceTurn(original)]);
+  const utterances = emit.filter((e) => e.type === "own_utterance");
+  assert(utterances.length > 1, "expected split into multiple utterances");
+  utterances.forEach((u) => {
+    if (u.type !== "own_utterance") throw new Error("unreachable");
+    assert(
+      u.text.length <= maxUtteranceChars,
+      `chunk length ${u.text.length} exceeds cap ${maxUtteranceChars}`,
+    );
+    assert(u.text.length > 0, "chunk should be non-empty");
+  });
+  const ids = new Set(utterances.map((u) => u.id));
+  assertEquals(ids.size, utterances.length, "chunks must have unique ids");
+});
+
+Deno.test("sanitizeModelOutput leaves under-cap own_utterance unchanged", () => {
+  const event = ownUtteranceTurn("short message");
+  const { emit } = sanitizeModelOutput([], [event]);
+  assertEquals(emit.length, 1);
+  assertEquals(emit[0], event);
+});
+
+Deno.test("sanitizeModelOutput hard-splits a single huge wordless run", () => {
+  const original = "a".repeat(maxUtteranceChars * 2 + 137);
+  const { emit } = sanitizeModelOutput([], [ownUtteranceTurn(original)]);
+  const utterances = emit.filter((e) => e.type === "own_utterance");
+  assert(utterances.length >= 3);
+  utterances.forEach((u) => {
+    if (u.type !== "own_utterance") throw new Error("unreachable");
+    assert(u.text.length <= maxUtteranceChars);
+  });
+});
