@@ -456,9 +456,10 @@ const historyEventToContent = (
       }])
       : e.modelMetadata
       ? wrapModelContent([{ text: " " }])
-      : wrapUserContent([{
-        text: stampText(`[System notification: ${e.text}]`),
-      }]);
+      : wrapUserContent([
+        { text: stampText(`[System notification: ${e.text}]`) },
+        ...attachmentsToPartsOrEmpty(e.attachments),
+      ]);
   }
   if (e.type === "own_reaction") {
     return wrapModelContent([{

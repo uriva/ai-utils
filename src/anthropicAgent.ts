@@ -261,9 +261,18 @@ async (
   }
 
   if (e.type === "own_thought") {
-    return e.modelMetadata
-      ? []
-      : [{ role: "user", content: `[System notification: ${e.text}]` }];
+    if (e.modelMetadata) return [];
+    const contentBlocks = await attachmentsToContentBlocks(e.attachments);
+    const textBlock: Anthropic.Messages.TextBlockParam = {
+      type: "text",
+      text: `[System notification: ${e.text}]`,
+    };
+    return [{
+      role: "user",
+      content: contentBlocks && contentBlocks.length > 0
+        ? [textBlock, ...contentBlocks]
+        : [textBlock],
+    }];
   }
 
   if (e.type === "own_reaction") {

@@ -143,6 +143,7 @@ export type OwnThought<ModelMetadata> = {
   isOwn: true;
   modelMetadata?: ModelMetadata;
   text: string;
+  attachments?: MediaAttachment[];
 } & SharedFields;
 
 export type DoNothing<ModelMetadata> = {
@@ -414,21 +415,25 @@ export const ownUtteranceTurn = <Metadata>(
 
 export const ownThoughtTurn = <Metadata>(
   text: string,
+  attachments?: MediaAttachment[],
 ): HistoryEventWithMetadata<Metadata> => ({
   type: "own_thought",
   isOwn: true,
   text,
+  attachments,
   ...sharedFields(),
 });
 
 export const ownThoughtTurnWithMetadata = <Metadata>(
   text: string,
   modelMetadata: Metadata | undefined,
+  attachments?: MediaAttachment[],
 ): HistoryEventWithMetadata<Metadata> => ({
   type: "own_thought",
   isOwn: true,
   modelMetadata,
   text,
+  attachments,
   ...sharedFields(),
 });
 
@@ -1035,7 +1040,8 @@ export const estimateTokens = (e: HistoryEvent): number => {
       attachmentTokens(e.attachments) + 4;
   }
   if (e.type === "own_thought") {
-    return approxTextTokens(e.text) + 2;
+    return approxTextTokens(e.text) +
+      attachmentTokens(e.attachments) + 2;
   }
   if (e.type === "participant_reaction") {
     return approxTextTokens(e.name) + approxTextTokens(e.reaction) + 2;

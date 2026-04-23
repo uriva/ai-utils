@@ -247,9 +247,18 @@ async (e: KimiHistoryEvent): Promise<ChatCompletionMessageParam[]> => {
   }
 
   if (e.type === "own_thought") {
-    return e.modelMetadata
-      ? []
-      : [{ role: "user", content: `[System notification: ${e.text}]` }];
+    if (e.modelMetadata) return [];
+    const contentParts = await attachmentsToContentParts(e.attachments);
+    const textPart: OpenAI.Chat.Completions.ChatCompletionContentPart = {
+      type: "text",
+      text: `[System notification: ${e.text}]`,
+    };
+    return [{
+      role: "user",
+      content: contentParts && contentParts.length > 0
+        ? [textPart, ...contentParts]
+        : [textPart],
+    }];
   }
 
   if (e.type === "own_reaction") {
