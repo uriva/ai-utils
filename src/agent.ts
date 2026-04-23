@@ -91,6 +91,7 @@ export type OwnUtterance<ModelMetadata> = {
   type: "own_utterance";
   text: string;
   attachments?: MediaAttachment[];
+  truncated?: boolean;
 } & SharedFields;
 
 export type ParticipantReaction =
@@ -876,6 +877,26 @@ const hasEmojiFlood = (events: HistoryEvent[]) =>
 
 const maxEmojiFloodRetries = 3;
 
+const maxTruncationRetries = 2;
+
+const findTruncatedUtterance = (events: HistoryEvent[]) =>
+  events.find(
+    (e): e is Extract<HistoryEvent, { type: "own_utterance" }> =>
+      e.type === "own_utterance" && e.truncated === true,
+  );
+
+const truncationCorrectionText = (partialText: string) => {
+  const tail = partialText.slice(-400);
+  return `Your previous response hit the output token budget and was cut off mid-way. You had written: "${tail}". Restart the response from the beginning — keep it significantly more concise and keep any internal reasoning brief so the full answer fits within the budget.`;
+};
+
+const stripTruncatedFlag = (events: HistoryEvent[]): HistoryEvent[] =>
+  events.map((e) =>
+    e.type === "own_utterance" && e.truncated
+      ? { ...e, truncated: undefined }
+      : e
+  );
+
 export const runAbstractAgent = async (
   { maxIterations, tools, skills, onMaxIterationsReached, prompt: _prompt }:
     AgentSpec,
@@ -886,6 +907,7 @@ export const runAbstractAgent = async (
     : tools;
   let c = 0;
   let emojiFloodRetries = 0;
+  let truncationRetries = 0;
   let ephemeralHistory: HistoryEvent[] = [];
   while (true) {
     if (await shouldAbort()) return;
@@ -898,10 +920,10 @@ export const runAbstractAgent = async (
     const effectiveHistory = [...history, ...ephemeralHistory];
     const normalizedHistory = normalizeHistoryForModel(effectiveHistory);
     await reportHistoryForDebug(normalizedHistory);
-    const modelResponse = await timeit(reportTimeElapsedMs, callModel)(
+    const rawModelResponse = await timeit(reportTimeElapsedMs, callModel)(
       normalizedHistory,
     );
-    if (hasEmojiFlood(modelResponse)) {
+    if (hasEmojiFlood(rawModelResponse)) {
       emojiFloodRetries++;
       console.warn(
         `[emoji-flood] detected emoji flood in model response (attempt ${emojiFloodRetries}/${maxEmojiFloodRetries})`,
@@ -911,6 +933,19 @@ export const runAbstractAgent = async (
       }
       continue;
     }
+    const truncated = findTruncatedUtterance(rawModelResponse);
+    if (truncated && truncationRetries < maxTruncationRetries) {
+      truncationRetries++;
+      console.warn(
+        `[max-tokens] model response truncated (attempt ${truncationRetries}/${maxTruncationRetries}); retrying with correctional thought`,
+      );
+      ephemeralHistory = [
+        ...ephemeralHistory,
+        ownThoughtTurn(truncationCorrectionText(truncated.text)),
+      ];
+      continue;
+    }
+    const modelResponse = stripTruncatedFlag(rawModelResponse);
     const { emit, internal } = sanitizeModelOutput(
       normalizedHistory,
       modelResponse,

@@ -91,6 +91,10 @@ const tokenUsage: Injection<
 
 export const injectTokenUsage = tokenUsage.inject;
 
+const finishReasonSink: Injection<(reason: string) => void> = context(
+  (_: string) => {},
+);
+
 type GeminiOutput = GeminiPartOfInterest[];
 
 export const extractFileIdFromError = (error: Error) => {
@@ -193,11 +197,13 @@ const rawCallGemini = async ({
   const handleStreamThinkingChunk = getStreamThinkingChunk();
   const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
   let finalUsageMetadata: TokenUsage | undefined;
+  let finalFinishReason: string | undefined;
   const accumulatedParts: Part[] = [];
 
   if (disableStreaming) {
     const response = await sdk.models.generateContent(req);
     finalUsageMetadata = response.usageMetadata;
+    finalFinishReason = response.candidates?.[0]?.finishReason;
     const parts = response.candidates?.[0]?.content?.parts ?? [];
     for (const part of parts) {
       if (
@@ -217,6 +223,8 @@ const rawCallGemini = async ({
       if (chunk.usageMetadata) {
         finalUsageMetadata = chunk.usageMetadata;
       }
+      const chunkFinishReason = chunk.candidates?.[0]?.finishReason;
+      if (chunkFinishReason) finalFinishReason = chunkFinishReason;
       const parts = chunk.candidates?.[0]?.content?.parts ?? [];
       for (const part of parts) {
         if (
@@ -265,6 +273,10 @@ const rawCallGemini = async ({
 
   if (finalUsageMetadata) {
     tokenUsage.access(finalUsageMetadata, req.model);
+  }
+
+  if (finalFinishReason) {
+    finishReasonSink.access(finalFinishReason);
   }
 
   return accumulatedParts.flatMap((part: Part): GeminiOutput => {
@@ -1097,7 +1109,26 @@ export const prepareGeminiHistory =
       filterAndRewriteUnsupportedGeminiAttachments(rewriteHistory),
     )(events);
 
-export const geminiAgentCaller = ({
+const geminiMaxTokensReason = "MAX_TOKENS";
+
+const markTruncatedUtterances = (
+  events: GeminiHistoryEvent[],
+): GeminiHistoryEvent[] =>
+  events.map((e) => e.type === "own_utterance" ? { ...e, truncated: true } : e);
+
+export const geminiAgentCaller =
+  (spec: AgentSpec) =>
+  async (events: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> => {
+    const box: { reason?: string } = {};
+    const result = await finishReasonSink.inject((r: string) => {
+      box.reason = r;
+    })(() => geminiAgentCallerInner(spec)(events))();
+    return box.reason === geminiMaxTokensReason
+      ? markTruncatedUtterances(result)
+      : result;
+  };
+
+const geminiAgentCallerInner = ({
   lightModel,
   prompt,
   tools,
