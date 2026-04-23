@@ -186,6 +186,30 @@ export const stripExpiredFile = (
   };
 };
 
+const modelCallTimeoutMs = 60_000;
+
+const withTimeout = <Args extends unknown[], Result>(
+  fn: (...args: Args) => Promise<Result>,
+) =>
+(...args: Args): Promise<Result> =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const err = new Error("Model call timed out");
+      Object.assign(err, { status: 503 });
+      reject(err);
+    }, modelCallTimeoutMs);
+    fn(...args).then(
+      (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+
 const rawCallGemini = async ({
   req,
   disableStreaming,
@@ -307,7 +331,7 @@ const rawCallGemini = async ({
 const callGeminiWithRetry = conditionalRetry(isRetryableError)(
   1000,
   4,
-  rawCallGemini,
+  withTimeout(rawCallGemini),
 );
 
 const callGemini = (
