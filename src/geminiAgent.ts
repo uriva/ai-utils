@@ -31,14 +31,14 @@ import {
   type MediaAttachment,
   type MessageId,
   type OwnEditMessage,
-  ownThoughtTurn,
+  ownThoughtTurnWithMetadata,
   type OwnUtterance,
-  ownUtteranceTurn,
+  ownUtteranceTurnWithMetadata,
   type ParticipantEditMessage,
   type ParticipantUtterance,
   type Tool,
   type ToolResult,
-  toolUseTurn,
+  toolUseTurnWithMetadata,
 } from "./agent.ts";
 import {
   accessGeminiToken,
@@ -1135,14 +1135,20 @@ const noResponseInstruction =
 // still applied inside `geminiAgentCaller` for correctness during cache
 // misses / production; the pre-filter here makes those paths idempotent
 // no-ops while guaranteeing the rewrite is persisted on every call.
+// Rehydrates `modelMetadata` on events that lack it (e.g. re-read from Deno
+// KV in prompt2bot, where we strip metadata before write to stay under the
+// 64KB value cap). Events that already carry inline `modelMetadata` are left
+// untouched — inline data is authoritative for the current run and may be
+// fresher than whatever rmmbr has persisted.
 const enrichGeminiEventsWithMetadata = async (
   events: HistoryEventWithMetadata<GeminiMetadata>[],
 ): Promise<HistoryEventWithMetadata<GeminiMetadata>[]> => {
   const eventIds = events.map((e) => e.id);
   const metadataList = await accessMetadataStore().mget(eventIds);
   return events.map((event, i) => {
+    if ("modelMetadata" in event && event.modelMetadata) return event;
     const metadata = metadataList[i] as GeminiMetadata | null;
-    if (!metadata || !("modelMetadata" in event)) return event;
+    if (!metadata) return event;
     return { ...event, modelMetadata: metadata };
   });
 };
@@ -1277,6 +1283,19 @@ const storeGeminiMetadata = (eventId: string, metadata: GeminiMetadata) =>
     console.error("Failed to store Gemini metadata:", e);
   });
 
+// Returns the event with inline `modelMetadata` for same-run use, and also
+// fire-and-forgets a persistent store so the data survives a round-trip
+// through storage layers that strip `modelMetadata` to stay under size caps
+// (see `prompt2bot` fitEventToKv). The inline copy is what downstream
+// filters like `filterInvalidToolCalls` read.
+const withPersistedMetadata = <E extends GeminiHistoryEvent>(
+  event: E,
+  metadata: GeminiMetadata,
+): E => {
+  storeGeminiMetadata(event.id, metadata);
+  return { ...event, modelMetadata: metadata };
+};
+
 const geminiOutputPartToHistoryEvent =
   (responseId: string) =>
   (p: GeminiPartOfInterest): GeminiHistoryEvent | null => {
@@ -1294,74 +1313,82 @@ const geminiOutputPartToHistoryEvent =
       const match = stripped.match(thoughtRegex);
 
       if (match) {
-        const event = ownThoughtTurn(match[1]) as GeminiHistoryEvent;
-        storeGeminiMetadata(event.id, metadata);
-        return event;
+        return withPersistedMetadata(
+          ownThoughtTurnWithMetadata(match[1], metadata) as GeminiHistoryEvent,
+          metadata,
+        );
       }
 
       const cleanedText = stripEmbeddedThoughtPatterns(stripped);
       if (!cleanedText) return null;
 
-      const event = (p.thought
-        ? ownThoughtTurn(cleanedText)
-        : ownUtteranceTurn(cleanedText)) as GeminiHistoryEvent;
-      storeGeminiMetadata(event.id, metadata);
-      return event;
+      return withPersistedMetadata(
+        (p.thought
+          ? ownThoughtTurnWithMetadata(cleanedText, metadata)
+          : ownUtteranceTurnWithMetadata(
+            cleanedText,
+            metadata,
+          )) as GeminiHistoryEvent,
+        metadata,
+      );
     }
     if (p.type === "function_call") {
-      const event = toolUseTurn(p.functionCall) as GeminiHistoryEvent;
-      storeGeminiMetadata(event.id, {
+      const metadata: GeminiMetadata = {
         type: "gemini",
         responseId,
         thoughtSignature: p.thoughtSignature ?? "",
-      });
-      return event;
+      };
+      return withPersistedMetadata(
+        toolUseTurnWithMetadata(
+          p.functionCall,
+          metadata,
+        ) as GeminiHistoryEvent,
+        metadata,
+      );
     }
     if (p.type === "inline_data") {
       const { data, mimeType } = p.inlineData;
-      if (!data) {
-        const event = ownUtteranceTurn("") as GeminiHistoryEvent;
-        storeGeminiMetadata(event.id, {
-          type: "gemini",
-          responseId,
-          thoughtSignature: "",
-        });
-        return event;
-      }
-      const event = ownUtteranceTurn("", [{
-        kind: "inline",
-        mimeType: mimeType ?? "application/octet-stream",
-        dataBase64: data,
-      }]) as GeminiHistoryEvent;
-      storeGeminiMetadata(event.id, {
+      const metadata: GeminiMetadata = {
         type: "gemini",
         responseId,
-        thoughtSignature: p.thoughtSignature ?? "",
-      });
-      return event;
+        thoughtSignature: data ? p.thoughtSignature ?? "" : "",
+      };
+      if (!data) {
+        return withPersistedMetadata(
+          ownUtteranceTurnWithMetadata("", metadata) as GeminiHistoryEvent,
+          metadata,
+        );
+      }
+      return withPersistedMetadata(
+        ownUtteranceTurnWithMetadata("", metadata, [{
+          kind: "inline",
+          mimeType: mimeType ?? "application/octet-stream",
+          dataBase64: data,
+        }]) as GeminiHistoryEvent,
+        metadata,
+      );
     }
     if (p.type === "file_data") {
       const { fileUri, mimeType } = p.fileData;
-      if (fileUri) {
-        const event = ownUtteranceTurn("", [{
-          kind: "file",
-          mimeType: mimeType ?? "application/octet-stream",
-          fileUri,
-        }]) as GeminiHistoryEvent;
-        storeGeminiMetadata(event.id, {
-          type: "gemini",
-          responseId,
-          thoughtSignature: p.thoughtSignature ?? "",
-        });
-        return event;
-      }
-      const event = ownUtteranceTurn("") as GeminiHistoryEvent;
-      storeGeminiMetadata(event.id, {
+      const metadata: GeminiMetadata = {
         type: "gemini",
         responseId,
-        thoughtSignature: "",
-      });
-      return event;
+        thoughtSignature: fileUri ? p.thoughtSignature ?? "" : "",
+      };
+      if (fileUri) {
+        return withPersistedMetadata(
+          ownUtteranceTurnWithMetadata("", metadata, [{
+            kind: "file",
+            mimeType: mimeType ?? "application/octet-stream",
+            fileUri,
+          }]) as GeminiHistoryEvent,
+          metadata,
+        );
+      }
+      return withPersistedMetadata(
+        ownUtteranceTurnWithMetadata("", metadata) as GeminiHistoryEvent,
+        metadata,
+      );
     }
     throw new Error(`Unknown part type: ${JSON.stringify(p)}`);
   };
