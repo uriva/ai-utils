@@ -74,14 +74,6 @@ export const accessGeminiToken = tokenInjection.access;
 export const injectGeminiToken = (token: string): Injector =>
   tokenInjection.inject(() => token);
 
-const geminiFileCacheInjection: Injection<
-  (_url: string) => Promise<string | undefined>
-> = context((_url: string): Promise<string | undefined> =>
-  Promise.resolve(undefined)
-);
-
-export const injectGeminiFileCache = geminiFileCacheInjection.inject;
-
 const openAiToGeminiMessage = pipe(
   map(({ role, content }: ChatCompletionMessageParam): Content => ({
     role: role === "user" ? role : "model",
@@ -180,18 +172,15 @@ const uploadBlobToGemini = async (
   return { geminiUri: uri, mimeType: mimeType2 };
 };
 
-const uploadToGeminiFromUrl = async (
-  url: string,
-  mimeType: string,
-): Promise<UploadResult> => {
-  const cached = await geminiFileCacheInjection.access(url);
-  if (cached) return { geminiUri: cached, mimeType };
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch file for Gemini upload: ${url}`);
-  }
-  return uploadBlobToGemini(await res.blob(), mimeType);
-};
+const uploadToGeminiFromUrl = makeCache("gemini-file-upload-v1")(
+  async (url: string, mimeType: string): Promise<UploadResult> => {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`Failed to fetch file for Gemini upload: ${url}`);
+    }
+    return uploadBlobToGemini(await res.blob(), mimeType);
+  },
+);
 
 const uploadToGeminiFromFile = (
   mimeType: string,

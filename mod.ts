@@ -32,14 +32,10 @@ export {
 } from "./src/compaction.ts";
 export { injectCacher } from "./src/cacher.ts";
 export {
-  ensureGeminiAttachmentIsActive,
-  ensureGeminiAttachmentIsLink,
   geminiGenJson,
   geminiGenJsonFromConvo,
   geminiGenText,
-  injectGeminiFileCache,
   injectGeminiToken,
-  isGeminiFileUri,
 } from "./src/gemini.ts";
 export {
   injectGeminiErrorLogger,
