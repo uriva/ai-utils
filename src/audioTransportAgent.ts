@@ -117,7 +117,13 @@ export const makeSessionEventHandler = (
   let interrupted = false;
   let latestOutputTranscript = "";
   let turnEvents: AudioSessionEvent[] = [];
-  return (event: AudioSessionEvent) => {
+  const flushPending = () => {
+    if (!interrupted && latestOutputTranscript) {
+      callbacks.onUtterance(latestOutputTranscript);
+    }
+    latestOutputTranscript = "";
+  };
+  const handle = (event: AudioSessionEvent) => {
     if (event.type === "audio") {
       callbacks.onAudio(event.chunk);
     }
@@ -156,6 +162,7 @@ export const makeSessionEventHandler = (
       }
     }
   };
+  return { handle, flushPending };
 };
 
 const audioToolTimeoutMs = 60_000;
@@ -299,9 +306,60 @@ const createSessionConfig = (
     resolveLoop: (() => void) | undefined;
     reconnect: () => void;
     sessionGeneration: number;
+    flushPendingUtterance: () => void;
   },
 ): AudioSessionConfig => {
   const generation = state.sessionGeneration;
+  const sessionHandler = makeSessionEventHandler({
+    onAudio: (chunk) => {
+      if (state.isReconnecting) return;
+      if (!state.loggedFirstAudioOut) {
+        state.loggedFirstAudioOut = true;
+        state.reconnectTimestamps = [];
+        console.log("[audio] first output audio, reconnect window reset");
+      }
+      void endpoint.sendData({
+        type: "audio",
+        chunks: [{
+          mimeType: chunk.mimeType,
+          dataBase64: chunk.dataBase64,
+        }],
+        from: spec.transport.participantName,
+      });
+    },
+    onUtterance: (text) => {
+      if (state.isReconnecting) return;
+      const spoken = spokenReplyOnly(text);
+      if (spoken.length === 0) return;
+      void outputEvent(ownUtteranceTurn(spoken));
+      // We do not send the text over the duplex to avoid confusing the remote end with both text and audio for the same utterance.
+      // void endpoint.sendData({
+      //   type: "text" as const,
+      //   text: spoken,
+      //   from: spec.transport.participantName,
+      // });
+    },
+    onFlush: () => {
+      if (state.isReconnecting) return;
+      void endpoint.sendData({
+        type: "flush",
+        from: spec.transport.participantName,
+      });
+    },
+    onTurnOutput: (sessionOutput, wasInterrupted) => {
+      if (state.isReconnecting) return;
+      const currentSession = state.session;
+      if (!currentSession) return;
+      processTurnOutput(
+        currentSession,
+        spec,
+        outputEvent,
+        sessionOutput,
+        wasInterrupted,
+      ).catch((e) => console.error("processTurnOutput error:", e));
+    },
+  });
+  state.flushPendingUtterance = sessionHandler.flushPending;
   return {
     apiKey: accessGeminiToken(),
     prompt:
@@ -327,55 +385,7 @@ const createSessionConfig = (
       );
       state.reconnect();
     },
-    onSessionEvent: makeSessionEventHandler({
-      onAudio: (chunk) => {
-        if (state.isReconnecting) return;
-        if (!state.loggedFirstAudioOut) {
-          state.loggedFirstAudioOut = true;
-          state.reconnectTimestamps = [];
-          console.log("[audio] first output audio, reconnect window reset");
-        }
-        void endpoint.sendData({
-          type: "audio",
-          chunks: [{
-            mimeType: chunk.mimeType,
-            dataBase64: chunk.dataBase64,
-          }],
-          from: spec.transport.participantName,
-        });
-      },
-      onUtterance: (text) => {
-        if (state.isReconnecting) return;
-        const spoken = spokenReplyOnly(text);
-        if (spoken.length === 0) return;
-        void outputEvent(ownUtteranceTurn(spoken));
-        // We do not send the text over the duplex to avoid confusing the remote end with both text and audio for the same utterance.
-        // void endpoint.sendData({
-        //   type: "text" as const,
-        //   text: spoken,
-        //   from: spec.transport.participantName,
-        // });
-      },
-      onFlush: () => {
-        if (state.isReconnecting) return;
-        void endpoint.sendData({
-          type: "flush",
-          from: spec.transport.participantName,
-        });
-      },
-      onTurnOutput: (sessionOutput, wasInterrupted) => {
-        if (state.isReconnecting) return;
-        const currentSession = state.session;
-        if (!currentSession) return;
-        processTurnOutput(
-          currentSession,
-          spec,
-          outputEvent,
-          sessionOutput,
-          wasInterrupted,
-        ).catch((e) => console.error("processTurnOutput error:", e));
-      },
-    }),
+    onSessionEvent: sessionHandler.handle,
   };
 };
 
@@ -427,6 +437,7 @@ export const runAudioAgentLoop = async (
       | undefined,
     resolveLoop: undefined as (() => void) | undefined,
     sessionGeneration: 0,
+    flushPendingUtterance: () => {},
     reconnect: () => {
       if (state.isClosed || state.isReconnecting) return;
       const now = Date.now();
@@ -504,6 +515,7 @@ export const runAudioAgentLoop = async (
         console.log("[audio] session closed");
         state.isClosed = true;
         clearTimeout(state.vadTimeout);
+        state.flushPendingUtterance();
         await state.session?.close();
         resolve();
         return;

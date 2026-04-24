@@ -364,7 +364,7 @@ Deno.test(
       onTurnOutput: (_sessionOutput, wasInterrupted) => {
         turnOutputCalls.push({ wasInterrupted });
       },
-    });
+    }).handle;
 
     handler({ type: "output_transcript", text: "Hello", finished: false });
     handler({ type: "interrupted" });
@@ -396,7 +396,7 @@ Deno.test(
       },
       onFlush: () => {},
       onTurnOutput: () => {},
-    });
+    }).handle;
 
     handler({
       type: "output_transcript",
@@ -410,6 +410,37 @@ Deno.test(
       args: {},
     });
 
+    assertEquals(utterances, ["ALPHA TANGO"]);
+  },
+);
+
+Deno.test(
+  "makeSessionEventHandler flushPending recovers transcript arriving after tool_call",
+  () => {
+    const utterances: string[] = [];
+    const { handle, flushPending } = makeSessionEventHandler({
+      onAudio: () => {},
+      onUtterance: (text) => {
+        utterances.push(text);
+      },
+      onFlush: () => {},
+      onTurnOutput: () => {},
+    });
+
+    handle({
+      type: "tool_call",
+      id: "tc1",
+      name: "hangUp",
+      args: {},
+    });
+    handle({
+      type: "output_transcript",
+      text: "ALPHA TANGO",
+      finished: false,
+    });
+
+    assertEquals(utterances, []);
+    flushPending();
     assertEquals(utterances, ["ALPHA TANGO"]);
   },
 );
