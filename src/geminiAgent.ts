@@ -1161,7 +1161,7 @@ export const geminiAgentCaller =
       : result;
   };
 
-const resolveFileAttachments = async (
+const resolveAttachments = async (
   events: GeminiHistoryEvent[],
 ): Promise<GeminiHistoryEvent[]> => {
   const resolved = await Promise.all(
@@ -1170,6 +1170,9 @@ const resolveFileAttachments = async (
       const resolvedAttachments = await Promise.all(
         event.attachments.map((att) => {
           if (att.kind === "file" && !isGeminiFileUri(att.fileUri)) {
+            return ensureGeminiAttachmentIsLink(att);
+          }
+          if (att.kind === "inline") {
             return ensureGeminiAttachmentIsLink(att);
           }
           return Promise.resolve(att);
@@ -1195,7 +1198,7 @@ const geminiAgentCallerInner = ({
 async (
   events: GeminiHistoryEvent[],
 ): Promise<GeminiHistoryEvent[]> => {
-  const resolvedEvents = await resolveFileAttachments(events);
+  const resolvedEvents = await resolveAttachments(events);
   return pipe(
     filterAndRewriteInvalidToolCalls(rewriteHistory),
     filterOrphanedToolResults,
