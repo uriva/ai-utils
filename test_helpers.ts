@@ -135,6 +135,7 @@ export const runForAllProviders = (
   ) => Promise<void>,
   retries = 3,
   geminiOnly = false,
+  sanitizeResources = true,
 ): void => {
   const requestedProvider = Deno.env.get("TEST_PROVIDER");
   if (!requestedProvider) return;
@@ -159,10 +160,13 @@ export const runForAllProviders = (
     : runWithProvider(normalizedProvider);
 
   Deno.test(
-    `${testName} [${normalizedProvider}]`,
-    injectSecrets(withRetries(retries, async () => {
-      await testFn(runWithSelectedProvider);
-    })),
+    {
+      name: `${testName} [${normalizedProvider}]`,
+      sanitizeResources,
+      fn: injectSecrets(withRetries(retries, async () => {
+        await testFn(runWithSelectedProvider);
+      })),
+    },
   );
 };
 

@@ -176,6 +176,7 @@ const uploadToGeminiFromUrl = makeCache("gemini-file-upload-v1")(
   async (url: string, mimeType: string): Promise<UploadResult> => {
     const res = await fetch(url);
     if (!res.ok) {
+      await res.body?.cancel();
       throw new Error(`Failed to fetch file for Gemini upload: ${url}`);
     }
     return uploadBlobToGemini(await res.blob(), mimeType);
