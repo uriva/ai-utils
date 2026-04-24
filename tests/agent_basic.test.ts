@@ -384,7 +384,7 @@ runForAllProviders(
     const history = [
       participantUtteranceTurn({ name: "user", text: "Hello" }),
       // do_nothing event should be filtered out
-      doNothingEvent({ type: "gemini", responseId: "test-id" }),
+      doNothingEvent(),
       participantUtteranceTurn({ name: "user", text: "What's up?" }),
     ];
 

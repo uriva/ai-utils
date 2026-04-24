@@ -17,6 +17,7 @@ import {
   type HistoryEvent,
   injectAccessHistory,
   injectCallModelWrapper,
+  injectMetadataStore,
   injectOutputEvent,
   type ToolReturn,
 } from "./src/agent.ts";
@@ -99,6 +100,11 @@ export const injectSecrets = pipe(
   flushRmmbr,
   injectDeterministic,
   injectCallModelWrapper(cachingCallModelWrapper),
+  injectMetadataStore(() => ({
+    get: () => Promise.resolve(null),
+    set: () => Promise.resolve(),
+    mget: () => Promise.resolve([]),
+  })),
   injectOpenAiToken(requireEnv("OPENAI_API_KEY")),
   injectGeminiToken(requireEnv("GEMINI_API_KEY")),
   injectKimiToken(requireEnv("KIMI_API_KEY")),

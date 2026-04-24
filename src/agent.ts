@@ -243,6 +243,23 @@ const getHistory = historyInjection.access;
 export const injectAccessHistory = historyInjection.inject;
 export const accessHistory = historyInjection.access;
 
+export type MetadataStore = {
+  get: (eventId: string) => Promise<unknown | null>;
+  set: (eventId: string, metadata: unknown) => Promise<void>;
+  mget: (eventIds: string[]) => Promise<(unknown | null)[]>;
+};
+
+const metadataStoreInjection: Injection<() => MetadataStore> = context(
+  (): MetadataStore => ({
+    get: () => Promise.resolve(null),
+    set: () => Promise.resolve(),
+    mget: () => Promise.resolve([]),
+  }),
+);
+
+export const injectMetadataStore = metadataStoreInjection.inject;
+export const accessMetadataStore = metadataStoreInjection.access;
+
 export type CallModel = (events: HistoryEvent[]) => Promise<HistoryEvent[]>;
 
 const callModelInjection: Injection<CallModel> = context(
@@ -367,17 +384,23 @@ export const callToResult =
       };
   };
 
-export const toolUseTurnWithMetadata = <Metadata>(
+export const toolUseTurn = (
   { name, args }: FunctionCall,
-  modelMetadata: Metadata | undefined,
-): HistoryEventWithMetadata<Metadata> => ({
+): HistoryEvent => ({
   type: "tool_call",
   ...sharedFields(),
   isOwn: true,
   name: coerce(name),
   parameters: args,
-  modelMetadata,
 });
+
+export const toolUseTurnWithMetadata = <Metadata>(
+  { name, args }: FunctionCall,
+  modelMetadata: Metadata | undefined,
+): HistoryEventWithMetadata<Metadata> => ({
+  ...toolUseTurn({ name, args }),
+  modelMetadata,
+} as HistoryEventWithMetadata<Metadata>);
 
 export const participantUtteranceTurn = (
   { name, text, attachments }: {
@@ -394,29 +417,30 @@ export const participantUtteranceTurn = (
   ...sharedFields(),
 });
 
-export const ownUtteranceTurnWithMetadata = <Metadata>(
+export const ownUtteranceTurn = (
   text: string,
-  modelMetadata: Metadata | undefined,
   attachments?: MediaAttachment[],
-): HistoryEventWithMetadata<Metadata> => ({
+): HistoryEvent => ({
   type: "own_utterance",
   isOwn: true,
-  modelMetadata,
   text,
   attachments,
   ...sharedFields(),
 });
 
-export const ownUtteranceTurn = <Metadata>(
+export const ownUtteranceTurnWithMetadata = <Metadata>(
   text: string,
-  attachments?: MediaAttachment[],
-): HistoryEventWithMetadata<Metadata> =>
-  ownUtteranceTurnWithMetadata(text, undefined, attachments);
-
-export const ownThoughtTurn = <Metadata>(
-  text: string,
+  modelMetadata: Metadata | undefined,
   attachments?: MediaAttachment[],
 ): HistoryEventWithMetadata<Metadata> => ({
+  ...ownUtteranceTurn(text, attachments),
+  modelMetadata,
+} as HistoryEventWithMetadata<Metadata>);
+
+export const ownThoughtTurn = (
+  text: string,
+  attachments?: MediaAttachment[],
+): HistoryEvent => ({
   type: "own_thought",
   isOwn: true,
   text,
@@ -429,13 +453,9 @@ export const ownThoughtTurnWithMetadata = <Metadata>(
   modelMetadata: Metadata | undefined,
   attachments?: MediaAttachment[],
 ): HistoryEventWithMetadata<Metadata> => ({
-  type: "own_thought",
-  isOwn: true,
+  ...ownThoughtTurn(text, attachments),
   modelMetadata,
-  text,
-  attachments,
-  ...sharedFields(),
-});
+} as HistoryEventWithMetadata<Metadata>);
 
 const sharedFields = () => ({
   id: idGeneration.access(),
@@ -474,6 +494,21 @@ export const participantEditMessageTurn = (
   ...sharedFields(),
 });
 
+export const ownEditMessageTurn = (
+  { text, onMessage, attachments }: {
+    text: string;
+    onMessage: MessageId;
+    attachments?: MediaAttachment[];
+  },
+): HistoryEvent => ({
+  type: "own_edit_message",
+  isOwn: true,
+  text,
+  onMessage,
+  attachments,
+  ...sharedFields(),
+});
+
 export const ownEditMessageTurnWithMetadata = <Metadata>(
   { text, onMessage, modelMetadata, attachments }: {
     text: string;
@@ -482,25 +517,22 @@ export const ownEditMessageTurnWithMetadata = <Metadata>(
     attachments?: MediaAttachment[];
   },
 ): HistoryEventWithMetadata<Metadata> => ({
-  type: "own_edit_message",
-  isOwn: true,
+  ...ownEditMessageTurn({ text, onMessage, attachments }),
   modelMetadata,
-  text,
-  onMessage,
-  attachments,
+} as HistoryEventWithMetadata<Metadata>);
+
+export const doNothingEvent = (): HistoryEvent => ({
+  type: "do_nothing",
+  isOwn: true,
   ...sharedFields(),
 });
 
-export const doNothingEvent = <Metadata>(
+export const doNothingEventWithMetadata = <Metadata>(
   modelMetadata?: Metadata,
-): HistoryEventWithMetadata<
-  Metadata
-> => ({
-  type: "do_nothing",
-  isOwn: true,
+): HistoryEventWithMetadata<Metadata> => ({
+  ...doNothingEvent(),
   modelMetadata,
-  ...sharedFields(),
-});
+} as HistoryEventWithMetadata<Metadata>);
 
 export const overrideTime = timestampGeneration.inject;
 export const overrideIdGenerator = idGeneration.inject;
@@ -547,13 +579,7 @@ const isNoResponseUtterance = (event: HistoryEvent) =>
 
 const reclassifyNoResponse = (output: HistoryEvent[]): HistoryEvent[] =>
   output.map((event) =>
-    isNoResponseUtterance(event)
-      ? doNothingEvent(
-        (event as Extract<HistoryEvent, { type: "own_utterance" }>)
-          .modelMetadata ??
-          undefined,
-      )
-      : event
+    isNoResponseUtterance(event) ? doNothingEvent() : event
   );
 
 const isEmptyUtterance = (event: HistoryEvent) => {
@@ -729,7 +755,7 @@ export const handleFunctionCalls =
     await each(async (t: ToolUse<Record<string, unknown>>) => {
       if (t.name === doNothingToolName) {
         hadDeferred = true;
-        await outputEvent(doNothingEvent(undefined));
+        await outputEvent(doNothingEvent());
         return;
       }
       const fc: FunctionCall = { name: t.name, args: t.parameters, id: t.id };

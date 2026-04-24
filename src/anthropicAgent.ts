@@ -4,9 +4,10 @@ import { conditionalRetry, empty, map, sum } from "gamla";
 import type { ZodType } from "zod/v4";
 import { zodToGeminiParameters } from "./gemini.ts";
 import {
+  accessMetadataStore,
   type AgentSpec,
   createSkillTools,
-  doNothingEvent,
+  doNothingEventWithMetadata,
   estimateTokens,
   generateId,
   getStreamChunk,
@@ -14,10 +15,10 @@ import {
   type HistoryEventWithMetadata,
   type MediaAttachment,
   type MessageId,
-  ownThoughtTurnWithMetadata,
-  ownUtteranceTurnWithMetadata,
+  ownThoughtTurn,
+  ownUtteranceTurn,
   type Tool,
-  toolUseTurnWithMetadata,
+  toolUseTurn,
 } from "./agent.ts";
 import {
   appendInternalSentTimestamp,
@@ -741,6 +742,11 @@ const didNothing = (output: AnthropicOutputPart[]) =>
     (!output[0].text.replace(/[\s\u200B\u200C\u200D\uFEFF]/g, "") ||
       output[0].text.trim().toLowerCase() === noResponseTag));
 
+const storeAnthropicMetadata = (eventId: string, metadata: AnthropicMetadata) =>
+  accessMetadataStore().set(eventId, metadata).catch((e) => {
+    console.error("Failed to store Anthropic metadata:", e);
+  });
+
 const anthropicOutputPartToHistoryEvents =
   (responseId: string) => (p: AnthropicOutputPart): AnthropicHistoryEvent[] => {
     const metadata: AnthropicMetadata = {
@@ -749,14 +755,13 @@ const anthropicOutputPartToHistoryEvents =
       thinkingContent: p.thinkingContent,
     };
 
-    const thoughtEvent = p.thinkingContent
-      ? [
-        ownThoughtTurnWithMetadata<AnthropicMetadata>(
-          p.thinkingContent,
-          metadata,
-        ),
-      ]
-      : [];
+    const events: AnthropicHistoryEvent[] = [];
+
+    if (p.thinkingContent) {
+      const event = ownThoughtTurn(p.thinkingContent) as AnthropicHistoryEvent;
+      storeAnthropicMetadata(event.id, metadata);
+      events.push(event);
+    }
 
     if (p.type === "text") {
       const text = p.text || "";
@@ -767,39 +772,37 @@ const anthropicOutputPartToHistoryEvents =
       const match = stripped.match(thoughtRegex);
 
       if (match) {
-        return [
-          ...thoughtEvent,
-          ownThoughtTurnWithMetadata<AnthropicMetadata>(match[1], metadata),
-        ];
+        const event = ownThoughtTurn(match[1]) as AnthropicHistoryEvent;
+        storeAnthropicMetadata(event.id, metadata);
+        events.push(event);
+        return events;
       }
 
       const notificationRegex = /^\[System notification: ([\s\S]*?)\]$/;
       const notificationMatch = stripped.match(notificationRegex);
 
       if (notificationMatch) {
-        return [
-          ...thoughtEvent,
-          ownThoughtTurnWithMetadata<AnthropicMetadata>(
-            notificationMatch[1],
-            metadata,
-          ),
-        ];
+        const event = ownThoughtTurn(
+          notificationMatch[1],
+        ) as AnthropicHistoryEvent;
+        storeAnthropicMetadata(event.id, metadata);
+        events.push(event);
+        return events;
       }
 
-      return [
-        ...thoughtEvent,
-        ownUtteranceTurnWithMetadata<AnthropicMetadata>(stripped, metadata),
-      ];
+      const event = ownUtteranceTurn(stripped) as AnthropicHistoryEvent;
+      storeAnthropicMetadata(event.id, metadata);
+      events.push(event);
+      return events;
     }
 
     if (p.type === "function_call") {
-      return [
-        ...thoughtEvent,
-        toolUseTurnWithMetadata(
-          { name: p.name, args: p.arguments, id: p.id },
-          metadata,
-        ),
-      ];
+      const event = toolUseTurn(
+        { name: p.name, args: p.arguments, id: p.id },
+      ) as AnthropicHistoryEvent;
+      storeAnthropicMetadata(event.id, metadata);
+      events.push(event);
+      return events;
     }
 
     throw new Error(
@@ -848,7 +851,7 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicHistoryEvent[]> => {
   const responseId = generateId();
 
   if (didNothing(anthropicOutput)) {
-    return [doNothingEvent({ type: "anthropic", responseId })];
+    return [doNothingEventWithMetadata({ type: "anthropic", responseId })];
   }
 
   return anthropicOutput.flatMap(

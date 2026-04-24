@@ -8,9 +8,10 @@ import type {
 import type { ZodType } from "zod/v4";
 import { zodToGeminiParameters } from "./gemini.ts";
 import {
+  accessMetadataStore,
   type AgentSpec,
   createSkillTools,
-  doNothingEvent,
+  doNothingEventWithMetadata,
   estimateTokens,
   generateId,
   getStreamChunk,
@@ -18,10 +19,10 @@ import {
   type HistoryEventWithMetadata,
   type MediaAttachment,
   type MessageId,
-  ownThoughtTurnWithMetadata,
-  ownUtteranceTurnWithMetadata,
+  ownThoughtTurn,
+  ownUtteranceTurn,
   type Tool,
-  toolUseTurnWithMetadata,
+  toolUseTurn,
 } from "./agent.ts";
 import {
   appendInternalSentTimestamp,
@@ -569,6 +570,11 @@ const didNothing = (output: KimiOutputPart[]) =>
     (!output[0].text.replace(/[\s\u200B\u200C\u200D\uFEFF]/g, "") ||
       output[0].text.trim().toLowerCase() === noResponseTag));
 
+const storeKimiMetadata = (eventId: string, metadata: KimiMetadata) =>
+  accessMetadataStore().set(eventId, metadata).catch((e) => {
+    console.error("Failed to store Kimi metadata:", e);
+  });
+
 const kimiOutputPartToHistoryEvents =
   (responseId: string) => (p: KimiOutputPart): KimiHistoryEvent[] => {
     const metadata: KimiMetadata = {
@@ -577,9 +583,13 @@ const kimiOutputPartToHistoryEvents =
       reasoningContent: p.reasoningContent,
     };
 
-    const thoughtEvent = p.reasoningContent
-      ? [ownThoughtTurnWithMetadata<KimiMetadata>(p.reasoningContent, metadata)]
-      : [];
+    const events: KimiHistoryEvent[] = [];
+
+    if (p.reasoningContent) {
+      const event = ownThoughtTurn(p.reasoningContent) as KimiHistoryEvent;
+      storeKimiMetadata(event.id, metadata);
+      events.push(event);
+    }
 
     if (p.type === "text") {
       const text = p.text || "";
@@ -590,39 +600,35 @@ const kimiOutputPartToHistoryEvents =
       const match = stripped.match(thoughtRegex);
 
       if (match) {
-        return [
-          ...thoughtEvent,
-          ownThoughtTurnWithMetadata<KimiMetadata>(match[1], metadata),
-        ];
+        const event = ownThoughtTurn(match[1]) as KimiHistoryEvent;
+        storeKimiMetadata(event.id, metadata);
+        events.push(event);
+        return events;
       }
 
       const notificationRegex = /^\[System notification: ([\s\S]*?)\]$/;
       const notificationMatch = stripped.match(notificationRegex);
 
       if (notificationMatch) {
-        return [
-          ...thoughtEvent,
-          ownThoughtTurnWithMetadata<KimiMetadata>(
-            notificationMatch[1],
-            metadata,
-          ),
-        ];
+        const event = ownThoughtTurn(notificationMatch[1]) as KimiHistoryEvent;
+        storeKimiMetadata(event.id, metadata);
+        events.push(event);
+        return events;
       }
 
-      return [
-        ...thoughtEvent,
-        ownUtteranceTurnWithMetadata<KimiMetadata>(stripped, metadata),
-      ];
+      const event = ownUtteranceTurn(stripped) as KimiHistoryEvent;
+      storeKimiMetadata(event.id, metadata);
+      events.push(event);
+      return events;
     }
 
     if (p.type === "function_call") {
-      return [
-        ...thoughtEvent,
-        toolUseTurnWithMetadata(
-          { name: p.name, args: p.arguments, id: p.id },
-          metadata,
-        ),
-      ];
+      const event = toolUseTurn(
+        { name: p.name, args: p.arguments, id: p.id },
+      ) as KimiHistoryEvent;
+      storeKimiMetadata(event.id, metadata);
+      events.push(event);
+      return events;
     }
 
     throw new Error(`Unknown Kimi output part type: ${JSON.stringify(p)}`);
@@ -664,7 +670,7 @@ async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
   const responseId = generateId();
 
   if (didNothing(kimiOutput)) {
-    return [doNothingEvent({ type: "kimi", responseId })];
+    return [doNothingEventWithMetadata({ type: "kimi", responseId })];
   }
 
   return kimiOutput.flatMap(kimiOutputPartToHistoryEvents(responseId));
