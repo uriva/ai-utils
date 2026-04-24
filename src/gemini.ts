@@ -74,6 +74,14 @@ export const accessGeminiToken = tokenInjection.access;
 export const injectGeminiToken = (token: string): Injector =>
   tokenInjection.inject(() => token);
 
+const geminiFileCacheInjection: Injection<
+  (_url: string) => Promise<string | undefined>
+> = context((_url: string): Promise<string | undefined> =>
+  Promise.resolve(undefined)
+);
+
+export const injectGeminiFileCache = geminiFileCacheInjection.inject;
+
 const openAiToGeminiMessage = pipe(
   map(({ role, content }: ChatCompletionMessageParam): Content => ({
     role: role === "user" ? role : "model",
@@ -176,6 +184,8 @@ const uploadToGeminiFromUrl = async (
   url: string,
   mimeType: string,
 ): Promise<UploadResult> => {
+  const cached = await geminiFileCacheInjection.access(url);
+  if (cached) return { geminiUri: cached, mimeType };
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`Failed to fetch file for Gemini upload: ${url}`);
@@ -200,7 +210,7 @@ const geminiFileNameFromUri = (uri: string) => {
   return match ? `files/${match[1]}` : null;
 };
 
-const isGeminiFileUri = (uri: string) =>
+export const isGeminiFileUri = (uri: string): boolean =>
   uri.startsWith("https://generativelanguage.googleapis.com/");
 
 const waitForFileActive = async (
@@ -225,10 +235,7 @@ const waitForFileActive = async (
 export const ensureGeminiAttachmentIsLink = async (
   attachment: MediaAttachment,
 ): Promise<MediaAttachment> => {
-  if (
-    attachment.kind === "file" &&
-    attachment.fileUri.startsWith("https://generativelanguage.googleapis.com/")
-  ) {
+  if (attachment.kind === "file" && isGeminiFileUri(attachment.fileUri)) {
     return attachment;
   }
   if (attachment.kind === "file" && attachment.fileUri.trim()) {

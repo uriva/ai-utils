@@ -2,7 +2,7 @@ import { type EitherOutput, type Func, throwerCatcher } from "gamla";
 
 export type ModelOpts = { mini: boolean; maxOutputTokens?: number };
 
-const typeAdherenceError = throwerCatcher();
+const typeAdherenceError = throwerCatcher("AI refused to adhere to typing");
 
 export const aiRefusesToAdhereTyping = typeAdherenceError.thrower;
 export const catchAiRefusesToAdhereToTyping: <G extends Func>(

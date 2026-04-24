@@ -1,5 +1,6 @@
 import { assert } from "@std/assert";
 import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
+import { injectGeminiFileCache } from "../src/gemini.ts";
 import {
   agentDeps,
   b64,
@@ -210,4 +211,74 @@ runForAllProviders(
       }`,
     );
   },
+);
+
+runForAllProviders(
+  "file attachment with external url is uploaded to gemini and cache is consulted",
+  async (runAgentWithProvider) => {
+    const ac = new AbortController();
+    const server = Deno.serve({ port: 0, signal: ac.signal }, async (req) => {
+      const url = new URL(req.url);
+      if (url.pathname === "/dog.jpg") {
+        const data = await Deno.readFile("./dog.jpg");
+        return new Response(data, {
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+    const addr = server.addr as Deno.NetAddr;
+    const imageUrl = `http://localhost:${addr.port}/dog.jpg`;
+
+    let cacheCalls = 0;
+    const cacheFn = (url: string): Promise<string | undefined> => {
+      cacheCalls++;
+      if (url !== imageUrl) {
+        return Promise.reject(new Error(`Unexpected cache URL: ${url}`));
+      }
+      return Promise.resolve(undefined);
+    };
+
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please describe the attached image.",
+        attachments: [
+          { kind: "file", mimeType: "image/jpeg", fileUri: imageUrl },
+        ],
+      }),
+    ];
+
+    await injectGeminiFileCache(cacheFn)(async () => {
+      await agentDeps(mockHistory)(runAgentWithProvider)({
+        maxIterations: 3,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        prompt: "You can see images attached by the user.",
+        lightModel: true,
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+      });
+    })();
+
+    ac.abort();
+    try {
+      await server.finished;
+    } catch {
+      // expected on abort
+    }
+
+    assert(
+      cacheCalls > 0,
+      `Expected geminiFileCache to be consulted, but it was never called`,
+    );
+    assert(
+      mockHistory.some(recognizedTheDog),
+      `AI did not describe the image as a dog. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+  },
+  3,
+  true,
 );

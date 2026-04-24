@@ -42,10 +42,12 @@ import {
 import {
   accessGeminiToken,
   attachmentsToParts,
+  ensureGeminiAttachmentIsLink,
   geminiFlashImageVersion,
   geminiFlashVersion,
   geminiProImageVersion,
   geminiProVersion,
+  isGeminiFileUri,
   zodToGeminiParameters,
 } from "./gemini.ts";
 import {
@@ -334,13 +336,19 @@ const callGeminiWithRetry = conditionalRetry(isRetryableError)(
   withTimeout(rawCallGemini),
 );
 
+const fallbackModelRetry = conditionalRetry(isRetryableError)(
+  1000,
+  4,
+  withTimeout(rawCallGemini),
+);
+
 const callGemini = (
   req: GenerateContentParameters,
   disableStreaming?: boolean,
 ): Promise<GeminiOutput> =>
   callGeminiWithRetry({ req, disableStreaming }).catch((err: unknown) => {
     if (!isRetryableError(err)) throw err;
-    return rawCallGemini({
+    return fallbackModelRetry({
       req: {
         ...req,
         model: alternateModel(req.model),
@@ -1153,6 +1161,26 @@ export const geminiAgentCaller =
       : result;
   };
 
+const resolveFileAttachments = async (
+  events: GeminiHistoryEvent[],
+): Promise<GeminiHistoryEvent[]> => {
+  const resolved = await Promise.all(
+    events.map(async (event) => {
+      if (!("attachments" in event) || !event.attachments) return event;
+      const resolvedAttachments = await Promise.all(
+        event.attachments.map((att) => {
+          if (att.kind === "file" && !isGeminiFileUri(att.fileUri)) {
+            return ensureGeminiAttachmentIsLink(att);
+          }
+          return Promise.resolve(att);
+        }),
+      );
+      return { ...event, attachments: resolvedAttachments };
+    }),
+  );
+  return resolved;
+};
+
 const geminiAgentCallerInner = ({
   lightModel,
   prompt,
@@ -1164,8 +1192,11 @@ const geminiAgentCallerInner = ({
   maxOutputTokens,
   disableStreaming,
 }: AgentSpec) =>
-(events: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> =>
-  pipe(
+async (
+  events: GeminiHistoryEvent[],
+): Promise<GeminiHistoryEvent[]> => {
+  const resolvedEvents = await resolveFileAttachments(events);
+  return pipe(
     filterAndRewriteInvalidToolCalls(rewriteHistory),
     filterOrphanedToolResults,
     filterDoNothing,
@@ -1212,7 +1243,8 @@ const geminiAgentCallerInner = ({
         return event ? [event] : [];
       });
     },
-  )(events);
+  )(resolvedEvents);
+};
 
 const embeddedThoughtPattern =
   /\[Internal thought, visible only to you: [\s\S]*?\]/g;

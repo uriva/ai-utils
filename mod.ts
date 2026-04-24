@@ -37,7 +37,9 @@ export {
   geminiGenJson,
   geminiGenJsonFromConvo,
   geminiGenText,
+  injectGeminiFileCache,
   injectGeminiToken,
+  isGeminiFileUri,
 } from "./src/gemini.ts";
 export {
   injectGeminiErrorLogger,
