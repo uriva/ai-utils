@@ -8,7 +8,7 @@ import {
 } from "@google/genai";
 import { context, type Injection } from "@uri/inject";
 import {
-  conditionalRetry,
+  conditionalRetryExponential,
   empty,
   filter,
   groupBy,
@@ -330,14 +330,16 @@ const rawCallGemini = async ({
   });
 };
 
-const callGeminiWithRetry = conditionalRetry(isRetryableError)(
+const callGeminiWithRetry = conditionalRetryExponential(isRetryableError)(
   1000,
-  4,
+  16000,
+  5,
   withTimeout(rawCallGemini),
 );
 
-const fallbackModelRetry = conditionalRetry(isRetryableError)(
+const fallbackModelRetry = conditionalRetryExponential(isRetryableError)(
   1000,
+  16000,
   4,
   withTimeout(rawCallGemini),
 );
