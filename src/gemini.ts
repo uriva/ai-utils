@@ -6,7 +6,7 @@ import {
   type Part,
 } from "@google/genai";
 import { context, type Injection, type Injector } from "@uri/inject";
-import { coerce, empty, map, pipe, remove } from "gamla";
+import { coerce, conditionalRetry, empty, map, pipe, remove } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z, type ZodType } from "zod/v4";
 import type { MediaAttachment } from "./agent.ts";
@@ -172,15 +172,24 @@ const uploadBlobToGemini = async (
   return { geminiUri: uri, mimeType: mimeType2 };
 };
 
+const isTransientFetchError = (error: unknown) =>
+  error instanceof TypeError &&
+  /reading a body|network|connection/i.test(error.message);
+
+const fetchAndUploadToGemini = async (
+  url: string,
+  mimeType: string,
+): Promise<UploadResult> => {
+  const res = await fetch(url);
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new Error(`Failed to fetch file for Gemini upload: ${url}`);
+  }
+  return uploadBlobToGemini(await res.blob(), mimeType);
+};
+
 const uploadToGeminiFromUrl = makeCache("gemini-file-upload-v1")(
-  async (url: string, mimeType: string): Promise<UploadResult> => {
-    const res = await fetch(url);
-    if (!res.ok) {
-      await res.body?.cancel();
-      throw new Error(`Failed to fetch file for Gemini upload: ${url}`);
-    }
-    return uploadBlobToGemini(await res.blob(), mimeType);
-  },
+  conditionalRetry(isTransientFetchError)(1000, 3, fetchAndUploadToGemini),
 );
 
 const uploadToGeminiFromFile = (
