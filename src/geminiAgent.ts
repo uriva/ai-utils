@@ -43,12 +43,10 @@ import {
 import {
   accessGeminiToken,
   attachmentsToParts,
-  ensureGeminiAttachmentIsLink,
   geminiFlashImageVersion,
   geminiFlashVersion,
   geminiProImageVersion,
   geminiProVersion,
-  isGeminiFileUri,
   zodToGeminiParameters,
 } from "./gemini.ts";
 import {
@@ -1184,28 +1182,9 @@ export const geminiAgentCaller =
       : result;
   };
 
-const resolveAttachments = async (
+const resolveAttachments = (
   events: GeminiHistoryEvent[],
-): Promise<GeminiHistoryEvent[]> => {
-  const resolved = await Promise.all(
-    events.map(async (event) => {
-      if (!("attachments" in event) || !event.attachments) return event;
-      const resolvedAttachments = await Promise.all(
-        event.attachments.map((att) => {
-          if (att.kind === "file" && !isGeminiFileUri(att.fileUri)) {
-            return ensureGeminiAttachmentIsLink(att);
-          }
-          if (att.kind === "inline") {
-            return ensureGeminiAttachmentIsLink(att);
-          }
-          return Promise.resolve(att);
-        }),
-      );
-      return { ...event, attachments: resolvedAttachments };
-    }),
-  );
-  return resolved;
-};
+): GeminiHistoryEvent[] => events;
 
 const geminiAgentCallerInner = ({
   lightModel,
@@ -1221,8 +1200,8 @@ const geminiAgentCallerInner = ({
 async (
   events: GeminiHistoryEvent[],
 ): Promise<GeminiHistoryEvent[]> => {
-  const resolvedEvents = await resolveAttachments(events);
-  return pipe(
+  const resolvedEvents = resolveAttachments(events);
+  return await pipe(
     filterAndRewriteInvalidToolCalls(rewriteHistory),
     filterOrphanedToolResults,
     filterDoNothing,
