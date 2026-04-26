@@ -189,6 +189,135 @@ Deno.test(
   },
 );
 
+// Provider-agnostic: when the model invents a tool name (a frequent failure
+// mode), the tool_result returned to the model must include the actual
+// available tool names and skill names so it can self-correct on the next
+// turn. The previous message ("you may have misspelled it") gave the model
+// nothing to recover with.
+Deno.test(
+  "tool not found error lists available tools and skills",
+  async () => {
+    const realTool = {
+      name: "send_email",
+      description: "Send an email",
+      parameters: z.object({ to: z.string() }),
+      handler: () => Promise.resolve("sent"),
+    };
+    const calendarSkill = {
+      name: "calendar",
+      description: "Calendar ops",
+      instructions: "use this to manage calendar",
+      tools: [{
+        name: "list_events",
+        description: "List events",
+        parameters: z.object({}),
+        handler: () => Promise.resolve("events"),
+      }],
+    };
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "send a hallucinated tool",
+    })];
+    let callCount = 0;
+    const fakeCallModel = () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return Promise.resolve([{
+          type: "tool_call" as const,
+          isOwn: true as const,
+          name: "send_emial", // typo, not registered
+          parameters: { to: "x@y.com" },
+          id: "fake-call-1",
+          timestamp: Date.now(),
+        }]);
+      }
+      return Promise.resolve([]);
+    };
+    await injectCallModel(fakeCallModel)(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        maxIterations: 2,
+        onMaxIterationsReached: () => {},
+        tools: [realTool],
+        skills: [calendarSkill],
+        prompt: "unused in fake",
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+      });
+    })();
+    const toolResult = mockHistory.find((e) => e.type === "tool_result");
+    assert(toolResult && toolResult.type === "tool_result");
+    assert(
+      toolResult.result.includes("send_email"),
+      `expected error to list real tool name, got: ${toolResult.result}`,
+    );
+    assert(
+      toolResult.result.includes("calendar"),
+      `expected error to list skill name, got: ${toolResult.result}`,
+    );
+  },
+);
+
+// Provider-agnostic: when the model calls run_command with a valid skill but
+// a bogus tool name inside that skill, the error must include the skill's
+// instructions and tool list inline (auto-load) so the model can self-correct
+// on the next turn without an extra learn_skill round trip.
+Deno.test(
+  "run_command auto-loads skill instructions on wrong tool name",
+  async () => {
+    const calendarSkill = {
+      name: "calendar",
+      description: "Calendar operations",
+      instructions: "ALWAYS_PRESENT_MARKER use list_events to enumerate.",
+      tools: [{
+        name: "list_events",
+        description: "List events",
+        parameters: z.object({}),
+        handler: () => Promise.resolve("events"),
+      }],
+    };
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "list events",
+    })];
+    let callCount = 0;
+    const fakeCallModel = () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return Promise.resolve([{
+          type: "tool_call" as const,
+          isOwn: true as const,
+          name: runCommandToolName,
+          parameters: { command: "calendar/listEvents", params: {} },
+          id: "fake-call-1",
+          timestamp: Date.now(),
+        }]);
+      }
+      return Promise.resolve([]);
+    };
+    await injectCallModel(fakeCallModel)(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        maxIterations: 2,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        skills: [calendarSkill],
+        prompt: "unused",
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+      });
+    })();
+    const toolResult = mockHistory.find((e) => e.type === "tool_result");
+    assert(toolResult && toolResult.type === "tool_result");
+    assert(
+      toolResult.result.includes("ALWAYS_PRESENT_MARKER"),
+      `expected error to include skill instructions, got: ${toolResult.result}`,
+    );
+    assert(
+      toolResult.result.includes("list_events"),
+      `expected error to list real tool name, got: ${toolResult.result}`,
+    );
+  },
+);
+
 runForAllProviders(
   "skills: works alongside regular tools",
   async (runAgentWithProvider) => {

@@ -307,9 +307,53 @@ const parseWithCatch = <T extends ZodType>(
   }
 };
 
+const editDistance = (a: string, b: string): number => {
+  const dp = Array.from(
+    { length: a.length + 1 },
+    (_, i) => Array.from({ length: b.length + 1 }, (_, j) => i === 0 ? j : i),
+  );
+  return [...Array(a.length).keys()].reduce(
+    (_, i) =>
+      [...Array(b.length).keys()].reduce((__, j) => {
+        dp[i + 1][j + 1] = a[i] === b[j] ? dp[i][j] : 1 + Math.min(
+          dp[i][j],
+          dp[i + 1][j],
+          dp[i][j + 1],
+        );
+        return 0;
+      }, 0),
+    0,
+  );
+};
+
+const closestName = (target: string, candidates: string[]): string | null => {
+  if (empty(candidates)) return null;
+  const scored = candidates.map((c) => ({ c, d: editDistance(target, c) }));
+  const best = scored.reduce((a, b) => (a.d <= b.d ? a : b));
+  return best.d <= Math.max(2, Math.floor(target.length / 3)) ? best.c : null;
+};
+
+const toolNotFoundMessage = (
+  name: string,
+  // deno-lint-ignore no-explicit-any
+  actions: Tool<any>[],
+  skillNames: string[],
+): string => {
+  const names = actions.map((a) => a.name);
+  const suggestion = closestName(name, [...names, ...skillNames]);
+  const suggestionText = suggestion ? ` Did you mean "${suggestion}"?` : "";
+  const list = nonempty(names) ? names.join(", ") : "(none registered)";
+  const skillsText = nonempty(skillNames)
+    ? ` Available skills (load with ${learnSkillToolName}): ${
+      skillNames.join(", ")
+    }.`
+    : "";
+  return `Tool "${name}" not found.${suggestionText} Available tools: ${list}.${skillsText}`;
+};
+
 export const callToResult =
   // deno-lint-ignore no-explicit-any
-  (actions: Tool<any>[]) =>
+  (actions: Tool<any>[], skillNames: string[] = []) =>
   async <T extends ZodType>(fc: FunctionCall): Promise<
     | {
       toolCallId: string | undefined;
@@ -338,8 +382,7 @@ export const callToResult =
       reportToolNotFound(name);
       return {
         toolCallId,
-        result:
-          `Tool not found. You may have misspelled it, or you need to call learn_skill to discover available tools. If you see this tool in your history, it may also be that this tool is no longer available or has changed names.`,
+        result: toolNotFoundMessage(name, actions, skillNames),
       };
     }
     const { handler, parameters } = action;
@@ -743,33 +786,36 @@ export const normalizeHistoryForModel = (
   return [...interleaved, ...orphanedResults];
 };
 
-export const handleFunctionCalls =
+export const handleFunctionCalls = (
   // deno-lint-ignore no-explicit-any
-  (tools: Tool<any>[], onToolResult?: (event: HistoryEvent) => void) =>
-  async (output: HistoryEvent[]): Promise<boolean> => {
-    // deno-lint-ignore no-explicit-any
-    const toolCalls = filter((p: HistoryEvent): p is ToolUse<any> =>
-      p.type === "tool_call"
-    )(output);
-    let hadDeferred = false;
-    await each(async (t: ToolUse<Record<string, unknown>>) => {
-      if (t.name === doNothingToolName) {
-        hadDeferred = true;
-        await outputEvent(doNothingEvent());
-        return;
-      }
-      const fc: FunctionCall = { name: t.name, args: t.parameters, id: t.id };
-      const callResult = await callToResult(tools)(fc);
-      if (callResult === undefined) {
-        hadDeferred = true;
-        return;
-      }
-      const result = toolResultTurn(callResult);
-      await outputEvent(result);
-      onToolResult?.(result);
-    })(toolCalls);
-    return hadDeferred;
-  };
+  tools: Tool<any>[],
+  onToolResult?: (event: HistoryEvent) => void,
+  skillNames: string[] = [],
+) =>
+async (output: HistoryEvent[]): Promise<boolean> => {
+  // deno-lint-ignore no-explicit-any
+  const toolCalls = filter((p: HistoryEvent): p is ToolUse<any> =>
+    p.type === "tool_call"
+  )(output);
+  let hadDeferred = false;
+  await each(async (t: ToolUse<Record<string, unknown>>) => {
+    if (t.name === doNothingToolName) {
+      hadDeferred = true;
+      await outputEvent(doNothingEvent());
+      return;
+    }
+    const fc: FunctionCall = { name: t.name, args: t.parameters, id: t.id };
+    const callResult = await callToResult(tools, skillNames)(fc);
+    if (callResult === undefined) {
+      hadDeferred = true;
+      return;
+    }
+    const result = toolResultTurn(callResult);
+    await outputEvent(result);
+    onToolResult?.(result);
+  })(toolCalls);
+  return hadDeferred;
+};
 
 export const runCommandToolName = "run_command";
 export const learnSkillToolName = "learn_skill";
@@ -829,7 +875,11 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         const fullToolName = `${skillName}/${toolName}`;
         const tool = toolMap[fullToolName];
         if (!tool) {
-          return `Tool "${toolName}" not found in skill "${skillName}". Please call ${learnSkillToolName}.`;
+          const skill = skillMap[skillName];
+          const toolList = skill.tools.map((t) =>
+            `  - ${t.name}: ${t.description}`
+          ).join("\n");
+          return `Tool "${toolName}" not found in skill "${skillName}".\n\nSkill "${skillName}" instructions:\n${skill.instructions}\n\nAvailable tools in this skill:\n${toolList}`;
         }
         const parseResult = parseWithCatch(tool.parameters, params);
         if (!parseResult.ok) {
@@ -936,6 +986,7 @@ export const runAbstractAgent = async (
   const allTools = skills && skills.length > 0
     ? [...tools, ...createSkillTools(skills)]
     : tools;
+  const skillNames = (skills ?? []).map((s) => s.name);
   let c = 0;
   let emojiFloodRetries = 0;
   let truncationRetries = 0;
@@ -985,7 +1036,11 @@ export const runAbstractAgent = async (
     // Process what needs to be emitted
     if (emit.length > 0) {
       await each(outputEvent)(emit);
-      const hadDeferred = await handleFunctionCalls(allTools)(emit);
+      const hadDeferred = await handleFunctionCalls(
+        allTools,
+        undefined,
+        skillNames,
+      )(emit);
       if (hadDeferred) return;
 
       // We actually yielded things to the outside world, reset ephemeral history
