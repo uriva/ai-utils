@@ -7,13 +7,13 @@ import {
 } from "@google/genai";
 import { context, type Injection, type Injector } from "@uri/inject";
 import { coerce, conditionalRetry, empty, map, pipe, remove } from "gamla";
+import { isRetryableError, type ModelOpts } from "./utils.ts";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z, type ZodType } from "zod/v4";
 import type { MediaAttachment } from "./agent.ts";
 import { makeCache } from "./cacher.ts";
 import { structuredMsgs } from "./openai.ts";
 import { pruneDefaultsFromRequired } from "./toolTyping.ts";
-import type { ModelOpts } from "./utils.ts";
 
 export { zodToTypingString } from "./toolTyping.ts";
 
@@ -157,7 +157,7 @@ export const geminiGenText = async (
 
 type UploadResult = { geminiUri: string; mimeType: string };
 
-const uploadBlobToGemini = async (
+const rawUploadBlobToGemini = async (
   blob: Blob,
   mimeType: string,
 ): Promise<UploadResult> => {
@@ -176,6 +176,15 @@ const isTransientFetchError = (error: unknown) =>
   error instanceof TypeError &&
   /reading a body|network|connection/i.test(error.message);
 
+const isRetryableUploadError = (error: unknown) =>
+  isRetryableError(error) || isTransientFetchError(error);
+
+const uploadBlobToGemini = conditionalRetry(isRetryableUploadError)(
+  1000,
+  4,
+  rawUploadBlobToGemini,
+);
+
 const fetchAndUploadToGemini = async (
   url: string,
   mimeType: string,
@@ -189,7 +198,7 @@ const fetchAndUploadToGemini = async (
 };
 
 const uploadToGeminiFromUrl = makeCache("gemini-file-upload-v1")(
-  conditionalRetry(isTransientFetchError)(1000, 3, fetchAndUploadToGemini),
+  conditionalRetry(isRetryableUploadError)(1000, 3, fetchAndUploadToGemini),
 );
 
 const uploadToGeminiFromFile = (
