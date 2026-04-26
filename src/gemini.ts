@@ -197,11 +197,17 @@ const fetchAndUploadToGemini = async (
   return uploadBlobToGemini(await res.blob(), mimeType);
 };
 
-const uploadToGeminiFromUrl = makeCache("gemini-file-upload-v1")(
-  conditionalRetry(isRetryableUploadError)(1000, 3, fetchAndUploadToGemini),
-);
+const fetchAndUploadToGeminiCached = (
+  url: string,
+  mimeType: string,
+): Promise<UploadResult> =>
+  makeCache("gemini-file-upload-v1")(
+    conditionalRetry(isRetryableUploadError)(1000, 3, fetchAndUploadToGemini),
+  )(url, mimeType);
 
-const uploadToGeminiFromFile = (
+const uploadToGeminiFromUrl = fetchAndUploadToGeminiCached;
+
+const uploadToGeminiFromFileInner = (
   mimeType: string,
   dataBase64: string,
 ): Promise<UploadResult> =>
@@ -211,6 +217,15 @@ const uploadToGeminiFromFile = (
       { type: mimeType },
     ),
     mimeType,
+  );
+
+const uploadToGeminiFromFile = (
+  mimeType: string,
+  dataBase64: string,
+): Promise<UploadResult> =>
+  makeCache("gemini-inline-upload-v1")(uploadToGeminiFromFileInner)(
+    mimeType,
+    dataBase64,
   );
 
 export const isGeminiFileUri = (uri: string): boolean =>

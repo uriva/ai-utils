@@ -4,6 +4,7 @@ import { cache, waitAllWrites } from "rmmbr";
 import { z } from "zod/v4";
 import {
   injectAnthropicToken,
+  injectCacher,
   injectGeminiToken,
   injectKimiToken,
   injectOpenAiToken,
@@ -96,9 +97,18 @@ const flushRmmbr = (f: () => Promise<void>) => async () => {
 const injectDeterministic = (f: () => Promise<void>) => () =>
   overrideIdGenerator(makeCounter("id"))(f)();
 
+const rmmbrCacher = (cacheId: string) =>
+  cache({
+    cacheId,
+    ttl: 60 * 60 * 24 * 30,
+    url: "https://rmmbr.net",
+    token: rmmbrToken,
+  }) as Injector;
+
 export const injectSecrets = pipe(
   flushRmmbr,
   injectDeterministic,
+  injectCacher(rmmbrCacher),
   injectCallModelWrapper(cachingCallModelWrapper),
   injectMetadataStore(() => ({
     get: () => Promise.resolve(null),

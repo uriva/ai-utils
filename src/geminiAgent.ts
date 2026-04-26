@@ -1153,16 +1153,38 @@ const enrichGeminiEventsWithMetadata = async (
   });
 };
 
+const resolveAttachments = (
+  events: GeminiHistoryEvent[],
+): Promise<GeminiHistoryEvent[]> =>
+  Promise.all(
+    events.map(async (event) => {
+      if (!("attachments" in event) || !event.attachments) return event;
+      const resolvedAttachments = await Promise.all(
+        event.attachments.map((att) => {
+          if (att.kind === "file" && !isGeminiFileUri(att.fileUri)) {
+            return ensureGeminiAttachmentIsLink(att);
+          }
+          if (att.kind === "inline") {
+            return ensureGeminiAttachmentIsLink(att);
+          }
+          return Promise.resolve(att);
+        }),
+      );
+      return { ...event, attachments: resolvedAttachments };
+    }),
+  );
+
 export const prepareGeminiHistory =
   (rewriteHistory: AgentSpec["rewriteHistory"]) =>
   async (
     events: HistoryEventWithMetadata<GeminiMetadata>[],
   ): Promise<HistoryEventWithMetadata<GeminiMetadata>[]> => {
     const enriched = await enrichGeminiEventsWithMetadata(events);
-    return pipe(
+    const filtered = await pipe(
       filterAndRewriteInvalidToolCallsAsync(rewriteHistory),
       filterAndRewriteUnsupportedGeminiAttachments(rewriteHistory),
     )(enriched);
+    return resolveAttachments(filtered);
   };
 
 const geminiMaxTokensReason = "MAX_TOKENS";
@@ -1184,29 +1206,6 @@ export const geminiAgentCaller =
       : result;
   };
 
-const resolveAttachments = async (
-  events: GeminiHistoryEvent[],
-): Promise<GeminiHistoryEvent[]> => {
-  const resolved = await Promise.all(
-    events.map(async (event) => {
-      if (!("attachments" in event) || !event.attachments) return event;
-      const resolvedAttachments = await Promise.all(
-        event.attachments.map((att) => {
-          if (att.kind === "file" && !isGeminiFileUri(att.fileUri)) {
-            return ensureGeminiAttachmentIsLink(att);
-          }
-          if (att.kind === "inline") {
-            return ensureGeminiAttachmentIsLink(att);
-          }
-          return Promise.resolve(att);
-        }),
-      );
-      return { ...event, attachments: resolvedAttachments };
-    }),
-  );
-  return resolved;
-};
-
 const geminiAgentCallerInner = ({
   lightModel,
   prompt,
@@ -1218,11 +1217,10 @@ const geminiAgentCallerInner = ({
   maxOutputTokens,
   disableStreaming,
 }: AgentSpec) =>
-async (
+(
   events: GeminiHistoryEvent[],
-): Promise<GeminiHistoryEvent[]> => {
-  const resolvedEvents = await resolveAttachments(events);
-  return pipe(
+): Promise<GeminiHistoryEvent[]> =>
+  pipe(
     filterAndRewriteInvalidToolCalls(rewriteHistory),
     filterOrphanedToolResults,
     filterDoNothing,
@@ -1269,8 +1267,7 @@ async (
         return event ? [event] : [];
       });
     },
-  )(resolvedEvents);
-};
+  )(events);
 
 const embeddedThoughtPattern =
   /\[Internal thought, visible only to you: [\s\S]*?\]/g;
