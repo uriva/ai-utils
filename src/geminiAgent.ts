@@ -1251,19 +1251,14 @@ const geminiAgentCallerInner = ({
   )(events);
 
 const embeddedThoughtPattern =
-  /\[Internal thought, visible only to you: [\s\S]*?\]/g;
+  /\[Internal thought, visible only to you: ([\s\S]*?)\]/g;
 
 export const stripEmbeddedThoughtPatterns = (text: string): string =>
   text.replace(embeddedThoughtPattern, "").trim();
 
 const extractEmbeddedThoughts = (text: string): string =>
   [...text.matchAll(embeddedThoughtPattern)]
-    .map((m) =>
-      m[0].replace(/^\[Internal thought, visible only to you: /, "").replace(
-        /\]$/,
-        "",
-      )
-    )
+    .map((m) => m[1])
     .join("\n")
     .trim();
 
@@ -1297,9 +1292,10 @@ const geminiOutputPartToHistoryEvent =
       const text = typeof p.text === "string" ? p.text : "";
 
       const stripped = stripInternalSentTimestampSuffix(text);
-      const thoughtRegex =
-        /^\[Internal thought, visible only to you: ([\s\S]*?)\]$/;
-      const match = stripped.match(thoughtRegex);
+      const anchoredThoughtRegex = new RegExp(
+        `^${embeddedThoughtPattern.source}$`,
+      );
+      const match = stripped.match(anchoredThoughtRegex);
 
       if (match) {
         return withPersistedMetadata(
