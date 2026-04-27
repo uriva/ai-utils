@@ -592,7 +592,7 @@ type GeminiMetadata = {
 
 type GeminiHistoryEvent = HistoryEventWithMetadata<GeminiMetadata>;
 
-type GeminiPartOfInterest =
+export type GeminiPartOfInterest =
   | { type: "text"; text: string; thoughtSignature?: string; thought?: boolean }
   | GeminiFunctiontoolPart
   | GeminiInlinePart
@@ -1246,27 +1246,8 @@ const geminiAgentCallerInner = ({
       ),
       disableStreaming,
     ),
-    (geminiOutput: GeminiOutput): GeminiHistoryEvent[] => {
-      const responseId = generateId();
-      if (didNothing(geminiOutput)) {
-        const textPart = geminiOutput.find((p) =>
-          p.type === "text" && p.thoughtSignature
-        );
-        return [doNothingEventWithMetadata(
-          textPart?.thoughtSignature
-            ? {
-              type: "gemini",
-              responseId,
-              thoughtSignature: textPart.thoughtSignature,
-            }
-            : undefined,
-        )];
-      }
-      return geminiOutput.flatMap((part) => {
-        const event = geminiOutputPartToHistoryEvent(responseId)(part);
-        return event ? [event] : [];
-      });
-    },
+    (geminiOutput: GeminiOutput): GeminiHistoryEvent[] =>
+      geminiOutputToHistoryEvents(geminiOutput),
   )(events);
 
 const embeddedThoughtPattern =
@@ -1274,6 +1255,17 @@ const embeddedThoughtPattern =
 
 export const stripEmbeddedThoughtPatterns = (text: string): string =>
   text.replace(embeddedThoughtPattern, "").trim();
+
+const extractEmbeddedThoughts = (text: string): string =>
+  [...text.matchAll(embeddedThoughtPattern)]
+    .map((m) =>
+      m[0].replace(/^\[Internal thought, visible only to you: /, "").replace(
+        /\]$/,
+        "",
+      )
+    )
+    .join("\n")
+    .trim();
 
 const storeGeminiMetadata = (eventId: string, metadata: GeminiMetadata) =>
   accessMetadataStore().set(eventId, metadata).catch((e) => {
@@ -1317,7 +1309,14 @@ const geminiOutputPartToHistoryEvent =
       }
 
       const cleanedText = stripEmbeddedThoughtPatterns(stripped);
-      if (!cleanedText) return null;
+      if (!cleanedText) {
+        const embedded = extractEmbeddedThoughts(stripped);
+        if (!embedded) return null;
+        return withPersistedMetadata(
+          ownThoughtTurnWithMetadata(embedded, metadata) as GeminiHistoryEvent,
+          metadata,
+        );
+      }
 
       return withPersistedMetadata(
         (p.thought
@@ -1389,3 +1388,34 @@ const geminiOutputPartToHistoryEvent =
     }
     throw new Error(`Unknown part type: ${JSON.stringify(p)}`);
   };
+
+const doNothingResultEvents = (
+  responseId: string,
+  geminiOutput: GeminiOutput,
+): GeminiHistoryEvent[] => {
+  const textPart = geminiOutput.find((p) =>
+    p.type === "text" && p.thoughtSignature
+  );
+  return [doNothingEventWithMetadata(
+    textPart?.thoughtSignature
+      ? {
+        type: "gemini",
+        responseId,
+        thoughtSignature: textPart.thoughtSignature,
+      }
+      : undefined,
+  )];
+};
+
+export const geminiOutputToHistoryEvents = (
+  geminiOutput: GeminiOutput,
+): GeminiHistoryEvent[] => {
+  const responseId = generateId();
+  if (didNothing(geminiOutput)) {
+    return doNothingResultEvents(responseId, geminiOutput);
+  }
+  return geminiOutput.flatMap((part) => {
+    const event = geminiOutputPartToHistoryEvent(responseId)(part);
+    return event ? [event] : [];
+  });
+};
