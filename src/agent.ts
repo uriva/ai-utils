@@ -943,6 +943,8 @@ export type AgentSpec = {
   provider?: "google" | "moonshot" | "anthropic";
   imageGen?: boolean;
   rewriteHistory: (replacements: Record<string, HistoryEvent>) => Promise<void>;
+  compactHistory?: (history: HistoryEvent[]) => Promise<void>;
+  historyCompactionTokenThreshold?: number;
   timezoneIANA: string;
   maxOutputTokens?: number;
   transport?: {
@@ -979,10 +981,10 @@ const stripTruncatedFlag = (events: HistoryEvent[]): HistoryEvent[] =>
   );
 
 export const runAbstractAgent = async (
-  { maxIterations, tools, skills, onMaxIterationsReached, prompt: _prompt }:
-    AgentSpec,
+  spec: AgentSpec,
   callModel: (history: HistoryEvent[]) => Promise<HistoryEvent[]>,
 ) => {
+  const { maxIterations, tools, skills, onMaxIterationsReached } = spec;
   const allTools = skills && skills.length > 0
     ? [...tools, ...createSkillTools(skills)]
     : tools;
@@ -1002,6 +1004,7 @@ export const runAbstractAgent = async (
     const effectiveHistory = [...history, ...ephemeralHistory];
     const normalizedHistory = normalizeHistoryForModel(effectiveHistory);
     await reportHistoryForDebug(normalizedHistory);
+    scheduleHistoryCompaction(spec, normalizedHistory);
     const rawModelResponse = await timeit(reportTimeElapsedMs, callModel)(
       normalizedHistory,
     );
@@ -1058,6 +1061,18 @@ export const runAbstractAgent = async (
       ephemeralHistory = [...ephemeralHistory, ...internal];
     }
   }
+};
+
+const scheduleHistoryCompaction = (
+  spec: AgentSpec,
+  history: HistoryEvent[],
+): void => {
+  if (!spec.compactHistory || !spec.historyCompactionTokenThreshold) return;
+  const totalTokens = estimateAgentInputTokens(spec, history);
+  if (totalTokens <= spec.historyCompactionTokenThreshold) return;
+  spec.compactHistory(history).catch((error) =>
+    console.error("Failed scheduling history compaction", error)
+  );
 };
 
 // --- Token estimation -------------------------------------------------------
@@ -1135,3 +1150,27 @@ export const estimateTokens = (e: HistoryEvent): number => {
   }
   return assertNever(e);
 };
+
+const estimateToolTokens = (
+  { name, description, parameters }: Tool<ZodType>,
+): number =>
+  approxTextTokens(name) + approxTextTokens(description) +
+  approxTextTokens(zodToTypingString(parameters));
+
+const estimateSkillTokens = (
+  { name, description, instructions, tools }: Skill,
+): number =>
+  approxTextTokens(name) + approxTextTokens(description) +
+  approxTextTokens(instructions) + tools.reduce(
+    (total, tool) => total + estimateToolTokens(tool),
+    0,
+  );
+
+export const estimateAgentInputTokens = (
+  { prompt, tools, skills = [] }: AgentSpec,
+  history: HistoryEvent[],
+): number =>
+  approxTextTokens(prompt) +
+  history.reduce((total, event) => total + estimateTokens(event), 0) +
+  tools.reduce((total, tool) => total + estimateToolTokens(tool), 0) +
+  skills.reduce((total, skill) => total + estimateSkillTokens(skill), 0);
