@@ -296,11 +296,12 @@ const parseWithCatch = <T extends ZodType>(
   args: any,
 ): { ok: false; error: Error } | { ok: true; result: z.infer<T> } => {
   try {
-    const p = "strict" in parameters &&
+    const p = deepStrict(parameters);
+    /*
         typeof (parameters as unknown as { strict?: () => ZodType }).strict ===
           "function"
       ? (parameters as unknown as { strict: () => ZodType }).strict()
-      : parameters;
+      : parameters; */
     return { ok: true, result: p.parse(args) as z.infer<T> };
   } catch (error) {
     return { ok: false, error: error as Error };
