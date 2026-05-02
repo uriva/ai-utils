@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "@std/assert";
 import z from "zod/v4";
 import { deepStrict } from "../src/deepStrict.ts";
 
