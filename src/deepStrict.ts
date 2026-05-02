@@ -1,11 +1,9 @@
-// deno-lint-ignore no-explicit-any
+// deno-lint-ignore-file no-explicit-any
 import z from "zod/v4";
 
-// deno-lint-ignore no-explicit-any
 export function deepStrict(schema: any): any {
   if (schema instanceof z.ZodObject) {
     const shape = schema.shape;
-    // deno-lint-ignore no-explicit-any
     const strictShape: any = {};
     for (const key in shape) {
       strictShape[key] = deepStrict(shape[key]);
