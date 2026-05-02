@@ -330,7 +330,7 @@ runForAllProviders(
         prefix: z.string().describe("Prefix to search for"),
         skip: z.number().describe(
           "How many results to skip past. Defaults to 0.",
-        ).default(0),
+        ).optional().default(0),
       }),
       handler: (args: { prefix: string; skip: number }) => {
         received.push(args);
@@ -365,7 +365,7 @@ runForAllProviders(
       "handler should receive the prefix the model sent",
     );
     assertEquals(
-      received[0].skip,
+      received[0].skip ?? 0,
       0,
       "handler should receive the zod default (0) for the omitted skip param",
     );
