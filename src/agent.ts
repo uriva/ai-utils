@@ -1,3 +1,4 @@
+import { deepStrict } from "./deepStrict.ts";
 import { context, type Injection } from "@uri/inject";
 import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
