@@ -19,5 +19,9 @@ export function deepStrict(schema: any): any {
   if (schema instanceof z.ZodArray) {
     return z.array(deepStrict(schema.element));
   }
+  if (schema instanceof z.ZodDefault) {
+    // Preserve the default behavior while making the inner schema strict
+    return deepStrict(schema.removeDefault()).default(schema._def.defaultValue);
+  }
   return schema;
 }
