@@ -296,6 +296,8 @@ const parseWithCatch = <T extends ZodType>(
   args: any,
 ): { ok: false; error: Error } | { ok: true; result: z.infer<T> } => {
   try {
+    const unknownKeysError = rejectUnknownKeys(parameters, args);
+    if (unknownKeysError) throw unknownKeysError;
     const p = "strict" in parameters &&
         typeof (parameters as unknown as { strict?: () => ZodType }).strict ===
           "function"
@@ -305,6 +307,75 @@ const parseWithCatch = <T extends ZodType>(
   } catch (error) {
     return { ok: false, error: error as Error };
   }
+};
+
+type ZodShape = Record<string, ZodType>;
+
+type ZodDef = {
+  type?: string;
+  shape?: ZodShape | (() => ZodShape);
+  innerType?: ZodType;
+  element?: ZodType;
+  catchall?: ZodType;
+  options?: ZodType[];
+};
+
+const zodDef = (schema: ZodType): ZodDef | undefined =>
+  (schema as unknown as { def?: ZodDef }).def;
+
+const zodShape = (schema: ZodType): ZodShape | undefined => {
+  const shape = zodDef(schema)?.shape;
+  return typeof shape === "function" ? shape() : shape;
+};
+
+const allowsUnknownKeys = (schema: ZodType): boolean => {
+  const catchall = zodDef(schema)?.catchall;
+  return !!catchall && zodDef(catchall)?.type !== "never";
+};
+
+const unwrapSchema = (schema: ZodType): ZodType => {
+  const inner = zodDef(schema)?.innerType;
+  return inner ? unwrapSchema(inner) : schema;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const unknownKeyErrors = (
+  schema: ZodType,
+  value: unknown,
+  path: string[] = [],
+): string[] => {
+  const s = unwrapSchema(schema);
+  const def = zodDef(s);
+  if (def?.type === "array" && def.element && Array.isArray(value)) {
+    return value.flatMap((item, i) =>
+      unknownKeyErrors(def.element!, item, [...path, String(i)])
+    );
+  }
+  if (def?.type !== "object" || !isRecord(value) || allowsUnknownKeys(s)) {
+    return [];
+  }
+  const shape = zodShape(s) ?? {};
+  const knownKeys = new Set(Object.keys(shape));
+  return [
+    ...Object.keys(value)
+      .filter((key) => !knownKeys.has(key))
+      .map((key) => `${[...path, key].join(".")}: Unrecognized key`),
+    ...Object.entries(shape).flatMap(([key, childSchema]) =>
+      key in value
+        ? unknownKeyErrors(childSchema, value[key], [...path, key])
+        : []
+    ),
+  ];
+};
+
+const rejectUnknownKeys = (
+  schema: ZodType,
+  value: unknown,
+): Error | undefined => {
+  const errors = unknownKeyErrors(schema, value);
+  return empty(errors) ? undefined : new Error(errors.join(", "));
 };
 
 const editDistance = (a: string, b: string): number => {

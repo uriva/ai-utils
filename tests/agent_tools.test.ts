@@ -183,6 +183,78 @@ Deno.test(
   },
 );
 
+Deno.test(
+  "run_command rejects unknown nested skill tool parameters",
+  async () => {
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "Find the video source for Spider-Man 2.",
+    })];
+    const fakeCallModel = () =>
+      Promise.resolve([
+        {
+          type: "tool_call" as const,
+          isOwn: true as const,
+          name: "run_command",
+          parameters: {
+            command: "video_sources/get_best_video_source",
+            params: {
+              query: {
+                movieName: "Spider-Man 2",
+                year: 2004,
+              },
+            },
+          },
+          id: "fake-tool-call",
+          timestamp: Date.now(),
+        },
+      ]);
+    let skillHandlerWasCalled = false;
+
+    await injectCallModel(fakeCallModel)(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        maxIterations: 1,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        skills: [{
+          name: "video_sources",
+          description: "Video source tools",
+          instructions: "Use these tools to find video sources.",
+          tools: [{
+            name: "get_best_video_source",
+            description: "Get the best video source for a movie or TV show.",
+            parameters: z.object({
+              query: z.object({
+                movieOrTVShowName: z.string().optional(),
+                year: z.number().optional(),
+              }),
+            }),
+            handler: () => {
+              skillHandlerWasCalled = true;
+              return Promise.resolve("Failed. Name of video was not given.");
+            },
+          }],
+        }],
+        prompt: "You are an AI assistant.",
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+      });
+    })();
+
+    assertEquals(skillHandlerWasCalled, false);
+    assert(
+      mockHistory.some((event) =>
+        event.type === "tool_result" &&
+        event.result.includes("Invalid parameters") &&
+        event.result.includes("movieName")
+      ),
+      `Expected invalid parameter error for movieName. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+  },
+);
+
 runForAllProviders(
   "agent triggers do nothing event after conversation ends with goodbye",
   async (runAgentWithProvider) => {
