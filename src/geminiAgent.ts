@@ -30,6 +30,7 @@ import {
   type HistoryEventWithMetadata,
   type MediaAttachment,
   type MessageId,
+  noResponseTag,
   type OwnEditMessage,
   ownThoughtTurnWithMetadata,
   type OwnUtterance,
@@ -1126,7 +1127,7 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
 const maxHistoryTokens = 800_000;
 
 const noResponseInstruction =
-  "\n\nWhen you have nothing to say (e.g. the message is irrelevant), respond with exactly [no response] and nothing else.";
+  `\n\nWhen you have nothing to say (e.g. the message is irrelevant), respond with exactly ${noResponseTag} and nothing else.`;
 
 // Side-effectful history normalization that MUST run outside the cached
 // `callModel` boundary. Without this, tests replay a populated rmmbr cache

@@ -685,16 +685,36 @@ const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
       : event;
   });
 
-const noResponsePattern = /^\[no response\]\s*$/i;
+export const noResponseTag = "[no response]";
 
-const isNoResponseUtterance = (event: HistoryEvent) =>
+const escapedNoResponseTag = noResponseTag.replace(
+  /[.*+?^${}()|[\]\\]/g,
+  "\\$&",
+);
+
+const noResponsePattern = new RegExp(`^${escapedNoResponseTag}\\s*$`, "i");
+
+const noResponseSuffixPattern = new RegExp(
+  `\\s*${escapedNoResponseTag}\\s*$`,
+  "i",
+);
+
+const isOwnTextEvent = (event: HistoryEvent) =>
   (event.type === "own_utterance" || event.type === "own_edit_message") &&
   noResponsePattern.test(event.text.trim());
 
+const cleanNoResponseSuffix = (event: HistoryEvent): HistoryEvent => {
+  if (event.type !== "own_utterance" && event.type !== "own_edit_message") {
+    return event;
+  }
+  return { ...event, text: event.text.replace(noResponseSuffixPattern, "") };
+};
+
 const reclassifyNoResponse = (output: HistoryEvent[]): HistoryEvent[] =>
-  output.map((event) =>
-    isNoResponseUtterance(event) ? doNothingEvent() : event
-  );
+  output.map((event) => {
+    if (isOwnTextEvent(event)) return doNothingEvent();
+    return cleanNoResponseSuffix(event);
+  });
 
 const isEmptyUtterance = (event: HistoryEvent) => {
   if (event.type !== "own_utterance" && event.type !== "own_edit_message") {

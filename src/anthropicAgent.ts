@@ -15,6 +15,7 @@ import {
   type HistoryEventWithMetadata,
   type MediaAttachment,
   type MessageId,
+  noResponseTag,
   ownThoughtTurn,
   ownUtteranceTurn,
   type Tool,
@@ -732,8 +733,6 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicOutputPart[]> => {
     throw err;
   }
 };
-
-export const noResponseTag = "<no response>";
 
 const didNothing = (output: AnthropicOutputPart[]) =>
   output.length === 0 ||

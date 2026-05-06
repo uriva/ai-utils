@@ -19,6 +19,7 @@ import {
   type HistoryEventWithMetadata,
   type MediaAttachment,
   type MessageId,
+  noResponseTag,
   ownThoughtTurn,
   ownUtteranceTurn,
   type Tool,
@@ -560,8 +561,6 @@ async (events: KimiHistoryEvent[]): Promise<KimiOutputPart[]> => {
     throw err;
   }
 };
-
-export const noResponseTag = "<no response>";
 
 const didNothing = (output: KimiOutputPart[]) =>
   output.length === 0 ||

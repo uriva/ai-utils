@@ -1,5 +1,13 @@
-import { assert } from "@std/assert";
-import { type AgentSpec, participantUtteranceTurn } from "../src/agent.ts";
+import { assert, assertEquals } from "@std/assert";
+import { runAgent } from "../mod.ts";
+import {
+  type AgentSpec,
+  type HistoryEvent,
+  injectCallModel,
+  noResponseTag,
+  ownUtteranceTurn,
+  participantUtteranceTurn,
+} from "../src/agent.ts";
 import {
   agentDeps,
   noopRewriteHistory,
@@ -75,3 +83,25 @@ runForAllProviders(
     );
   },
 );
+
+Deno.test("agent strips no-response tag from utterance suffix", async () => {
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({ name: "user", text: "say hi" }),
+  ];
+  const fakeCallModel = () =>
+    Promise.resolve([ownUtteranceTurn(`Hi there. ${noResponseTag}`)]);
+
+  await injectCallModel(fakeCallModel)(async () => {
+    await agentDeps(history)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "unused in fake",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  })();
+
+  const visible = history.filter((e) => e.type === "own_utterance");
+  assertEquals(visible.map((e) => e.text), ["Hi there."]);
+});
