@@ -318,6 +318,64 @@ Deno.test(
   },
 );
 
+Deno.test(
+  "run_command unrecognized key error lists expected keys",
+  async () => {
+    const calendarSkill = {
+      name: "calendar",
+      description: "Calendar operations",
+      instructions: "Use this to manage calendar events.",
+      tools: [{
+        name: "update_event",
+        description: "Update an event",
+        parameters: z.object({ update: z.object({ title: z.string() }) }),
+        handler: () => Promise.resolve("updated"),
+      }],
+    };
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "update the event",
+    })];
+    let callCount = 0;
+    const fakeCallModel = () => {
+      callCount += 1;
+      if (callCount === 1) {
+        return Promise.resolve([{
+          type: "tool_call" as const,
+          isOwn: true as const,
+          name: runCommandToolName,
+          parameters: {
+            command: "calendar/update_event",
+            params: { title: "standup" },
+          },
+          id: "fake-call-1",
+          timestamp: Date.now(),
+        }]);
+      }
+      return Promise.resolve([]);
+    };
+    await injectCallModel(fakeCallModel)(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        maxIterations: 2,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        skills: [calendarSkill],
+        prompt: "unused",
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+      });
+    })();
+    const toolResult = mockHistory.find((e) => e.type === "tool_result");
+    assert(toolResult && toolResult.type === "tool_result");
+    assert(
+      toolResult.result.includes(
+        "title: Unrecognized key. Expected keys: update",
+      ),
+      `expected error to list expected keys, got: ${toolResult.result}`,
+    );
+  },
+);
+
 runForAllProviders(
   "skills: works alongside regular tools",
   async (runAgentWithProvider) => {

@@ -357,11 +357,17 @@ const unknownKeyErrors = (
     return [];
   }
   const shape = zodShape(s) ?? {};
-  const knownKeys = new Set(Object.keys(shape));
+  const expectedKeys = Object.keys(shape);
+  const knownKeys = new Set(expectedKeys);
+  const expectedKeysMessage = empty(expectedKeys)
+    ? ""
+    : `. Expected keys: ${expectedKeys.join(", ")}`;
   return [
     ...Object.keys(value)
       .filter((key) => !knownKeys.has(key))
-      .map((key) => `${[...path, key].join(".")}: Unrecognized key`),
+      .map((key) =>
+        `${[...path, key].join(".")}: Unrecognized key${expectedKeysMessage}`
+      ),
     ...Object.entries(shape).flatMap(([key, childSchema]) =>
       key in value
         ? unknownKeyErrors(childSchema, value[key], [...path, key])
