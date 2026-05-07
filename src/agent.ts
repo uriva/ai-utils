@@ -694,7 +694,7 @@ const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
 export const noResponseTag = "[no response]";
 
 export const invisibleToolUseInstruction =
-  "Users cannot see tool calls or tool results. When you use tools or rely on their results, communicate the relevant action and outcome to the user yourself, unless higher-priority instructions say not to.";
+  "Users cannot see tool calls or tool results. When you use tools or rely on their results, communicate the relevant action and outcome to the user yourself, unless higher-priority instructions say not to. Do not assume a tool result is visible to the user just because the tool returned it.";
 
 const escapedNoResponseTag = noResponseTag.replace(
   /[.*+?^${}()|[\]\\]/g,
