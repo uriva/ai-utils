@@ -1,12 +1,11 @@
 import { assert } from "@std/assert";
+import { z } from "zod/v4";
 import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
 import {
   agentDeps,
   b64,
   collectAttachment,
   findTextualAnswer,
-  mediaTool,
-  mediaToolWithCaption,
   noopRewriteHistory,
   recognizedTheDog,
   runForAllProviders,
@@ -74,38 +73,6 @@ runForAllProviders(
     assert(
       answer.text.trim().length > 0,
       `Expected a non-empty verification response, got: ${answer.text}`,
-    );
-  },
-  3,
-  true,
-  false,
-);
-
-runForAllProviders(
-  "tool result attachments are forwarded to model",
-  async (runAgentWithProvider) => {
-    const mockHistory: HistoryEvent[] = [
-      participantUtteranceTurn({
-        name: "user",
-        text: "Please call returnMedia and then describe the image.",
-      }),
-    ];
-    await agentDeps(mockHistory)(runAgentWithProvider)({
-      maxIterations: 3,
-      onMaxIterationsReached: () => {},
-      tools: [mediaTool],
-      prompt: "You can see images returned by tools.",
-      lightModel: true,
-      rewriteHistory: noopRewriteHistory,
-      timezoneIANA: "UTC",
-    });
-    assert(
-      mockHistory.some((event) =>
-        event.type === "own_utterance" && mentionsDogLikeContent(event.text)
-      ),
-      `AI did not describe the tool image as dog-like content. History: ${
-        JSON.stringify(mockHistory, null, 2)
-      }`,
     );
   },
   3,
@@ -182,40 +149,7 @@ runForAllProviders(
 );
 
 runForAllProviders(
-  "tool result attachments with captions are forwarded to model",
-  async (runAgentWithProvider) => {
-    const mockHistory: HistoryEvent[] = [
-      participantUtteranceTurn({
-        name: "user",
-        text:
-          "Please call returnMediaWithCaption and describe what you received including the caption.",
-      }),
-    ];
-    await agentDeps(mockHistory)(runAgentWithProvider)({
-      maxIterations: 3,
-      onMaxIterationsReached: () => {},
-      tools: [mediaToolWithCaption],
-      prompt:
-        "You can see images and their captions returned by tools. Always mention the caption text in your reply. The caption says: 'A friendly golden retriever sitting in the grass'. Include the words 'grass' and 'retriever' in your response.",
-      lightModel: true,
-      rewriteHistory: noopRewriteHistory,
-      timezoneIANA: "UTC",
-    });
-    assert(
-      mockHistory.some((e) =>
-        e.type === "own_utterance" &&
-        (e.text.toLowerCase().includes("grass") ||
-          recognizedTheDog(e))
-      ),
-      `AI did not mention the tool caption information. History: ${
-        JSON.stringify(mockHistory, null, 2)
-      }`,
-    );
-  },
-);
-
-runForAllProviders(
-  "file attachment with external url is uploaded to gemini",
+  "user file attachment with external url is uploaded to gemini",
   async (runAgentWithProvider) => {
     const ac = new AbortController();
     const server = Deno.serve({ port: 0, signal: ac.signal }, async (req) => {
@@ -261,6 +195,83 @@ runForAllProviders(
     assert(
       mockHistory.some(recognizedTheDog),
       `AI did not describe the image as a dog. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+  },
+  3,
+  true,
+  false,
+);
+
+runForAllProviders(
+  "tool file attachment url is inspected only by explicit tool call",
+  async (runAgentWithProvider) => {
+    const ac = new AbortController();
+    const server = Deno.serve({ port: 0, signal: ac.signal }, async (req) => {
+      const url = new URL(req.url);
+      if (url.pathname === "/dog.jpg") {
+        const data = await Deno.readFile("./dog.jpg");
+        return new Response(data, {
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+    const addr = server.addr as Deno.NetAddr;
+    const imageUrl = `http://localhost:${addr.port}/dog.jpg`;
+
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text:
+          "Please call returnMediaUrl and inspect the returned URL before describing the image.",
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runAgentWithProvider)({
+      maxIterations: 5,
+      onMaxIterationsReached: () => {},
+      tools: [{
+        name: "returnMediaUrl",
+        description: "Returns an image URL as a file attachment",
+        parameters: z.object({}),
+        handler: () =>
+          Promise.resolve({
+            result: `Download URL: ${imageUrl}`,
+            attachments: [{
+              kind: "file" as const,
+              mimeType: "image/jpeg",
+              fileUri: imageUrl,
+              caption: "dog photo",
+            }],
+          }),
+      }],
+      prompt:
+        "When a tool returns a media URL, call inspect_media_url to look at it before answering.",
+      lightModel: true,
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+
+    ac.abort();
+    try {
+      await server.finished;
+    } catch {
+      // expected on abort
+    }
+
+    assert(
+      mockHistory.some((event) =>
+        event.type === "tool_call" && event.name === "inspect_media_url"
+      ),
+      `AI did not explicitly inspect the media URL. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+    assert(
+      mockHistory.some(recognizedTheDog),
+      `AI did not describe the inspected image as a dog. History: ${
         JSON.stringify(mockHistory, null, 2)
       }`,
     );

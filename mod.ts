@@ -12,6 +12,7 @@ import {
 import { anthropicAgentCaller } from "./src/anthropicAgent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
 import { geminiAgentCaller, prepareGeminiHistory } from "./src/geminiAgent.ts";
+import { inspectMediaUrlTool } from "./src/inspectMediaTool.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
 export {
   appendInternalSentTimestamp,
@@ -112,10 +113,25 @@ const resolveCallModel = (spec: AgentSpec): CallModel => {
   return async (events) => wrapped(await prepare(events));
 };
 
-const runAgentInner = (spec: AgentSpec): Promise<void> =>
-  spec.transport?.kind === "audio"
+const builtinTools = [inspectMediaUrlTool];
+
+const addBuiltinTools = (spec: AgentSpec): AgentSpec => {
+  const existingToolNames = new Set(spec.tools.map(({ name }) => name));
+  return {
+    ...spec,
+    tools: [
+      ...spec.tools,
+      ...builtinTools.filter(({ name }) => !existingToolNames.has(name)),
+    ],
+  };
+};
+
+const runAgentInner = (spec: AgentSpec): Promise<void> => {
+  const specWithBuiltins = addBuiltinTools(spec);
+  return spec.transport?.kind === "audio"
     ? runAudioTransportAgent(spec)
-    : runAbstractAgent(spec, resolveCallModel(spec));
+    : runAbstractAgent(specWithBuiltins, resolveCallModel(specWithBuiltins));
+};
 
 export const runAgent = (spec: AgentSpec): Promise<void> => {
   let runner = () => runAgentInner(spec);

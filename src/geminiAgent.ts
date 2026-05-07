@@ -56,6 +56,7 @@ import {
   appendInternalSentTimestamp,
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
+import { inspectMediaUrlToolName } from "./inspectMediaTool.ts";
 
 const normalizeError = (error: unknown): Error => {
   if (error instanceof Error) return error;
@@ -376,12 +377,37 @@ const optionalThoughtSignature = (sig: string | undefined) =>
 const attachmentsToPartsOrEmpty = (attachments?: MediaAttachment[]): Part[] =>
   attachmentsToParts(attachments ?? []);
 
+const toolResultAttachmentText = (attachments?: MediaAttachment[]) => {
+  if (!attachments || empty(attachments)) return "";
+  return "\nTool returned media URLs. If you need to inspect them visually, call inspect_media_url:\n" +
+    attachments.map((attachment) =>
+      attachment.kind === "file"
+        ? `- ${
+          attachment.caption ?? attachment.mimeType
+        }: ${attachment.fileUri}`
+        : `- ${
+          attachment.caption ?? attachment.mimeType
+        }: inline ${attachment.mimeType} attachment`
+    ).join("\n");
+};
+
 const referencedMessageText =
   (eventById: (id: string) => GeminiHistoryEvent | undefined) =>
   (onMessage: MessageId): string => {
     const msg = eventById(onMessage);
     return typeof msg === "object" && "text" in msg ? msg.text : "";
   };
+
+const isInspectMediaToolResult = (
+  eventById: (id: MessageId) => GeminiHistoryEvent | undefined,
+) =>
+(event: GeminiHistoryEvent) => {
+  const toolCall = event.type === "tool_result" && event.toolCallId
+    ? eventById(event.toolCallId)
+    : undefined;
+  return toolCall?.type === "tool_call" &&
+    toolCall.name === inspectMediaUrlToolName;
+};
 
 const historyEventToContent = (
   eventById: (id: string) => GeminiHistoryEvent | undefined,
@@ -451,11 +477,12 @@ const historyEventToContent = (
         functionResponse: {
           name,
           response: {
-            result: stampText(e.result),
+            result: stampText(
+              e.result + toolResultAttachmentText(e.attachments),
+            ),
           },
         },
       },
-      ...attachmentsToPartsOrEmpty(e.attachments),
     ];
     return wrapUserContent(parts);
   }
@@ -1160,6 +1187,12 @@ const resolveAttachments = (
   Promise.all(
     events.map(async (event) => {
       if (!("attachments" in event) || !event.attachments) return event;
+      if (
+        event.type === "tool_result" &&
+        !isInspectMediaToolResult(indexById(events))(event)
+      ) {
+        return event;
+      }
       const resolvedAttachments = await Promise.all(
         event.attachments.map((att) => {
           if (att.kind === "file" && !isGeminiFileUri(att.fileUri)) {
