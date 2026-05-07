@@ -7,6 +7,7 @@ import {
   tool,
 } from "../mod.ts";
 import {
+  emitSpokenUtteranceIfOpen,
   makeSessionEventHandler,
   spokenReplyOnly,
   transcriptOf,
@@ -444,6 +445,22 @@ Deno.test(
     assertEquals(utterances, ["ALPHA TANGO"]);
   },
 );
+
+Deno.test("emitSpokenUtteranceIfOpen ignores pending transcript after close", () => {
+  const emitted: HistoryEvent[] = [];
+
+  emitSpokenUtteranceIfOpen(
+    "ALPHA TANGO",
+    true,
+    false,
+    (event) => {
+      emitted.push(event);
+      return Promise.resolve();
+    },
+  );
+
+  assertEquals(emitted, []);
+});
 
 const exampleSkill = {
   name: "secret_skill",

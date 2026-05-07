@@ -27,10 +27,12 @@ export const runAudioTransportAgent = async (
   if (!spec.transport || spec.transport.kind !== "audio") {
     throw new Error("audio transport required");
   }
+  const outputEvent = customOutputEvent ?? spec.onOutputEvent ??
+    accessOutputEvent;
   return await runAudioAgentLoop(
     spec,
     spec.transport.endpoint,
-    customOutputEvent ?? accessOutputEvent,
+    outputEvent,
   );
 };
 
@@ -164,6 +166,19 @@ export const makeSessionEventHandler = (
     }
   };
   return { handle, flushPending };
+};
+
+export const emitSpokenUtteranceIfOpen = (
+  text: string,
+  isClosed: boolean,
+  isReconnecting: boolean,
+  outputEvent: (event: HistoryEvent) => Promise<void>,
+) => {
+  if (isClosed) return;
+  if (isReconnecting) return;
+  const spoken = spokenReplyOnly(text);
+  if (spoken.length === 0) return;
+  void outputEvent(ownUtteranceTurn(spoken));
 };
 
 const audioToolTimeoutMs = 60_000;
@@ -329,10 +344,12 @@ const createSessionConfig = (
       });
     },
     onUtterance: (text) => {
-      if (state.isReconnecting) return;
-      const spoken = spokenReplyOnly(text);
-      if (spoken.length === 0) return;
-      void outputEvent(ownUtteranceTurn(spoken));
+      emitSpokenUtteranceIfOpen(
+        text,
+        state.isClosed,
+        state.isReconnecting,
+        outputEvent,
+      );
       // We do not send the text over the duplex to avoid confusing the remote end with both text and audio for the same utterance.
       // void endpoint.sendData({
       //   type: "text" as const,
