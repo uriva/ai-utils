@@ -13,6 +13,7 @@ import {
   getStreamChunk,
   getStreamThinkingChunk,
   type HistoryEventWithMetadata,
+  invisibleToolUseInstruction,
   type MediaAttachment,
   type MessageId,
   noResponseTag,
@@ -821,7 +822,7 @@ export const anthropicAgentCaller = ({
 }: AgentSpec) =>
 async (events: AnthropicHistoryEvent[]): Promise<AnthropicHistoryEvent[]> => {
   const enhancedPrompt = [
-    prompt,
+    `${prompt}\n\n${invisibleToolUseInstruction}`,
     ...(skills && skills.length > 0
       ? [
         `Available skills:\n${

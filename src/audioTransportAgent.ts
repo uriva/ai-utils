@@ -4,6 +4,7 @@ import {
   createSkillTools,
   handleFunctionCalls,
   type HistoryEvent,
+  invisibleToolUseInstruction,
   ownThoughtTurn,
   ownUtteranceTurn,
   participantEditMessageTurn,
@@ -363,7 +364,7 @@ const createSessionConfig = (
   return {
     apiKey: accessGeminiToken(),
     prompt:
-      `${spec.prompt}\n\nIMPORTANT: You are operating via a voice interface. The user cannot see tool results visually. You MUST speak the result of tool calls out loud.`,
+      `${spec.prompt}\n\n${invisibleToolUseInstruction}\n\nIMPORTANT: You are operating via a voice interface. The user cannot see tool results visually. You MUST speak the result of tool calls out loud.`,
     voiceName: spec.transport.voiceName,
     tools: spec.skills && spec.skills.length > 0
       ? [...spec.tools, ...createSkillTools(spec.skills)]

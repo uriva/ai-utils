@@ -28,6 +28,7 @@ import {
   getStreamChunk,
   getStreamThinkingChunk,
   type HistoryEventWithMetadata,
+  invisibleToolUseInstruction,
   type MediaAttachment,
   type MessageId,
   noResponseTag,
@@ -1172,6 +1173,9 @@ const maxHistoryTokens = 800_000;
 const noResponseInstruction =
   `\n\nWhen you have nothing to say (e.g. the message is irrelevant), respond with exactly ${noResponseTag} and nothing else.`;
 
+const enhancePrompt = (prompt: string) =>
+  `${prompt}\n\n${invisibleToolUseInstruction}`;
+
 // Side-effectful history normalization that MUST run outside the cached
 // `callModel` boundary. Without this, tests replay a populated rmmbr cache
 // and never see the underlying provider call — meaning the `rewriteHistory`
@@ -1283,11 +1287,13 @@ const geminiAgentCallerInner = ({
         imageGen,
         lightModel,
         skills && skills.length > 0
-          ? `${prompt}${noResponseInstruction}\n\nAvailable skills:\n${
+          ? `${
+            enhancePrompt(prompt)
+          }${noResponseInstruction}\n\nAvailable skills:\n${
             skills.map((skill) => `- ${skill.name}: ${skill.description}`)
               .join("\n")
           }`
-          : `${prompt}${noResponseInstruction}`,
+          : `${enhancePrompt(prompt)}${noResponseInstruction}`,
         [
           ...tools,
           ...(skills && skills.length > 0 ? createSkillTools(skills) : []),

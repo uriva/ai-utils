@@ -17,6 +17,7 @@ import {
   getStreamChunk,
   getStreamThinkingChunk,
   type HistoryEventWithMetadata,
+  invisibleToolUseInstruction,
   type MediaAttachment,
   type MessageId,
   noResponseTag,
@@ -647,7 +648,7 @@ async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
   void lightModel;
 
   const enhancedPrompt = [
-    prompt,
+    `${prompt}\n\n${invisibleToolUseInstruction}`,
     ...(skills && skills.length > 0
       ? [
         `Available skills:\n${
