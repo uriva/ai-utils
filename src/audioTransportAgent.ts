@@ -363,8 +363,7 @@ const createSessionConfig = (
   state.flushPendingUtterance = sessionHandler.flushPending;
   return {
     apiKey: accessGeminiToken(),
-    prompt:
-      `${spec.prompt}\n\n${invisibleToolUseInstruction}\n\nIMPORTANT: You are operating via a voice interface. The user cannot see tool results visually. You MUST speak the result of tool calls out loud.`,
+    prompt: `${spec.prompt}\n\n${invisibleToolUseInstruction}`,
     voiceName: spec.transport.voiceName,
     tools: spec.skills && spec.skills.length > 0
       ? [...spec.tools, ...createSkillTools(spec.skills)]
