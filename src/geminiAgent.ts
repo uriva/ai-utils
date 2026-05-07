@@ -379,17 +379,32 @@ const attachmentsToPartsOrEmpty = (attachments?: MediaAttachment[]): Part[] =>
 
 const toolResultAttachmentText = (attachments?: MediaAttachment[]) => {
   if (!attachments || empty(attachments)) return "";
-  return "\nTool returned media URLs. If you need to inspect them visually, call inspect_media_url:\n" +
-    attachments.map((attachment) =>
-      attachment.kind === "file"
-        ? `- ${
-          attachment.caption ?? attachment.mimeType
-        }: ${attachment.fileUri}`
-        : `- ${
-          attachment.caption ?? attachment.mimeType
-        }: inline ${attachment.mimeType} attachment`
-    ).join("\n");
+  const fileAttachments = attachments.filter((attachment) =>
+    attachment.kind === "file"
+  );
+  const inlineAttachments = attachments.filter((attachment) =>
+    attachment.kind === "inline"
+  );
+  const text = [
+    !empty(fileAttachments)
+      ? "Tool returned media URLs. If you need to inspect them visually, call inspect_media_url:\n" +
+        fileAttachments.map((attachment) =>
+          `- ${
+            attachment.caption ?? attachment.mimeType
+          }: ${attachment.fileUri}`
+        ).join("\n")
+      : "",
+    !empty(inlineAttachments)
+      ? "Tool returned raw inline media attached directly. Inspect the attached media visually; do not call inspect_media_url for inline media."
+      : "",
+  ].filter(Boolean).join("\n");
+  return text ? `\n${text}` : "";
 };
+
+const inlineAttachmentParts = (attachments?: MediaAttachment[]) =>
+  attachmentsToParts(
+    (attachments ?? []).filter((attachment) => attachment.kind === "inline"),
+  );
 
 const referencedMessageText =
   (eventById: (id: string) => GeminiHistoryEvent | undefined) =>
@@ -483,6 +498,7 @@ const historyEventToContent = (
           },
         },
       },
+      ...inlineAttachmentParts(e.attachments),
     ];
     return wrapUserContent(parts);
   }
@@ -1187,14 +1203,15 @@ const resolveAttachments = (
   Promise.all(
     events.map(async (event) => {
       if (!("attachments" in event) || !event.attachments) return event;
-      if (
-        event.type === "tool_result" &&
-        !isInspectMediaToolResult(indexById(events))(event)
-      ) {
-        return event;
-      }
       const resolvedAttachments = await Promise.all(
         event.attachments.map((att) => {
+          if (
+            event.type === "tool_result" &&
+            !isInspectMediaToolResult(indexById(events))(event) &&
+            att.kind === "file"
+          ) {
+            return Promise.resolve(att);
+          }
           if (att.kind === "file" && !isGeminiFileUri(att.fileUri)) {
             return ensureGeminiAttachmentIsLink(att);
           }

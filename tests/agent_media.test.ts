@@ -81,6 +81,51 @@ runForAllProviders(
 );
 
 runForAllProviders(
+  "tool inline attachment is forwarded to model",
+  async (runAgentWithProvider) => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text:
+          "Please call returnRawDogImageForVisualChoiceTest and describe the attached animal directly.",
+      }),
+    ];
+    await agentDeps(mockHistory)(runAgentWithProvider)({
+      maxIterations: 3,
+      onMaxIterationsReached: () => {},
+      tools: [{
+        name: "returnRawDogImageForVisualChoiceTest",
+        description: "Returns raw image bytes as an inline attachment",
+        parameters: z.object({}),
+        handler: () =>
+          Promise.resolve({
+            result: "Raw image attached.",
+            attachments: [{
+              kind: "inline" as const,
+              mimeType: "image/jpeg",
+              dataBase64: b64,
+            }],
+          }),
+      }],
+      prompt:
+        "You can see raw images returned by tools. Do not call inspect_media_url for inline media; describe the attached image directly.",
+      lightModel: true,
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+    assert(
+      mockHistory.some(recognizedTheDog),
+      `AI did not describe the raw tool image as a dog. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+  },
+  3,
+  true,
+  false,
+);
+
+runForAllProviders(
   "user attachments are forwarded to model",
   async (runAgentWithProvider) => {
     const mockHistory: HistoryEvent[] = [
