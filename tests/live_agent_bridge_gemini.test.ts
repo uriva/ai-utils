@@ -24,6 +24,9 @@ const normalizeForMatch = (text: string) =>
 const includesRelayCode = (text: string, relayCode: string) =>
   normalizeForMatch(text).includes(normalizeForMatch(relayCode));
 
+const concatenatedIncludesRelayCode = (texts: string[], relayCode: string) =>
+  includesRelayCode(texts.join(" "), relayCode);
+
 const waitForCondition = (
   predicate: () => boolean,
   timeoutMs: number,
@@ -110,14 +113,14 @@ Deno.test({
       });
 
       await waitForCondition(
-        () => outputTexts.some((text) => includesRelayCode(text, fetchedCode)),
+        () => concatenatedIncludesRelayCode(outputTexts, fetchedCode),
         45_000,
       );
       await testEndpoint.sendData({ type: "close", from: "tester" });
       await agentTask;
 
       assertEquals(
-        outputTexts.some((text) => includesRelayCode(text, fetchedCode)),
+        concatenatedIncludesRelayCode(outputTexts, fetchedCode),
         true,
         JSON.stringify(outputTexts, null, 2),
       );
