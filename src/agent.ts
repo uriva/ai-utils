@@ -2,6 +2,7 @@ import { context, type Injection } from "@uri/inject";
 import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
 import { zodToTypingString } from "./toolTyping.ts";
+import { coerceArgs } from "./argCoercion.ts";
 import {
   hasInternalSentTimestampSuffix,
   stripInternalSentTimestampSuffix,
@@ -428,6 +429,13 @@ const toolNotFoundMessage = (
   return `Tool "${name}" not found.${suggestionText} Available tools: ${list}.${skillsText}`;
 };
 
+export const correctionPrefix = (corrections: string[]): string =>
+  empty(corrections)
+    ? ""
+    : `[arguments auto-corrected: ${
+      corrections.join("; ")
+    }. Use the canonical shape next time.]\n\n`;
+
 export const callToResult =
   // deno-lint-ignore no-explicit-any
   (actions: Tool<any>[], skillNames: string[] = []) =>
@@ -463,19 +471,22 @@ export const callToResult =
       };
     }
     const { handler, parameters } = action;
-    const parseResult = parseWithCatch(parameters, effectiveArgs);
+    const coerced = coerceArgs(z.toJSONSchema(parameters), effectiveArgs);
+    const prefix = correctionPrefix(coerced.corrections);
+    const parseResult = parseWithCatch(parameters, coerced.args);
     if (!parseResult.ok) {
       return {
         toolCallId,
-        result: `Invalid arguments: ${
-          parseResult.error instanceof z.ZodError
-            ? parseResult.error.issues
-              .map((i) =>
-                `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
-              )
-              .join(", ")
-            : parseResult.error.message
-        }`,
+        result: prefix +
+          `Invalid arguments: ${
+            parseResult.error instanceof z.ZodError
+              ? parseResult.error.issues
+                .map((i) =>
+                  `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
+                )
+                .join(", ")
+              : parseResult.error.message
+          }`,
       };
     }
     const out = await handler(parseResult.result, toolCallId ?? "");
@@ -496,10 +507,10 @@ export const callToResult =
     }
     const validated = parsed.result;
     return typeof validated === "string"
-      ? { toolCallId, result: truncateToolOutput(validated) }
+      ? { toolCallId, result: prefix + truncateToolOutput(validated) }
       : {
         toolCallId,
-        result: truncateToolOutput(validated.result),
+        result: prefix + truncateToolOutput(validated.result),
         attachments: validated.attachments,
       };
   };
@@ -981,17 +992,23 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           ).join("\n");
           return `Tool "${toolName}" not found in skill "${skillName}".\n\nSkill "${skillName}" instructions:\n${skill.instructions}\n\nAvailable tools in this skill:\n${toolList}`;
         }
-        const parseResult = parseWithCatch(tool.parameters, params);
+        const coerced = coerceArgs(z.toJSONSchema(tool.parameters), params);
+        const prefix = correctionPrefix(coerced.corrections);
+        const parseResult = parseWithCatch(tool.parameters, coerced.args);
         if (!parseResult.ok) {
-          return `Invalid parameters for ${fullToolName}: ${
-            parseResult.error instanceof z.ZodError
-              ? parseResult.error.issues.map((i) =>
-                `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
-              ).join(", ")
-              : parseResult.error.message
-          }`;
+          return prefix +
+            `Invalid parameters for ${fullToolName}: ${
+              parseResult.error instanceof z.ZodError
+                ? parseResult.error.issues.map((i) =>
+                  `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
+                ).join(", ")
+                : parseResult.error.message
+            }`;
         }
-        return await tool.handler(parseResult.result, toolCallId);
+        const out = await tool.handler(parseResult.result, toolCallId);
+        if (out === undefined) return out;
+        if (typeof out === "string") return prefix + out;
+        return { ...out, result: prefix + out.result };
       },
     }),
     tool({
