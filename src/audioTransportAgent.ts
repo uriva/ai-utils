@@ -114,17 +114,37 @@ type SessionEventCallbacks = {
   ) => void;
 };
 
+const transcriptDebounceMs = 1000;
+
 export const makeSessionEventHandler = (
   callbacks: SessionEventCallbacks,
 ) => {
   let interrupted = false;
   let latestOutputTranscript = "";
   let turnEvents: AudioSessionEvent[] = [];
+  let debounceTimer: number | undefined;
+  const cancelDebounce = () => {
+    if (debounceTimer !== undefined) {
+      clearTimeout(debounceTimer);
+      debounceTimer = undefined;
+    }
+  };
   const flushPending = () => {
+    cancelDebounce();
     if (!interrupted && latestOutputTranscript) {
       callbacks.onUtterance(latestOutputTranscript);
     }
     latestOutputTranscript = "";
+  };
+  const scheduleDebouncedFlush = () => {
+    cancelDebounce();
+    debounceTimer = globalThis.setTimeout(() => {
+      debounceTimer = undefined;
+      if (!interrupted && latestOutputTranscript) {
+        callbacks.onUtterance(latestOutputTranscript);
+        latestOutputTranscript = "";
+      }
+    }, transcriptDebounceMs) as unknown as number;
   };
   const handle = (event: AudioSessionEvent) => {
     if (event.type === "audio") {
@@ -134,11 +154,15 @@ export const makeSessionEventHandler = (
     if (event.type === "output_transcript") {
       latestOutputTranscript = event.text;
       if (event.finished && !interrupted) {
+        cancelDebounce();
         callbacks.onUtterance(event.text);
         latestOutputTranscript = "";
+      } else {
+        scheduleDebouncedFlush();
       }
     }
     if (event.type === "interrupted") {
+      cancelDebounce();
       interrupted = true;
       latestOutputTranscript = "";
       callbacks.onFlush();
@@ -153,6 +177,7 @@ export const makeSessionEventHandler = (
         !interrupted &&
         latestOutputTranscript
       ) {
+        cancelDebounce();
         callbacks.onUtterance(latestOutputTranscript);
         latestOutputTranscript = "";
       }

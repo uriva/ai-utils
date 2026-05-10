@@ -446,6 +446,32 @@ Deno.test(
   },
 );
 
+Deno.test(
+  "makeSessionEventHandler debounce-flushes transcript arriving after tool_call",
+  async () => {
+    const utterances: string[] = [];
+    const { handle } = makeSessionEventHandler({
+      onAudio: () => {},
+      onUtterance: (text) => {
+        utterances.push(text);
+      },
+      onFlush: () => {},
+      onTurnOutput: () => {},
+    });
+
+    handle({ type: "tool_call", id: "tc1", name: "hangUp", args: {} });
+    handle({
+      type: "output_transcript",
+      text: "ALPHA TANGO",
+      finished: false,
+    });
+
+    assertEquals(utterances, []);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assertEquals(utterances, ["ALPHA TANGO"]);
+  },
+);
+
 Deno.test("emitSpokenUtteranceIfOpen ignores pending transcript after close", () => {
   const emitted: HistoryEvent[] = [];
 
