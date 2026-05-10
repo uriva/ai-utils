@@ -319,7 +319,7 @@ Deno.test(
 );
 
 Deno.test(
-  "run_command unrecognized key error lists expected keys",
+  "run_command auto-corrects an unambiguous misplaced key and prefixes the result",
   async () => {
     const calendarSkill = {
       name: "calendar",
@@ -368,10 +368,12 @@ Deno.test(
     const toolResult = mockHistory.find((e) => e.type === "tool_result");
     assert(toolResult && toolResult.type === "tool_result");
     assert(
-      toolResult.result.includes(
-        "title: Unrecognized key. Expected keys: update",
-      ),
-      `expected error to list expected keys, got: ${toolResult.result}`,
+      toolResult.result.startsWith("[arguments auto-corrected:"),
+      `expected correction prefix, got: ${toolResult.result}`,
+    );
+    assert(
+      toolResult.result.includes("updated"),
+      `expected handler output after correction, got: ${toolResult.result}`,
     );
   },
 );
