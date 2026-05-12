@@ -453,9 +453,11 @@ export const callToResult =
     const directMatch: Tool<T> | undefined = actions.find((
       { name: n },
     ) => n === name);
+    const isSkillCall = !directMatch &&
+      (name.includes("/") || name.includes(":"));
     const [action, effectiveArgs] = directMatch
       ? [directMatch, args]
-      : name.includes("/")
+      : isSkillCall
       ? [
         actions.find(({ name: n }) => n === runCommandToolName) as
           | Tool<T>
@@ -974,12 +976,13 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         params: z.any().describe("The parameters for the tool"),
       }),
       handler: async ({ command, params }, toolCallId) => {
-        const lastSlash = command.lastIndexOf("/");
-        if (lastSlash === -1) {
+        const separator = command.includes("/") ? "/" : ":";
+        const lastSep = command.lastIndexOf(separator);
+        if (lastSep === -1) {
           return `Invalid command format. Expected "skillName/toolName", got "${command}". Available skills: ${skillNames}`;
         }
-        const skillName = command.slice(0, lastSlash);
-        const toolName = command.slice(lastSlash + 1);
+        const skillName = command.slice(0, lastSep);
+        const toolName = command.slice(lastSep + 1);
         if (!skillMap[skillName]) {
           return `Skill "${skillName}" not found. Available skills: ${skillNames}`;
         }

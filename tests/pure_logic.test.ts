@@ -234,6 +234,64 @@ Deno.test(
   },
 );
 
+Deno.test(
+  "direct skillName:toolName call (colon form) is routed through run_command",
+  async () => {
+    let handlerCalledWith = "";
+    const history: HistoryEvent[] = [];
+
+    const testSkillTool = tool({
+      name: "read_url",
+      description: "Read a URL",
+      parameters: z.object({ url: z.string() }),
+      handler: ({ url }) => {
+        handlerCalledWith = url;
+        return Promise.resolve(`content of ${url}`);
+      },
+    });
+
+    const mockCallModel = (_h: HistoryEvent[]): Promise<HistoryEvent[]> =>
+      Promise.resolve([{
+        type: "tool_call" as const,
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        isOwn: true,
+        name: "web:read_url",
+        parameters: { url: "https://example.com" },
+        modelMetadata: undefined,
+      }]);
+
+    await injectAccessHistory(() => Promise.resolve(history))(
+      injectOutputEvent((event) => {
+        history.push(event);
+        return Promise.resolve();
+      })(runAbstractAgent),
+    )(
+      {
+        maxIterations: 2,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        skills: [{
+          name: "web",
+          description: "Web skill",
+          instructions: "Use it",
+          tools: [testSkillTool],
+        }],
+        prompt: "test",
+        rewriteHistory: async () => {},
+        timezoneIANA: "UTC",
+      },
+      mockCallModel,
+    );
+
+    assertEquals(handlerCalledWith, "https://example.com");
+    const toolResult = history.find((e) =>
+      e.type === "tool_result" && e.result === "content of https://example.com"
+    );
+    assert(toolResult, "Should have tool result with correct output");
+  },
+);
+
 Deno.test("stripEmbeddedThoughtPatterns removes thoughts from mixed text", () => {
   const mixed =
     'Great choice! Here are the scenes:\n<video controls><source src="https://fake-url.com/video" type="video/mp4" /></video>[Internal thought, visible only to you: DOWNLOAD COMPLETE. Confirmed media HTML:\n<video controls><source src="https://api.find-scene.com/s/7c2a10" type="video/mp4" /></video>] [Internal thought, visible only to you: DOWNLOAD COMPLETE. Confirmed media HTML:\n<video controls><source src="https://api.find-scene.com/s/9d4f32" type="video/mp4" /></video>]';
