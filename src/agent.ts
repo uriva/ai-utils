@@ -52,7 +52,16 @@ const scratchPadSpillNotice = (
   totalLines: number,
   totalChars: number,
 ): string =>
-  `[Tool output was large (${totalChars} chars, ${totalLines} lines) and was written to scratch pad with id "${id}". Use the ${readScratchFileToolName} tool to read it in chunks (max ${maxScratchReadLines} lines per call), or with a grep pattern to filter.]`;
+  `[Tool output was large (${totalChars} chars, ${totalLines} lines) and was written to scratch pad with id "${id}". Read it with ${readScratchFileToolName}({id: "${id}"}) for the first ${maxScratchReadLines} lines, ${readScratchFileToolName}({id: "${id}", startLine: ${
+    maxScratchReadLines + 1
+  }}) for the next page, or ${readScratchFileToolName}({id: "${id}", grep: "<regex>"}) to filter.]`;
+
+const scratchPadReadHeader = (
+  id: string,
+  totalLines: number,
+  totalChars: number,
+): string =>
+  `[Scratch pad "${id}": ${totalLines} lines, ${totalChars} chars total.]\n`;
 
 const countLines = (s: string): number => s.split("\n").length;
 
@@ -124,6 +133,11 @@ export const createReadScratchFileTool = (
     if (content === undefined) {
       return `No scratch pad entry found for id "${id}". It may have expired.`;
     }
+    const header = scratchPadReadHeader(
+      id,
+      countLines(content),
+      content.length,
+    );
     const limit = clampScratchLines(numLines);
     if (typeof grep === "string" && grep.length > 0) {
       const { text, matchCount, truncated } = grepScratchLines(
@@ -131,11 +145,11 @@ export const createReadScratchFileTool = (
         grep,
         limit,
       );
-      if (matchCount === 0) return `No lines matched /${grep}/.`;
+      if (matchCount === 0) return header + `No lines matched /${grep}/.`;
       const suffix = truncated
         ? `\n[${matchCount} total matches; showing first ${limit}. Narrow the pattern to see the rest.]`
         : `\n[${matchCount} matches.]`;
-      return text + suffix;
+      return header + text + suffix;
     }
     const start = typeof startLine === "number" ? startLine : 1;
     const { text, nextStartLine, totalLines } = sliceScratchLines(
@@ -148,7 +162,7 @@ export const createReadScratchFileTool = (
         nextStartLine - 1
       } of ${totalLines}. Call again with startLine=${nextStartLine} to continue.]`
       : `\n[End of file at line ${totalLines}.]`;
-    return text + suffix;
+    return header + text + suffix;
   },
 });
 

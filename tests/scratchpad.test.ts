@@ -75,14 +75,36 @@ runForAllProviders(
       !dumpResult.result.includes(needle),
       "spill notice must not contain the needle (the blob was spilled, not inlined)",
     );
+    assert(
+      dumpResult.result.includes(`${readScratchFileToolName}({id:`),
+      `spill notice should include a concrete example call. Got: ${dumpResult.result}`,
+    );
 
     const readCall = mockHistory.find(
-      (e) => e.type === "tool_call" && e.name === readScratchFileToolName,
+      (e): e is Extract<HistoryEvent, { type: "tool_call" }> =>
+        e.type === "tool_call" && e.name === readScratchFileToolName,
     );
     assert(
       readCall,
       `agent should call ${readScratchFileToolName}. History: ${
         JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+
+    const readResult = mockHistory.find(
+      (e): e is Extract<HistoryEvent, { type: "tool_result" }> =>
+        e.type === "tool_result" && e.toolCallId === readCall.id,
+    );
+    assert(
+      readResult,
+      `${readScratchFileToolName} should have a tool_result.`,
+    );
+    assert(
+      /\[Scratch pad ".*": \d+ lines, \d+ chars total\.\]/.test(
+        readResult.result,
+      ),
+      `read_scratch_file output should start with a size header. Got: ${
+        readResult.result.slice(0, 200)
       }`,
     );
 
