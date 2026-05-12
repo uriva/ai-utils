@@ -36,6 +36,122 @@ const truncateToolOutput = (s: string): string =>
     ? s
     : s.slice(0, maxToolOutputChars) + "\n[...output truncated]";
 
+export type ToolOutputScratchPad = {
+  set: (id: string, content: string) => Promise<void>;
+  get: (id: string) => Promise<string | undefined>;
+  threshold?: number;
+};
+
+export const readScratchFileToolName = "read_scratch_file";
+
+const defaultScratchPadThreshold = 2000;
+const maxScratchReadLines = 200;
+
+const scratchPadSpillNotice = (
+  id: string,
+  totalLines: number,
+  totalChars: number,
+): string =>
+  `[Tool output was large (${totalChars} chars, ${totalLines} lines) and was written to scratch pad with id "${id}". Use the ${readScratchFileToolName} tool to read it in chunks (max ${maxScratchReadLines} lines per call), or with a grep pattern to filter.]`;
+
+const countLines = (s: string): number => s.split("\n").length;
+
+const clampScratchLines = (n: number | undefined): number =>
+  n === undefined || n <= 0
+    ? maxScratchReadLines
+    : Math.min(n, maxScratchReadLines);
+
+const sliceScratchLines = (
+  content: string,
+  startLine: number,
+  numLines: number,
+): { text: string; nextStartLine: number | undefined; totalLines: number } => {
+  const lines = content.split("\n");
+  const total = lines.length;
+  const safeStart = Math.max(1, startLine);
+  const fromIdx = safeStart - 1;
+  const toIdx = Math.min(total, fromIdx + numLines);
+  const slice = lines.slice(fromIdx, toIdx).join("\n");
+  const next = toIdx < total ? toIdx + 1 : undefined;
+  return { text: slice, nextStartLine: next, totalLines: total };
+};
+
+const grepScratchLines = (
+  content: string,
+  pattern: string,
+  numLines: number,
+): { text: string; matchCount: number; truncated: boolean } => {
+  const re = new RegExp(pattern);
+  const matches = content
+    .split("\n")
+    .map((line, idx) => ({ line, n: idx + 1 }))
+    .filter(({ line }) => re.test(line));
+  const limited = matches.slice(0, numLines);
+  return {
+    text: limited.map(({ n, line }) => `${n}: ${line}`).join("\n"),
+    matchCount: matches.length,
+    truncated: matches.length > limited.length,
+  };
+};
+
+const readScratchFileParameters: z.ZodObject<{
+  id: z.ZodString;
+  startLine: z.ZodOptional<z.ZodNumber>;
+  numLines: z.ZodOptional<z.ZodNumber>;
+  grep: z.ZodOptional<z.ZodString>;
+}> = z.object({
+  id: z.string().describe("Scratch pad id returned by the spilling tool"),
+  startLine: z.number().int().optional().describe(
+    "1-indexed line to start reading from (default 1). Ignored when grep is set.",
+  ),
+  numLines: z.number().int().optional().describe(
+    `Max lines to return (default and hard cap ${maxScratchReadLines}).`,
+  ),
+  grep: z.string().optional().describe(
+    "Optional JS regex; only matching lines (prefixed with line number) are returned.",
+  ),
+});
+
+export const createReadScratchFileTool = (
+  scratchPad: ToolOutputScratchPad,
+): Tool<typeof readScratchFileParameters> => ({
+  name: readScratchFileToolName,
+  description:
+    `Read a tool output that was spilled to the scratch pad. Returns up to ${maxScratchReadLines} lines per call. Use 'startLine' (1-indexed) to paginate, or 'grep' (regex) to filter lines.`,
+  parameters: readScratchFileParameters,
+  handler: async ({ id, startLine, numLines, grep }) => {
+    const content = await scratchPad.get(id);
+    if (content === undefined) {
+      return `No scratch pad entry found for id "${id}". It may have expired.`;
+    }
+    const limit = clampScratchLines(numLines);
+    if (typeof grep === "string" && grep.length > 0) {
+      const { text, matchCount, truncated } = grepScratchLines(
+        content,
+        grep,
+        limit,
+      );
+      if (matchCount === 0) return `No lines matched /${grep}/.`;
+      const suffix = truncated
+        ? `\n[${matchCount} total matches; showing first ${limit}. Narrow the pattern to see the rest.]`
+        : `\n[${matchCount} matches.]`;
+      return text + suffix;
+    }
+    const start = typeof startLine === "number" ? startLine : 1;
+    const { text, nextStartLine, totalLines } = sliceScratchLines(
+      content,
+      start,
+      limit,
+    );
+    const suffix = nextStartLine
+      ? `\n[Showing lines ${start}-${
+        nextStartLine - 1
+      } of ${totalLines}. Call again with startLine=${nextStartLine} to continue.]`
+      : `\n[End of file at line ${totalLines}.]`;
+    return text + suffix;
+  },
+});
+
 const toolReturnSchema: z.ZodType<string | ToolReturn> = z.union([
   z.string(),
   z.object({
@@ -436,86 +552,105 @@ export const correctionPrefix = (corrections: string[]): string =>
       corrections.join("; ")
     }. Use the canonical shape next time.]\n\n`;
 
-export const callToResult =
+export const callToResult = (
   // deno-lint-ignore no-explicit-any
-  (actions: Tool<any>[], skillNames: string[] = []) =>
-  async <T extends ZodType>(fc: FunctionCall): Promise<
-    | {
-      toolCallId: string | undefined;
-      result: string;
-      attachments?: MediaAttachment[];
-    }
-    | undefined
-  > => {
-    const { name, args, id } = fc;
-    const toolCallId = id;
-    if (!name) throw new Error("Function call name is missing");
-    const directMatch: Tool<T> | undefined = actions.find((
-      { name: n },
-    ) => n === name);
-    const isSkillCall = !directMatch &&
-      (name.includes("/") || name.includes(":"));
-    const [action, effectiveArgs] = directMatch
-      ? [directMatch, args]
-      : isSkillCall
-      ? [
-        actions.find(({ name: n }) => n === runCommandToolName) as
-          | Tool<T>
-          | undefined,
-        { command: name, params: args },
-      ]
-      : [undefined, args];
-    if (!action) {
-      reportToolNotFound(name);
-      return {
-        toolCallId,
-        result: toolNotFoundMessage(name, actions, skillNames),
-      };
-    }
-    const { handler, parameters } = action;
-    const coerced = coerceArgs(z.toJSONSchema(parameters), effectiveArgs);
-    const prefix = correctionPrefix(coerced.corrections);
-    const parseResult = parseWithCatch(parameters, coerced.args);
-    if (!parseResult.ok) {
-      return {
-        toolCallId,
-        result: prefix +
-          `Invalid arguments: ${
-            parseResult.error instanceof z.ZodError
-              ? parseResult.error.issues
-                .map((i) =>
-                  `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
-                )
-                .join(", ")
-              : parseResult.error.message
-          }`,
-      };
-    }
-    const out = await handler(parseResult.result, toolCallId ?? "");
-    if (out === undefined) return undefined;
-    const parsed = parseWithCatch(toolReturnSchema, out);
-    if (!parsed.ok) {
-      throw new Error(
-        `Tool "${name}" handler returned invalid value (args: ${
-          JSON.stringify(args)
-        }): ${
-          parsed.error instanceof z.ZodError
-            ? parsed.error.issues.map((i) =>
-              `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
-            ).join(", ")
-            : parsed.error.message
+  actions: Tool<any>[],
+  skillNames: string[] = [],
+  scratchPad?: ToolOutputScratchPad,
+) =>
+async <T extends ZodType>(fc: FunctionCall): Promise<
+  | {
+    toolCallId: string | undefined;
+    result: string;
+    attachments?: MediaAttachment[];
+  }
+  | undefined
+> => {
+  const { name, args, id } = fc;
+  const toolCallId = id;
+  if (!name) throw new Error("Function call name is missing");
+  const directMatch: Tool<T> | undefined = actions.find((
+    { name: n },
+  ) => n === name);
+  const isSkillCall = !directMatch &&
+    (name.includes("/") || name.includes(":"));
+  const [action, effectiveArgs] = directMatch
+    ? [directMatch, args]
+    : isSkillCall
+    ? [
+      actions.find(({ name: n }) => n === runCommandToolName) as
+        | Tool<T>
+        | undefined,
+      { command: name, params: args },
+    ]
+    : [undefined, args];
+  if (!action) {
+    reportToolNotFound(name);
+    return {
+      toolCallId,
+      result: toolNotFoundMessage(name, actions, skillNames),
+    };
+  }
+  const { handler, parameters } = action;
+  const coerced = coerceArgs(z.toJSONSchema(parameters), effectiveArgs);
+  const prefix = correctionPrefix(coerced.corrections);
+  const parseResult = parseWithCatch(parameters, coerced.args);
+  if (!parseResult.ok) {
+    return {
+      toolCallId,
+      result: prefix +
+        `Invalid arguments: ${
+          parseResult.error instanceof z.ZodError
+            ? parseResult.error.issues
+              .map((i) =>
+                `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
+              )
+              .join(", ")
+            : parseResult.error.message
         }`,
-      );
-    }
-    const validated = parsed.result;
-    return typeof validated === "string"
-      ? { toolCallId, result: prefix + truncateToolOutput(validated) }
-      : {
-        toolCallId,
-        result: prefix + truncateToolOutput(validated.result),
-        attachments: validated.attachments,
-      };
+    };
+  }
+  const out = await handler(parseResult.result, toolCallId ?? "");
+  if (out === undefined) return undefined;
+  const parsed = parseWithCatch(toolReturnSchema, out);
+  if (!parsed.ok) {
+    throw new Error(
+      `Tool "${name}" handler returned invalid value (args: ${
+        JSON.stringify(args)
+      }): ${
+        parsed.error instanceof z.ZodError
+          ? parsed.error.issues.map((i) =>
+            `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
+          ).join(", ")
+          : parsed.error.message
+      }`,
+    );
+  }
+  const validated = parsed.result;
+  const rawText = typeof validated === "string" ? validated : validated.result;
+  const attachments = typeof validated === "string"
+    ? undefined
+    : validated.attachments;
+  const threshold = scratchPad?.threshold ?? defaultScratchPadThreshold;
+  const shouldSpill = scratchPad !== undefined &&
+    name !== readScratchFileToolName &&
+    toolCallId !== undefined &&
+    rawText.length > threshold;
+  if (shouldSpill) {
+    await scratchPad.set(toolCallId, rawText);
+    return {
+      toolCallId,
+      result: prefix +
+        scratchPadSpillNotice(toolCallId, countLines(rawText), rawText.length),
+      attachments,
+    };
+  }
+  return {
+    toolCallId,
+    result: prefix + truncateToolOutput(rawText),
+    attachments,
   };
+};
 
 export const toolUseTurn = (
   { name, args }: FunctionCall,
@@ -904,6 +1039,7 @@ export const handleFunctionCalls = (
   tools: Tool<any>[],
   onToolResult?: (event: HistoryEvent) => void,
   skillNames: string[] = [],
+  scratchPad?: ToolOutputScratchPad,
 ) =>
 async (output: HistoryEvent[]): Promise<boolean> => {
   // deno-lint-ignore no-explicit-any
@@ -918,7 +1054,7 @@ async (output: HistoryEvent[]): Promise<boolean> => {
       return;
     }
     const fc: FunctionCall = { name: t.name, args: t.parameters, id: t.id };
-    const callResult = await callToResult(tools, skillNames)(fc);
+    const callResult = await callToResult(tools, skillNames, scratchPad)(fc);
     if (callResult === undefined) {
       hadDeferred = true;
       return;
@@ -1073,6 +1209,7 @@ export type AgentSpec = {
     voiceName: string;
     participantName: string;
   };
+  toolOutputScratchPad?: ToolOutputScratchPad;
 };
 
 const hasEmojiFlood = (events: HistoryEvent[]) =>
@@ -1105,6 +1242,7 @@ export const runAbstractAgent = async (
   callModel: (history: HistoryEvent[]) => Promise<HistoryEvent[]>,
 ) => {
   const { maxIterations, tools, skills, onMaxIterationsReached } = spec;
+  const scratchPad = spec.toolOutputScratchPad;
   const allTools = skills && skills.length > 0
     ? [...tools, ...createSkillTools(skills)]
     : tools;
@@ -1163,6 +1301,7 @@ export const runAbstractAgent = async (
         allTools,
         undefined,
         skillNames,
+        scratchPad,
       )(emit);
       if (hadDeferred) return;
 

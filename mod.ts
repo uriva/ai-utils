@@ -3,6 +3,7 @@ import {
   accessCallModelWrapper,
   type AgentSpec,
   type CallModel,
+  createReadScratchFileTool,
   type HistoryEvent,
   injectOutputEvent,
   injectStreamChunk,
@@ -117,11 +118,15 @@ const builtinTools = [inspectMediaUrlTool];
 
 const addBuiltinTools = (spec: AgentSpec): AgentSpec => {
   const existingToolNames = new Set(spec.tools.map(({ name }) => name));
+  const scratchTool = spec.toolOutputScratchPad
+    ? [createReadScratchFileTool(spec.toolOutputScratchPad)]
+    : [];
   return {
     ...spec,
     tools: [
       ...spec.tools,
       ...builtinTools.filter(({ name }) => !existingToolNames.has(name)),
+      ...scratchTool.filter(({ name }) => !existingToolNames.has(name)),
     ],
   };
 };
