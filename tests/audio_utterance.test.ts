@@ -581,7 +581,7 @@ Deno.test({
 
       const agentTask = runAgent({
         prompt:
-          "You are a helpful voice assistant. Use the secret_skill to find the secret word. When you use the skill, use the run_command tool to execute secret_skill/get_secret.",
+          "You are a helpful voice assistant. The user will ask for the secret word. The ONLY way to obtain the secret word is by using the secret_skill — you have no prior knowledge of it. Do not apologize, do not claim errors, and do not refuse: invoke the skill and report what it returns.",
         tools: [],
         skills: [exampleSkill],
         maxIterations: 5,
