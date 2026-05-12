@@ -33,8 +33,15 @@ export const isServerError = (error: unknown) =>
 
 export const isRateLimitError = (error: unknown) => errorStatus(error) === 429;
 
+export const syntheticTimeoutMarker = "syntheticTimeout";
+
+export const isSyntheticTimeoutError = (error: unknown) =>
+  error instanceof Error && syntheticTimeoutMarker in error &&
+  (error as { syntheticTimeout: unknown }).syntheticTimeout === true;
+
 export const isRetryableError = (error: unknown) =>
-  isServerError(error) || isRateLimitError(error);
+  !isSyntheticTimeoutError(error) &&
+  (isServerError(error) || isRateLimitError(error));
 
 const emojiPattern =
   /\p{Emoji_Presentation}|\p{Extended_Pictographic}|\p{Regional_Indicator}/gu;

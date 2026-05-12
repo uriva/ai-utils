@@ -16,7 +16,7 @@ import {
   pipe,
   sum,
 } from "gamla";
-import { isRetryableError } from "./utils.ts";
+import { isRetryableError, syntheticTimeoutMarker } from "./utils.ts";
 import type { ZodType } from "zod/v4";
 import {
   accessMetadataStore,
@@ -192,7 +192,7 @@ export const stripExpiredFile = (
   };
 };
 
-const modelCallTimeoutMs = 60_000;
+const modelCallTimeoutMs = 90_000;
 
 const withTimeout = <Args extends unknown[], Result>(
   fn: (...args: Args) => Promise<Result>,
@@ -205,7 +205,7 @@ const withTimeout = <Args extends unknown[], Result>(
         `[gemini-step] model-call-timeout after ${modelCallTimeoutMs}ms`,
       );
       const err = new Error("Model call timed out");
-      Object.assign(err, { status: 503 });
+      Object.assign(err, { status: 503, [syntheticTimeoutMarker]: true });
       reject(err);
     }, modelCallTimeoutMs);
     console.log("[gemini-step] rawCallGemini-start");

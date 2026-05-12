@@ -19,7 +19,12 @@ import {
   filterOrphanedToolResults,
   stripEmbeddedThoughtPatterns,
 } from "../src/geminiAgent.ts";
-import { isEmojiFlood } from "../src/utils.ts";
+import {
+  isEmojiFlood,
+  isRetryableError,
+  isSyntheticTimeoutError,
+  syntheticTimeoutMarker,
+} from "../src/utils.ts";
 
 Deno.test("filterOrphanedToolResults logic", () => {
   const baseAuth = { isOwn: true, id: "msg-id", timestamp: 100 } as const;
@@ -816,4 +821,37 @@ Deno.test("sanitizeModelOutput hard-splits a single huge wordless run", () => {
     if (u.type !== "own_utterance") throw new Error("unreachable");
     assert(u.text.length <= maxUtteranceChars);
   });
+});
+
+const buildSyntheticTimeoutError = () => {
+  const err = new Error("Model call timed out");
+  Object.assign(err, { status: 503, [syntheticTimeoutMarker]: true });
+  return err;
+};
+
+const buildRealServerError = () => {
+  const err = new Error("Internal server error");
+  Object.assign(err, { status: 503 });
+  return err;
+};
+
+Deno.test("isSyntheticTimeoutError identifies marked synthetic timeouts", () => {
+  assert(isSyntheticTimeoutError(buildSyntheticTimeoutError()));
+  assert(!isSyntheticTimeoutError(buildRealServerError()));
+  assert(!isSyntheticTimeoutError(new Error("plain")));
+  assert(!isSyntheticTimeoutError(null));
+});
+
+Deno.test("isRetryableError excludes synthetic timeouts to prevent retry-amplified hangs", () => {
+  assert(
+    !isRetryableError(buildSyntheticTimeoutError()),
+    "synthetic 503 from withTimeout must not be retried; the underlying request may still complete and compound wall-clock under SIGTERM window",
+  );
+  assert(
+    isRetryableError(buildRealServerError()),
+    "real 503 from Gemini server must still be retried",
+  );
+  const rateLimit = new Error("too many requests");
+  Object.assign(rateLimit, { status: 429 });
+  assert(isRetryableError(rateLimit));
 });
