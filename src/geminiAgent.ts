@@ -199,18 +199,34 @@ const withTimeout = <Args extends unknown[], Result>(
 ) =>
 (...args: Args): Promise<Result> =>
   new Promise((resolve, reject) => {
+    const startedAt = Date.now();
     const timer = setTimeout(() => {
+      console.warn(
+        `[gemini-step] model-call-timeout after ${modelCallTimeoutMs}ms`,
+      );
       const err = new Error("Model call timed out");
       Object.assign(err, { status: 503 });
       reject(err);
     }, modelCallTimeoutMs);
+    console.log("[gemini-step] rawCallGemini-start");
     fn(...args).then(
       (result) => {
         clearTimeout(timer);
+        console.log(
+          `[gemini-step] rawCallGemini-ok elapsedMs=${Date.now() - startedAt}`,
+        );
         resolve(result);
       },
       (error) => {
         clearTimeout(timer);
+        const status = (error && typeof error === "object" && "status" in error)
+          ? (error as { status: unknown }).status
+          : undefined;
+        console.warn(
+          `[gemini-step] rawCallGemini-error elapsedMs=${
+            Date.now() - startedAt
+          } status=${String(status)}`,
+        );
         reject(error);
       },
     );
@@ -247,9 +263,14 @@ const rawCallGemini = async ({
       accumulatedParts.push(part);
     }
   } else {
+    console.log("[gemini-step] stream-await-start");
     const responseStream = await sdk.models.generateContentStream(req);
+    console.log("[gemini-step] stream-await-ok");
 
+    let chunkCount = 0;
     for await (const chunk of responseStream) {
+      chunkCount++;
+      if (chunkCount === 1) console.log("[gemini-step] stream-first-chunk");
       if (chunk.usageMetadata) {
         finalUsageMetadata = chunk.usageMetadata;
       }
@@ -299,6 +320,7 @@ const rawCallGemini = async ({
         }
       }
     }
+    console.log(`[gemini-step] stream-done chunks=${chunkCount}`);
   }
 
   if (finalUsageMetadata) {
