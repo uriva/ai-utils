@@ -195,21 +195,23 @@ export const stripExpiredFile = (
 const modelCallTimeoutMs = 90_000;
 
 const withTimeout = <Args extends unknown[], Result>(
-  fn: (...args: Args) => Promise<Result>,
+  fn: (signal: AbortSignal, ...args: Args) => Promise<Result>,
 ) =>
 (...args: Args): Promise<Result> =>
   new Promise((resolve, reject) => {
     const startedAt = Date.now();
+    const controller = new AbortController();
     const timer = setTimeout(() => {
       console.warn(
         `[gemini-step] model-call-timeout after ${modelCallTimeoutMs}ms`,
       );
+      controller.abort();
       const err = new Error("Model call timed out");
       Object.assign(err, { status: 503, [syntheticTimeoutMarker]: true });
       reject(err);
     }, modelCallTimeoutMs);
     console.log("[gemini-step] rawCallGemini-start");
-    fn(...args).then(
+    fn(controller.signal, ...args).then(
       (result) => {
         clearTimeout(timer);
         console.log(
@@ -232,13 +234,22 @@ const withTimeout = <Args extends unknown[], Result>(
     );
   });
 
-const rawCallGemini = async ({
-  req,
-  disableStreaming,
-}: {
-  req: GenerateContentParameters;
-  disableStreaming?: boolean;
-}): Promise<GeminiOutput> => {
+const withAbortSignal = (
+  signal: AbortSignal,
+  req: GenerateContentParameters,
+): GenerateContentParameters => ({
+  ...req,
+  config: { ...(req.config ?? {}), abortSignal: signal },
+});
+
+const rawCallGemini = async (
+  signal: AbortSignal,
+  { req: rawReq, disableStreaming }: {
+    req: GenerateContentParameters;
+    disableStreaming?: boolean;
+  },
+): Promise<GeminiOutput> => {
+  const req = withAbortSignal(signal, rawReq);
   const handleStreamChunk = getStreamChunk();
   const handleStreamThinkingChunk = getStreamThinkingChunk();
   const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
