@@ -5,6 +5,7 @@ import {
   type GenerateContentResponseUsageMetadata,
   GoogleGenAI,
   type Part,
+  ThinkingLevel,
 } from "@google/genai";
 import { encodeBase64 } from "@std/encoding/base64";
 import { context, type Injection } from "@uri/inject";
@@ -750,7 +751,7 @@ export const buildReq = (
     systemInstruction: prompt,
     tools: [{ functionDeclarations: tools.map(actionToTool) }],
     toolConfig: { functionCallingConfig: {} },
-    thinkingConfig: { includeThoughts: true },
+    thinkingConfig: { includeThoughts: true, thinkingLevel: ThinkingLevel.LOW },
     ...(maxOutputTokens ? { maxOutputTokens } : {}),
   },
   contents: pipe(
