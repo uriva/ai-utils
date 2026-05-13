@@ -7,7 +7,6 @@ import {
   type Part,
   ThinkingLevel,
 } from "@google/genai";
-import { encodeBase64 } from "@std/encoding/base64";
 import { context, type Injection } from "@uri/inject";
 import {
   conditionalRetryExponential,
@@ -288,21 +287,6 @@ const withTimeout = <Args extends unknown[], Result>(
     );
   });
 
-const chunkBase64 = (s: string, size: number): string[] =>
-  s.length === 0 ? [] : [s.slice(0, size), ...chunkBase64(s.slice(size), size)];
-
-const dumpReq = (req: GenerateContentParameters) => {
-  const id = generateId().slice(0, 8);
-  const b64 = encodeBase64(new TextEncoder().encode(JSON.stringify(req)));
-  const chunks = chunkBase64(b64, 4000);
-  chunks.forEach((chunk, i) =>
-    console.log(
-      `[gemini-reqdump] id=${id} part=${i + 1}/${chunks.length} ${chunk}`,
-    )
-  );
-  return id;
-};
-
 const requestDiag = (
   req: GenerateContentParameters,
   disableStreaming: boolean | undefined,
@@ -368,7 +352,6 @@ const rawCallGemini = async (
 ): Promise<GeminiOutput> => {
   const req = withAbortSignal(signal, rawReq);
   requestDiag(req, disableStreaming);
-  const dumpId = dumpReq(req);
   const handleStreamChunk = getStreamChunk();
   const handleStreamThinkingChunk = getStreamThinkingChunk();
   const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
@@ -381,7 +364,6 @@ const rawCallGemini = async (
     finalUsageMetadata = response.usageMetadata;
     finalFinishReason = response.candidates?.[0]?.finishReason;
     const parts = response.candidates?.[0]?.content?.parts ?? [];
-    console.log(`[gemini-reqdump] id=${dumpId} done`);
     usageDiag("buffered", finalUsageMetadata, finalFinishReason, parts);
     for (const part of parts) {
       if (
@@ -453,7 +435,6 @@ const rawCallGemini = async (
       }
     }
     console.log(`[gemini-step] stream-done chunks=${chunkCount}`);
-    console.log(`[gemini-reqdump] id=${dumpId} done`);
     usageDiag(
       "stream",
       finalUsageMetadata,
