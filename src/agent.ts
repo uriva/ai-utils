@@ -85,18 +85,68 @@ const sliceScratchLines = (
   return { text: slice, nextStartLine: next, totalLines: total };
 };
 
+const jsFlagChars = new Set(["i", "m", "s", "u", "y", "g"]);
+
+const translatePcreFlags = (
+  pattern: string,
+): { source: string; flags: string } => {
+  const match = pattern.match(/^\(\?([a-zA-Z-]+)\)/);
+  if (!match) return { source: pattern, flags: "" };
+  const spec = match[1];
+  const minusIdx = spec.indexOf("-");
+  const enabling = minusIdx === -1 ? spec : spec.slice(0, minusIdx);
+  const flags = [...new Set(enabling.split(""))]
+    .filter((f) => jsFlagChars.has(f))
+    .join("");
+  return { source: pattern.slice(match[0].length), flags };
+};
+
+export const compileGrepPattern = (
+  pattern: string,
+): { ok: true; re: RegExp } | { ok: false; error: string } => {
+  const { source, flags } = translatePcreFlags(pattern);
+  const attempt = (src: string, fl: string) => {
+    const re = new RegExp(src, fl);
+    return { ok: true as const, re };
+  };
+  const first = safeCompile(source, flags, attempt);
+  if (first.ok) return first;
+  if (source !== pattern) {
+    const fallback = safeCompile(pattern, "", attempt);
+    if (fallback.ok) return fallback;
+  }
+  return { ok: false, error: first.error };
+};
+
+const safeCompile = (
+  source: string,
+  flags: string,
+  attempt: (s: string, f: string) => { ok: true; re: RegExp },
+): { ok: true; re: RegExp } | { ok: false; error: string } => {
+  try {
+    return attempt(source, flags);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+};
+
 const grepScratchLines = (
   content: string,
   pattern: string,
   numLines: number,
-): { text: string; matchCount: number; truncated: boolean } => {
-  const re = new RegExp(pattern);
+):
+  | { ok: true; text: string; matchCount: number; truncated: boolean }
+  | { ok: false; error: string } => {
+  const compiled = compileGrepPattern(pattern);
+  if (!compiled.ok) return compiled;
+  const { re } = compiled;
   const matches = content
     .split("\n")
     .map((line, idx) => ({ line, n: idx + 1 }))
     .filter(({ line }) => re.test(line));
   const limited = matches.slice(0, numLines);
   return {
+    ok: true,
     text: limited.map(({ n, line }) => `${n}: ${line}`).join("\n"),
     matchCount: matches.length,
     truncated: matches.length > limited.length,
@@ -117,7 +167,7 @@ const readScratchFileParameters: z.ZodObject<{
     `Max lines to return (default and hard cap ${maxScratchReadLines}).`,
   ),
   grep: z.string().optional().describe(
-    "Optional JS regex; only matching lines (prefixed with line number) are returned.",
+    "Optional JS regex; only matching lines (prefixed with line number) are returned. A leading PCRE-style inline flag group like (?i), (?im) is auto-translated to JS RegExp flags.",
   ),
 });
 
@@ -140,11 +190,13 @@ export const createReadScratchFileTool = (
     );
     const limit = clampScratchLines(numLines);
     if (typeof grep === "string" && grep.length > 0) {
-      const { text, matchCount, truncated } = grepScratchLines(
-        content,
-        grep,
-        limit,
-      );
+      const result = grepScratchLines(content, grep, limit);
+      if (!result.ok) {
+        return header +
+          `Invalid grep regex /${grep}/: ${result.error}. ` +
+          `Use a JS RegExp pattern (e.g. "foo", not "(?i)foo" — pass flags via leading "(?i)" which we translate, or just plain JS syntax).`;
+      }
+      const { text, matchCount, truncated } = result;
       if (matchCount === 0) return header + `No lines matched /${grep}/.`;
       const suffix = truncated
         ? `\n[${matchCount} total matches; showing first ${limit}. Narrow the pattern to see the rest.]`

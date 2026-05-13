@@ -1,7 +1,10 @@
 import { assert } from "@std/assert";
 import { z } from "zod/v4";
+import { runAgent } from "../mod.ts";
 import {
+  compileGrepPattern,
   type HistoryEvent,
+  injectCallModel,
   participantUtteranceTurn,
   readScratchFileToolName,
   type ToolOutputScratchPad,
@@ -117,6 +120,122 @@ runForAllProviders(
       `agent should reply with the needle ${needle}. History: ${
         JSON.stringify(mockHistory, null, 2)
       }`,
+    );
+  },
+);
+
+Deno.test("compileGrepPattern translates leading PCRE inline flags", () => {
+  const r = compileGrepPattern("(?i)Shinjuku|Ramen");
+  assert(r.ok, `expected compile success, got: ${JSON.stringify(r)}`);
+  assert(r.re.flags.includes("i"));
+  assert(r.re.test("shinjuku station"));
+  assert(r.re.test("RAMEN house"));
+});
+
+Deno.test("compileGrepPattern handles combined PCRE flags (?ims)", () => {
+  const r = compileGrepPattern("(?ims)^foo");
+  assert(r.ok);
+  ["i", "m", "s"].forEach((f) => assert(r.re.flags.includes(f)));
+});
+
+Deno.test("compileGrepPattern silently drops unsupported PCRE flag x", () => {
+  const r = compileGrepPattern("(?ix)foo");
+  assert(r.ok);
+  assert(r.re.flags.includes("i"));
+  assert(!r.re.flags.includes("x"));
+});
+
+Deno.test("compileGrepPattern returns error on invalid regex", () => {
+  const r = compileGrepPattern("(unclosed");
+  assert(!r.ok);
+  assert(r.error.length > 0);
+});
+
+const fakeReadScratchCall = (
+  id: string,
+  grep: string,
+): HistoryEvent => ({
+  type: "tool_call",
+  isOwn: true,
+  name: readScratchFileToolName,
+  parameters: { id, grep },
+  id: "tc-grep",
+  timestamp: Date.now(),
+});
+
+const runFakeGrepAgent = async (
+  grep: string,
+  content: string,
+): Promise<HistoryEvent[]> => {
+  const scratchId = "fake-scratch-id";
+  const store = new Map<string, string>([[scratchId, content]]);
+  const scratchPad = makeScratchPad(store);
+  const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+    name: "user",
+    text: "look up the file",
+  })];
+  let n = 0;
+  const fakeCallModel = () => {
+    n++;
+    if (n === 1) return Promise.resolve([fakeReadScratchCall(scratchId, grep)]);
+    return Promise.resolve([{
+      type: "own_utterance" as const,
+      isOwn: true as const,
+      text: "done",
+      id: "u-done",
+      timestamp: Date.now(),
+    }]);
+  };
+  await injectCallModel(fakeCallModel)(async () => {
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 4,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "test",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+      toolOutputScratchPad: scratchPad,
+    });
+  })();
+  return mockHistory;
+};
+
+const findToolResult = (history: HistoryEvent[]) =>
+  history.find((
+    e,
+  ): e is Extract<HistoryEvent, { type: "tool_result" }> =>
+    e.type === "tool_result" && e.toolCallId === "tc-grep"
+  );
+
+Deno.test(
+  "read_scratch_file with PCRE-style (?i) flag matches case-insensitively",
+  async () => {
+    const history = await runFakeGrepAgent(
+      "(?i)Shinjuku|Ramen",
+      "Tokyo notes\nshinjuku district\nRAMEN shop\nunrelated",
+    );
+    const result = findToolResult(history);
+    assert(result, `expected tool_result. History: ${JSON.stringify(history)}`);
+    assert(
+      result.result.includes("shinjuku district") &&
+        result.result.includes("RAMEN shop"),
+      `expected case-insensitive matches. Got: ${result.result}`,
+    );
+  },
+);
+
+Deno.test(
+  "read_scratch_file with invalid regex returns error to model instead of throwing",
+  async () => {
+    const history = await runFakeGrepAgent(
+      "(unclosed",
+      "anything\ngoes here",
+    );
+    const result = findToolResult(history);
+    assert(result, `expected tool_result. History: ${JSON.stringify(history)}`);
+    assert(
+      result.result.toLowerCase().includes("invalid grep regex"),
+      `expected error message in tool_result. Got: ${result.result}`,
     );
   },
 );
