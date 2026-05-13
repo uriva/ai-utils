@@ -367,7 +367,7 @@ const rawCallGemini = async (
 ): Promise<GeminiOutput> => {
   const req = withAbortSignal(signal, rawReq);
   requestDiag(req, disableStreaming);
-  const dumpId = disableStreaming ? dumpReq(req) : "";
+  const dumpId = dumpReq(req);
   const handleStreamChunk = getStreamChunk();
   const handleStreamThinkingChunk = getStreamThinkingChunk();
   const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
@@ -452,6 +452,7 @@ const rawCallGemini = async (
       }
     }
     console.log(`[gemini-step] stream-done chunks=${chunkCount}`);
+    console.log(`[gemini-reqdump] id=${dumpId} done`);
     usageDiag(
       "stream",
       finalUsageMetadata,
