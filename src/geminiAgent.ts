@@ -59,6 +59,49 @@ import {
 } from "./internalMessageMetadata.ts";
 import { inspectMediaUrlToolName } from "./inspectMediaTool.ts";
 
+const fetchUrl = (input: RequestInfo | URL): string =>
+  typeof input === "string"
+    ? input
+    : input instanceof URL
+    ? input.href
+    : input.url;
+
+const fetchPath = (url: string): string =>
+  URL.canParse(url) ? new URL(url).pathname : url.slice(0, 80);
+
+const isGoogleApi = (url: string) => url.includes("googleapis.com");
+
+const originalFetch = globalThis.fetch;
+
+const instrumentedFetch: typeof fetch = (input, init) => {
+  const url = fetchUrl(input);
+  if (!isGoogleApi(url)) return originalFetch(input, init);
+  const path = fetchPath(url);
+  const t0 = Date.now();
+  console.log(`[gemini-fetch] start ${path}`);
+  return originalFetch(input, init).then(
+    (res) => {
+      console.log(
+        `[gemini-fetch] headers ${path} status=${res.status} ttfbMs=${
+          Date.now() - t0
+        }`,
+      );
+      return res;
+    },
+    (err) => {
+      const { name, message } = errorDetails(err);
+      console.warn(
+        `[gemini-fetch] error ${path} elapsedMs=${
+          Date.now() - t0
+        } name=${name} msg=${message}`,
+      );
+      throw err;
+    },
+  );
+};
+
+globalThis.fetch = instrumentedFetch;
+
 const normalizeError = (error: unknown): Error => {
   if (error instanceof Error) return error;
   if (typeof error === "string") return new Error(error);
@@ -194,6 +237,17 @@ export const stripExpiredFile = (
 
 const modelCallTimeoutMs = 90_000;
 
+const errorDetails = (error: unknown) => {
+  const status = (error && typeof error === "object" && "status" in error)
+    ? (error as { status: unknown }).status
+    : undefined;
+  const name = (error instanceof Error) ? error.name : typeof error;
+  const message = (error instanceof Error)
+    ? error.message.slice(0, 200)
+    : String(error).slice(0, 200);
+  return { status, name, message };
+};
+
 const withTimeout = <Args extends unknown[], Result>(
   fn: (signal: AbortSignal, ...args: Args) => Promise<Result>,
 ) =>
@@ -221,18 +275,64 @@ const withTimeout = <Args extends unknown[], Result>(
       },
       (error) => {
         clearTimeout(timer);
-        const status = (error && typeof error === "object" && "status" in error)
-          ? (error as { status: unknown }).status
-          : undefined;
+        const { status, name, message } = errorDetails(error);
         console.warn(
           `[gemini-step] rawCallGemini-error elapsedMs=${
             Date.now() - startedAt
-          } status=${String(status)}`,
+          } status=${String(status)} name=${name} msg=${message}`,
         );
         reject(error);
       },
     );
   });
+
+const requestDiag = (
+  req: GenerateContentParameters,
+  disableStreaming: boolean | undefined,
+) => {
+  const firstTool = req.config?.tools?.[0];
+  const decls = firstTool && "functionDeclarations" in firstTool
+    ? (firstTool.functionDeclarations ?? [])
+    : [];
+  const sysInstr = typeof req.config?.systemInstruction === "string"
+    ? req.config.systemInstruction
+    : "";
+  const reqBytes = JSON.stringify(req).length;
+  const declBytes = JSON.stringify(decls).length;
+  const contents = Array.isArray(req.contents) ? req.contents : [];
+  const partsCount = contents.reduce(
+    (n, c) =>
+      n +
+      (c && typeof c === "object" && "parts" in c && Array.isArray(c.parts)
+        ? c.parts.length
+        : 0),
+    0,
+  );
+  console.log(
+    `[gemini-diag] pre-call model=${req.model} mode=${
+      disableStreaming ? "buffered" : "stream"
+    } contents=${contents.length} parts=${partsCount} tools=${decls.length} declBytes=${declBytes} sysInstrLen=${sysInstr.length} reqBytes=${reqBytes}`,
+  );
+};
+
+const usageDiag = (
+  mode: "buffered" | "stream",
+  usage: TokenUsage | undefined,
+  finishReason: string | undefined,
+  parts: Part[],
+) => {
+  const fnCalls = parts.filter((p) => p.functionCall).length;
+  const thoughtChars = parts
+    .filter((p) => p.thought && typeof p.text === "string")
+    .reduce((n, p) => n + (p.text?.length ?? 0), 0);
+  const textChars = parts
+    .filter((p) => !p.thought && typeof p.text === "string" && !p.functionCall)
+    .reduce((n, p) => n + (p.text?.length ?? 0), 0);
+  const sigCount = parts.filter((p) => p.thoughtSignature).length;
+  console.log(
+    `[gemini-diag] post-call mode=${mode} finish=${finishReason} parts=${parts.length} fnCalls=${fnCalls} thoughtChars=${thoughtChars} textChars=${textChars} sigCount=${sigCount} promptTok=${usage?.promptTokenCount} candTok=${usage?.candidatesTokenCount} thoughtTok=${usage?.thoughtsTokenCount} cachedTok=${usage?.cachedContentTokenCount}`,
+  );
+};
 
 const withAbortSignal = (
   signal: AbortSignal,
@@ -250,6 +350,7 @@ const rawCallGemini = async (
   },
 ): Promise<GeminiOutput> => {
   const req = withAbortSignal(signal, rawReq);
+  requestDiag(req, disableStreaming);
   const handleStreamChunk = getStreamChunk();
   const handleStreamThinkingChunk = getStreamThinkingChunk();
   const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
@@ -262,6 +363,7 @@ const rawCallGemini = async (
     finalUsageMetadata = response.usageMetadata;
     finalFinishReason = response.candidates?.[0]?.finishReason;
     const parts = response.candidates?.[0]?.content?.parts ?? [];
+    usageDiag("buffered", finalUsageMetadata, finalFinishReason, parts);
     for (const part of parts) {
       if (
         typeof part.text === "string" && !part.thought
@@ -332,6 +434,12 @@ const rawCallGemini = async (
       }
     }
     console.log(`[gemini-step] stream-done chunks=${chunkCount}`);
+    usageDiag(
+      "stream",
+      finalUsageMetadata,
+      finalFinishReason,
+      accumulatedParts,
+    );
   }
 
   if (finalUsageMetadata) {

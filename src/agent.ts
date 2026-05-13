@@ -1327,6 +1327,9 @@ export const runAbstractAgent = async (
     const history = await getHistory();
     const effectiveHistory = [...history, ...ephemeralHistory];
     const normalizedHistory = normalizeHistoryForModel(effectiveHistory);
+    console.log(
+      `[agent-iter] iter=${c} histLen=${history.length} ephLen=${ephemeralHistory.length} normLen=${normalizedHistory.length}`,
+    );
     await reportHistoryForDebug(normalizedHistory);
     scheduleHistoryCompaction(spec, normalizedHistory);
     const rawModelResponse = await timeit(reportTimeElapsedMs, callModel)(
