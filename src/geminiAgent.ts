@@ -237,7 +237,7 @@ export const stripExpiredFile = (
   };
 };
 
-const modelCallTimeoutMs = 90_000;
+const modelCallTimeoutMs = 180_000;
 
 const errorDetails = (error: unknown) => {
   const status = (error && typeof error === "object" && "status" in error)
