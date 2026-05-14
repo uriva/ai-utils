@@ -76,7 +76,13 @@ runForAllProviders(
     );
     assert(
       !dumpResult.result.includes(needle),
-      "spill notice must not contain the needle (the blob was spilled, not inlined)",
+      "needle lives past the preview window, so it must not appear in the spill result (would defeat the spill test)",
+    );
+    assert(
+      dumpResult.result.includes("line 1: lorem ipsum"),
+      `spill result should inline the first chunk as a preview. Got: ${
+        dumpResult.result.slice(0, 300)
+      }`,
     );
     assert(
       dumpResult.result.includes(`${readScratchFileToolName}({id:`),

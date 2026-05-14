@@ -51,10 +51,24 @@ const scratchPadSpillNotice = (
   id: string,
   totalLines: number,
   totalChars: number,
+  previewLines: number,
 ): string =>
-  `[Tool output was large (${totalChars} chars, ${totalLines} lines) and was written to scratch pad with id "${id}". Read it with ${readScratchFileToolName}({id: "${id}"}) for the first ${maxScratchReadLines} lines, ${readScratchFileToolName}({id: "${id}", startLine: ${
-    maxScratchReadLines + 1
-  }}) for the next page, or ${readScratchFileToolName}({id: "${id}", grep: "<regex>"}) to filter.]`;
+  `[Tool output was large (${totalChars} chars, ${totalLines} lines). First ${previewLines} lines shown above; full output written to scratch pad with id "${id}". Read more with ${readScratchFileToolName}({id: "${id}", startLine: ${
+    previewLines + 1
+  }}) for the next page, or ${readScratchFileToolName}({id: "${id}", grep: "<regex>"}) to filter. If the preview already answered your question, no further read is needed.]`;
+
+const sliceFirstChunk = (
+  content: string,
+  maxChars: number,
+): { preview: string; previewLines: number } => {
+  if (content.length <= maxChars) {
+    return { preview: content, previewLines: countLines(content) };
+  }
+  const truncated = content.slice(0, maxChars);
+  const lastNewline = truncated.lastIndexOf("\n");
+  const preview = lastNewline > 0 ? truncated.slice(0, lastNewline) : truncated;
+  return { preview, previewLines: countLines(preview) };
+};
 
 const scratchPadReadHeader = (
   id: string,
@@ -704,10 +718,16 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
     rawText.length > threshold;
   if (shouldSpill) {
     await scratchPad.set(toolCallId, rawText);
+    const { preview, previewLines } = sliceFirstChunk(rawText, threshold);
     return {
       toolCallId,
-      result: prefix +
-        scratchPadSpillNotice(toolCallId, countLines(rawText), rawText.length),
+      result: prefix + preview + "\n" +
+        scratchPadSpillNotice(
+          toolCallId,
+          countLines(rawText),
+          rawText.length,
+          previewLines,
+        ),
       attachments,
     };
   }
