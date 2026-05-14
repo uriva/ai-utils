@@ -1179,10 +1179,16 @@ export const tool = <ParametersSchema extends z.ZodObject<z.ZodRawShape>>(
 
 // deno-lint-ignore no-explicit-any
 export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
+  const bareToolName = (skillName: string, toolName: string) =>
+    toolName.startsWith(`${skillName}/`)
+      ? toolName.slice(skillName.length + 1)
+      : toolName;
   const skillMap = Object.fromEntries(skills.map((s) => [s.name, s]));
   const toolMap = Object.fromEntries(
     skills.flatMap((skill) =>
-      skill.tools.map((tool) => [`${skill.name}/${tool.name}`, tool])
+      skill.tools.map((
+        tool,
+      ) => [`${skill.name}/${bareToolName(skill.name, tool.name)}`, tool])
     ),
   );
   const skillNames = skills.map((s) => s.name).join(", ");

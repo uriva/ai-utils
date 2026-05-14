@@ -137,6 +137,38 @@ Deno.test(
 );
 
 Deno.test(
+  "skills: run_command handles tool names that include the skill prefix",
+  async () => {
+    let calledWith = "";
+    const prefixedTool = tool({
+      name: "browser/create",
+      description: "Create browser",
+      parameters: z.object({}),
+      handler: () => {
+        calledWith = "create";
+        return Promise.resolve("session_id: abc");
+      },
+    });
+    const skillTools = createSkillTools([{
+      name: "browser",
+      description: "Browser",
+      instructions: "Use it",
+      tools: [prefixedTool],
+    }]);
+    const runCommandTool = skillTools.find((t) =>
+      t.name === runCommandToolName
+    );
+    if (!runCommandTool) throw new Error("run_command not found");
+    const result = await runCommandTool.handler(
+      { command: "browser/create", params: {} },
+      "test-call-id",
+    );
+    assertEquals(calledWith, "create");
+    assertEquals(result, "session_id: abc");
+  },
+);
+
+Deno.test(
   `skills: ${learnSkillToolName} returns actual skill details`,
   async () => {
     const weatherSkill = {
