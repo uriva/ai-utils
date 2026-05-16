@@ -53,9 +53,9 @@ const scratchPadSpillNotice = (
   totalChars: number,
   previewLines: number,
 ): string =>
-  `[Tool output was large (${totalChars} chars, ${totalLines} lines). First ${previewLines} lines shown above; full output written to scratch pad with id "${id}". Read more with ${readScratchFileToolName}({id: "${id}", startLine: ${
+  `Tool output was too large (${totalChars} chars, ${totalLines} lines). Only the first ${previewLines} lines are shown above. Call ${readScratchFileToolName}({id: "${id}", startLine: ${
     previewLines + 1
-  }}) for the next page, or ${readScratchFileToolName}({id: "${id}", grep: "<regex>"}) to filter. If the preview already answered your question, no further read is needed.]`;
+  }}) to read the next ${maxScratchReadLines} lines. Keep calling it with startLine incremented until you have the full output. If you only need specific info, use ${readScratchFileToolName}({id: "${id}", grep: "<regex>"}) to filter.`;
 
 const sliceFirstChunk = (
   content: string,
@@ -714,6 +714,7 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
   const threshold = scratchPad?.threshold ?? defaultScratchPadThreshold;
   const shouldSpill = scratchPad !== undefined &&
     name !== readScratchFileToolName &&
+    name !== learnSkillToolName &&
     toolCallId !== undefined &&
     rawText.length > threshold;
   if (shouldSpill) {
@@ -721,7 +722,7 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
     const { preview, previewLines } = sliceFirstChunk(rawText, threshold);
     return {
       toolCallId,
-      result: prefix + preview + "\n" +
+      result: prefix + preview + "\n\n" +
         scratchPadSpillNotice(
           toolCallId,
           countLines(rawText),
