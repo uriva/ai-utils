@@ -66,7 +66,8 @@ runForAllProviders(
 
     const dumpResult = mockHistory.find(
       (e): e is Extract<HistoryEvent, { type: "tool_result" }> =>
-        e.type === "tool_result" && e.result.includes("scratch pad with id"),
+        e.type === "tool_result" &&
+        e.result.includes("Tool output was too large"),
     );
     assert(
       dumpResult,
