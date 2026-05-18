@@ -133,3 +133,20 @@ Deno.test("coerceArgs preserves correctly placed keys at top level", () => {
   assertEquals(args, { query: { name: "x" }, timeout: 5 });
   assertEquals(corrections.length, 1);
 });
+
+Deno.test("coerceArgs nests flat title under query for video source schema", () => {
+  const schema = schemaOf(
+    z.object({
+      query: z.object({
+        title: z.string().nullable().optional(),
+        year: z.number().nullable().optional(),
+        season: z.number().nullable().optional(),
+      }),
+    }),
+  );
+  const { args, corrections } = coerceArgs(schema, {
+    title: "Never Let Me Go",
+  });
+  assertEquals(args, { query: { title: "Never Let Me Go" } });
+  assertEquals(corrections.length, 1);
+});
