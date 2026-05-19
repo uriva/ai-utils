@@ -2,6 +2,15 @@
 
 Never fix quality issue without first a reproducing test.
 
+When reproducing a hallucination or quality regression, target the **first
+failure point in history** — the earliest turn where the model emits the bad
+behavior. Do not try to reproduce the downstream cascade (the bot trusting its
+own prior fabrication, the user noticing, the retraction loop). Catch the
+hallucination at its core: the single turn where an unverified claim, a
+fabricated entity, or an unsupported specific first enters history. Shorter
+repros are sharper, more deterministic, and isolate the actual defect from
+everything that piles on top of it.
+
 To run the tests with the required env vars consult the deno task "test" in the
 `deno.json` file.
 
