@@ -17,7 +17,13 @@ Deno.test(
   async () => {
     const huge = Array.from(
       { length: 8 },
-      (_, i) => `Section ${i + 1}.\n${"lorem ipsum ".repeat(120)}`,
+      (_, i) =>
+        `Section ${i + 1}.\n${
+          Array.from(
+            { length: 120 },
+            (_, j) => `word-${i}-${j}`,
+          ).join(" ")
+        }`,
     ).join("\n\n");
     assert(huge.length > maxUtteranceChars);
 
