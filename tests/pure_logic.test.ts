@@ -382,7 +382,7 @@ Deno.test("tool_call with empty thoughtSignature omits field from API request", 
       result: "done",
     },
   ];
-  const req = buildReq(false, true, "prompt", [], "UTC", undefined)(events);
+  const req = buildReq(true, "prompt", [], "UTC", undefined)(events);
   const contents = req.contents as Content[];
   const modelContents = contents.filter((c: Content) => c.role === "model");
   for (const content of modelContents) {
@@ -431,7 +431,7 @@ Deno.test("tool_call with non-empty thoughtSignature preserves it in API request
       result: "done",
     },
   ];
-  const req = buildReq(false, true, "prompt", [], "UTC", undefined)(events);
+  const req = buildReq(true, "prompt", [], "UTC", undefined)(events);
   const contents = req.contents as Content[];
   const modelContents = contents.filter((c: Content) => c.role === "model");
   let foundFc = false;

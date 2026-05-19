@@ -4,7 +4,6 @@ import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
 import {
   agentDeps,
   b64,
-  findTextualAnswer,
   noopRewriteHistory,
   recognizedTheDog,
   runForAllProviders,

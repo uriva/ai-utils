@@ -43,7 +43,7 @@ Deno.test(
       },
     ];
 
-    const req = buildReq(false, false, "system prompt", [], "UTC", undefined)(
+    const req = buildReq(false, "system prompt", [], "UTC", undefined)(
       history,
     );
 
@@ -99,7 +99,7 @@ Deno.test(
       },
     ];
 
-    const req = buildReq(false, false, "system prompt", [], "UTC", undefined)(
+    const req = buildReq(false, "system prompt", [], "UTC", undefined)(
       history,
     );
 
@@ -131,7 +131,7 @@ Deno.test(
       syntheticThought,
     ];
 
-    const req = buildReq(false, false, "system prompt", [], "UTC", undefined)(
+    const req = buildReq(false, "system prompt", [], "UTC", undefined)(
       history,
     );
 
