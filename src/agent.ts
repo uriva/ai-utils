@@ -611,9 +611,10 @@ const toolNotFoundMessage = (
   name: string,
   // deno-lint-ignore no-explicit-any
   actions: Tool<any>[],
-  skillNames: string[],
+  skills: Skill[],
 ): string => {
   const names = actions.map((a) => a.name);
+  const skillNames = skills.map((s) => s.name);
   const suggestion = closestName(name, [...names, ...skillNames]);
   const suggestionText = suggestion ? ` Did you mean "${suggestion}"?` : "";
   const list = nonempty(names) ? names.join(", ") : "(none registered)";
@@ -682,10 +683,20 @@ const formatZodIssues = (
     return hint ? `${base} (expected ${hint})` : base;
   }).join(", ");
 
+const resolveUnambiguousBareName = (
+  name: string,
+  skills: Skill[],
+): string | undefined => {
+  const matches = skills.flatMap((s) =>
+    s.tools.filter((t) => t.name === name).map(() => `${s.name}/${name}`)
+  );
+  return matches.length === 1 ? matches[0] : undefined;
+};
+
 export const callToResult = (
   // deno-lint-ignore no-explicit-any
   actions: Tool<any>[],
-  skillNames: string[] = [],
+  skills: Skill[] = [],
   scratchPad?: ToolOutputScratchPad,
 ) =>
 async <T extends ZodType>(fc: FunctionCall): Promise<
@@ -702,8 +713,13 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
   const directMatch: Tool<T> | undefined = actions.find((
     { name: n },
   ) => n === name);
-  const isSkillCall = !directMatch &&
+  const slashSkillCall = !directMatch &&
     (name.includes("/") || name.includes(":"));
+  const unambiguousBare = !directMatch && !slashSkillCall
+    ? resolveUnambiguousBareName(name, skills)
+    : undefined;
+  const isSkillCall = slashSkillCall || unambiguousBare !== undefined;
+  const skillCommand = unambiguousBare ?? name;
   const [action, effectiveArgs] = directMatch
     ? [directMatch, args]
     : isSkillCall
@@ -711,14 +727,14 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
       actions.find(({ name: n }) => n === runCommandToolName) as
         | Tool<T>
         | undefined,
-      { command: name, params: args },
+      { command: skillCommand, params: args },
     ]
     : [undefined, args];
   if (!action) {
     reportToolNotFound(name);
     return {
       toolCallId,
-      result: toolNotFoundMessage(name, actions, skillNames),
+      result: toolNotFoundMessage(name, actions, skills),
     };
   }
   const { handler, parameters } = action;
@@ -1172,7 +1188,7 @@ export const handleFunctionCalls = (
   // deno-lint-ignore no-explicit-any
   tools: Tool<any>[],
   onToolResult?: (event: HistoryEvent) => void,
-  skillNames: string[] = [],
+  skills: Skill[] = [],
   scratchPad?: ToolOutputScratchPad,
 ) =>
 async (output: HistoryEvent[]): Promise<boolean> => {
@@ -1188,7 +1204,7 @@ async (output: HistoryEvent[]): Promise<boolean> => {
       return;
     }
     const fc: FunctionCall = { name: t.name, args: t.parameters, id: t.id };
-    const callResult = await callToResult(tools, skillNames, scratchPad)(fc);
+    const callResult = await callToResult(tools, skills, scratchPad)(fc);
     if (callResult === undefined) {
       hadDeferred = true;
       return;
@@ -1390,7 +1406,7 @@ export const runAbstractAgent = async (
   const allTools = skills && skills.length > 0
     ? [...tools, ...createSkillTools(skills)]
     : tools;
-  const skillNames = (skills ?? []).map((s) => s.name);
+  const skillsArr = skills ?? [];
   let c = 0;
   let emojiFloodRetries = 0;
   let repetitionFloodRetries = 0;
@@ -1458,7 +1474,7 @@ export const runAbstractAgent = async (
       const hadDeferred = await handleFunctionCalls(
         allTools,
         undefined,
-        skillNames,
+        skillsArr,
         scratchPad,
       )(emit);
       if (hadDeferred) return;
