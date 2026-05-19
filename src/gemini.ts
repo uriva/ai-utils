@@ -4,6 +4,7 @@ import {
   type GenerateContentParameters,
   GoogleGenAI,
   type Part,
+  ThinkingLevel,
 } from "@google/genai";
 import { context, type Injection, type Injector } from "@uri/inject";
 import { coerce, conditionalRetry, empty, map, pipe, remove } from "gamla";
@@ -84,10 +85,15 @@ const openAiToGeminiMessage = pipe(
   remove(({ parts }: Content) => empty(parts ?? [])),
 );
 
-export const geminiProVersion = "gemini-3.1-pro-preview";
+export const geminiProVersion = "gemini-3.5-flash";
 export const geminiFlashVersion = "gemini-3.5-flash";
 export const geminiFlashImageVersion = "gemini-2.5-flash-image";
 export const geminiProImageVersion = "gemini-3-pro-image-preview";
+
+export const geminiThinkingConfig = (mini: boolean | undefined) => ({
+  includeThoughts: true,
+  thinkingLevel: mini ? ThinkingLevel.MEDIUM : ThinkingLevel.HIGH,
+});
 
 export const geminiGenJsonFromConvo: <T extends ZodType>(
   { mini, maxOutputTokens }: ModelOpts,
@@ -110,6 +116,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
       config: {
         responseMimeType: "application/json",
         responseSchema: zodToGeminiParameters(zodType),
+        thinkingConfig: geminiThinkingConfig(mini),
         ...(maxOutputTokens ? { maxOutputTokens } : {}),
       },
       contents: pipe(openAiToGeminiMessage)(messages),
@@ -147,6 +154,7 @@ export const geminiGenText = async (
     apiKey: tokenInjection.access(),
   }).models.generateContent({
     model: mini ? geminiFlashVersion : geminiProVersion,
+    config: { thinkingConfig: geminiThinkingConfig(mini) },
     contents: [{
       role: "user",
       parts: [...attachmentsToParts(attachments), { text: prompt }],

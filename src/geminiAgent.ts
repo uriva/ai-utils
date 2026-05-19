@@ -5,7 +5,6 @@ import {
   type GenerateContentResponseUsageMetadata,
   GoogleGenAI,
   type Part,
-  ThinkingLevel,
 } from "@google/genai";
 import { context, type Injection } from "@uri/inject";
 import {
@@ -51,6 +50,7 @@ import {
   geminiFlashVersion,
   geminiProImageVersion,
   geminiProVersion,
+  geminiThinkingConfig,
   isGeminiFileUri,
   zodToGeminiParameters,
 } from "./gemini.ts";
@@ -622,6 +622,7 @@ const historyEventToContent = (
     return wrapModelContent([{
       ...optionalThoughtSignature(e.modelMetadata?.thoughtSignature),
       functionCall: {
+        id: e.id,
         name: e.name,
         args: isRecord(e.parameters) ? e.parameters : {},
       },
@@ -633,6 +634,7 @@ const historyEventToContent = (
     const parts: Part[] = [
       {
         functionResponse: {
+          id: e.toolCallId,
           name,
           response: {
             result: stampText(
@@ -732,7 +734,7 @@ export const buildReq = (
     systemInstruction: prompt,
     tools: [{ functionDeclarations: tools.map(actionToTool) }],
     toolConfig: { functionCallingConfig: {} },
-    thinkingConfig: { includeThoughts: true, thinkingLevel: ThinkingLevel.LOW },
+    thinkingConfig: geminiThinkingConfig(lightModel),
     ...(maxOutputTokens ? { maxOutputTokens } : {}),
   },
   contents: pipe(
