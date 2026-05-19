@@ -632,6 +632,56 @@ export const correctionPrefix = (corrections: string[]): string =>
       corrections.join("; ")
     }. Use the canonical shape next time.]\n\n`;
 
+// deno-lint-ignore no-explicit-any
+const schemaAtPath = (schema: any, path: string[]): any => {
+  let cursor = schema;
+  for (const seg of path) {
+    if (!cursor || typeof cursor !== "object") return undefined;
+    if (cursor.properties && seg in cursor.properties) {
+      cursor = cursor.properties[seg];
+    } else if (Array.isArray(cursor.anyOf)) {
+      // deno-lint-ignore no-explicit-any
+      const branch = cursor.anyOf.find((b: any) =>
+        b.properties && seg in b.properties
+      );
+      cursor = branch ? branch.properties[seg] : undefined;
+    } else {
+      return undefined;
+    }
+    if (!cursor) return undefined;
+  }
+  return cursor;
+};
+
+// deno-lint-ignore no-explicit-any
+const objectSchemaHint = (schemaNode: any): string | undefined => {
+  if (!schemaNode || typeof schemaNode !== "object") return undefined;
+  const props = schemaNode.properties ?? schemaNode.shape;
+  if (!props || typeof props !== "object") return undefined;
+  const required = new Set(schemaNode.required ?? []);
+  // deno-lint-ignore no-explicit-any
+  const fields = Object.entries(props).map(([k, v]: [string, any]) => {
+    const isRequired = required.has(k);
+    const typeStr = Array.isArray(v.type) ? v.type.join("|") : v.type;
+    return `${k}${isRequired ? "" : "?"}: ${typeStr ?? "any"}`;
+  });
+  return `{ ${fields.join(", ")} }`;
+};
+
+const formatZodIssues = (
+  error: z.ZodError,
+  // deno-lint-ignore no-explicit-any
+  schema: any,
+): string =>
+  error.issues.map((issue) => {
+    const path = issue.path.join(".");
+    const base = `${path ? `${path}: ` : ""}${issue.message}`;
+    if (!issue.message.includes("expected object")) return base;
+    const pathStr = issue.path.map(String);
+    const hint = objectSchemaHint(schemaAtPath(schema, pathStr));
+    return hint ? `${base} (expected ${hint})` : base;
+  }).join(", ");
+
 export const callToResult = (
   // deno-lint-ignore no-explicit-any
   actions: Tool<any>[],
@@ -672,7 +722,8 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
     };
   }
   const { handler, parameters } = action;
-  const coerced = coerceArgs(z.toJSONSchema(parameters), effectiveArgs);
+  const jsonSchema = z.toJSONSchema(parameters);
+  const coerced = coerceArgs(jsonSchema, effectiveArgs);
   const prefix = correctionPrefix(coerced.corrections);
   const parseResult = parseWithCatch(parameters, coerced.args);
   if (!parseResult.ok) {
@@ -681,11 +732,7 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
       result: prefix +
         `Invalid arguments: ${
           parseResult.error instanceof z.ZodError
-            ? parseResult.error.issues
-              .map((i) =>
-                `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
-              )
-              .join(", ")
+            ? formatZodIssues(parseResult.error, jsonSchema)
             : parseResult.error.message
         }`,
     };
@@ -1224,16 +1271,15 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           ).join("\n");
           return `Tool "${toolName}" not found in skill "${skillName}".\n\nSkill "${skillName}" instructions:\n${skill.instructions}\n\nAvailable tools in this skill:\n${toolList}`;
         }
-        const coerced = coerceArgs(z.toJSONSchema(tool.parameters), params);
+        const toolJsonSchema = z.toJSONSchema(tool.parameters);
+        const coerced = coerceArgs(toolJsonSchema, params);
         const prefix = correctionPrefix(coerced.corrections);
         const parseResult = parseWithCatch(tool.parameters, coerced.args);
         if (!parseResult.ok) {
           return prefix +
             `Invalid parameters for ${fullToolName}: ${
               parseResult.error instanceof z.ZodError
-                ? parseResult.error.issues.map((i) =>
-                  `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
-                ).join(", ")
+                ? formatZodIssues(parseResult.error, toolJsonSchema)
                 : parseResult.error.message
             }`;
         }

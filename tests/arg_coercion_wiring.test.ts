@@ -21,6 +21,18 @@ const findEpisode = tool({
     ),
 });
 
+const getVideoSource = tool({
+  name: "get_best_video_source",
+  description: "get video source",
+  parameters: z.object({
+    query: z.object({
+      title: z.string(),
+      year: z.number().optional(),
+    }),
+  }),
+  handler: ({ query }) => Promise.resolve(`source for ${query.title}`),
+});
+
 Deno.test("callToResult coerces flat args into nested shape and prefixes the result", async () => {
   const out = await callToResult([findEpisode])({
     name: "find_episode",
@@ -113,5 +125,53 @@ Deno.test("run_command leaves canonical params alone", async () => {
   assertEquals(out.startsWith("[arguments auto-corrected"), false);
   if (!out.includes("found Lost s2e1")) {
     throw new Error(`expected handler output, got: ${out}`);
+  }
+});
+
+Deno.test("callToResult error includes expected object shape when string is passed for object", async () => {
+  const out = await callToResult([getVideoSource])({
+    name: "get_best_video_source",
+    args: { query: "Mrs. Doubtfire" },
+    id: "call-4",
+  });
+  if (!out) throw new Error("expected a result");
+  if (!out.result.includes("Invalid arguments")) {
+    throw new Error(`expected validation error, got: ${out.result}`);
+  }
+  if (!out.result.includes("expected object")) {
+    throw new Error(`expected object type hint, got: ${out.result}`);
+  }
+  if (!out.result.includes("title: string")) {
+    throw new Error(`expected field hint, got: ${out.result}`);
+  }
+});
+
+Deno.test("run_command error includes expected object shape when string is passed for object", async () => {
+  const skillTools = createSkillTools([
+    {
+      name: "video",
+      description: "video skill",
+      instructions: "x",
+      tools: [getVideoSource],
+    },
+  ]);
+  const runCommand = skillTools.find((t) => t.name === "run_command");
+  if (!runCommand) throw new Error("run_command missing");
+  const out = await runCommand.handler(
+    {
+      command: "video/get_best_video_source",
+      params: { query: "Mrs. Doubtfire" },
+    },
+    "call-id",
+  );
+  if (typeof out !== "string") throw new Error("expected string result");
+  if (!out.includes("Invalid parameters")) {
+    throw new Error(`expected validation error, got: ${out}`);
+  }
+  if (!out.includes("expected object")) {
+    throw new Error(`expected object type hint, got: ${out}`);
+  }
+  if (!out.includes("title: string")) {
+    throw new Error(`expected field hint, got: ${out}`);
   }
 });
