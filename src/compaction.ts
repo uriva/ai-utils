@@ -250,6 +250,12 @@ export const summarizeEvents = async (
       { mini: false },
       `Summarize the following conversation into structured sections. Write from the assistant's perspective. Be concise but preserve all important details, especially names, numbers, and specific facts that would be needed to continue the conversation.
 
+Critical anti-fabrication rules:
+- Use ONLY information that is explicitly present in the source events. Never introduce specific proper-noun entities (hotel names, person names, document titles, restaurant or landmark names, brand names, etc.) that the source did not state.
+- If the source refers to something generically (e.g. "the user's hotel", "the document she sent", "the second hotel near X", "the photography museum"), preserve that generic phrasing verbatim. Do NOT upgrade a generic reference into a specific name even if you can guess what it might be.
+- Any section may be empty or contain only generic descriptions. Empty/generic is strictly better than invented specifics. An empty section is a correct answer when the source contained no concrete items for it.
+- When in doubt about whether a name appeared in the source, leave it out.
+
 Important rules for Pending Items vs Abandoned Items:
 - If the user explicitly confirmed or rejected a proposal, note that in Decisions.
 - If the user moved on to a different topic or chose an alternative WITHOUT explicitly confirming or rejecting a proposal, treat the original proposal as ABANDONED (put it in Abandoned Items, not Pending Items).
