@@ -41,7 +41,6 @@ Deno.test(
     ];
 
     const reqBuilder = buildReq(
-      false, // imageGen
       false, // lightModel
       "system prompt",
       tools,

@@ -46,9 +46,7 @@ import {
   accessGeminiToken,
   attachmentsToParts,
   ensureGeminiAttachmentIsLink,
-  geminiFlashImageVersion,
   geminiFlashVersion,
-  geminiProImageVersion,
   geminiProVersion,
   geminiThinkingConfig,
   isGeminiFileUri,
@@ -121,10 +119,6 @@ const alternateModel = (model: string) =>
     ? geminiFlashVersion
     : model === geminiFlashVersion
     ? geminiProVersion
-    : model === geminiProImageVersion
-    ? geminiFlashImageVersion
-    : model === geminiFlashImageVersion
-    ? geminiProImageVersion
     : model;
 
 const geminiError: Injection<
@@ -719,7 +713,6 @@ const fixStart = (history: Content[]) =>
     : history;
 
 export const buildReq = (
-  imageGen: boolean | undefined,
   lightModel: boolean | undefined,
   prompt: string,
   tools: Tool<ZodType>[],
@@ -727,9 +720,7 @@ export const buildReq = (
   maxOutputTokens: number | undefined,
 ) =>
 (events: GeminiHistoryEvent[]): GenerateContentParameters => ({
-  model: imageGen
-    ? (lightModel ? geminiFlashImageVersion : geminiProImageVersion)
-    : (lightModel ? geminiFlashVersion : geminiProVersion),
+  model: lightModel ? geminiFlashVersion : geminiProVersion,
   config: {
     systemInstruction: prompt,
     tools: [{ functionDeclarations: tools.map(actionToTool) }],
@@ -1410,7 +1401,6 @@ const geminiAgentCallerInner = ({
   prompt,
   tools,
   skills,
-  imageGen,
   rewriteHistory,
   timezoneIANA,
   maxOutputTokens,
@@ -1428,7 +1418,6 @@ const geminiAgentCallerInner = ({
     callGeminiWithFixHistory(
       rewriteHistory,
       buildReq(
-        imageGen,
         lightModel,
         skills && skills.length > 0
           ? `${

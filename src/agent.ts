@@ -1352,7 +1352,6 @@ export type AgentSpec = {
   lightModel?: boolean;
   disableStreaming?: boolean;
   provider?: "google" | "moonshot" | "anthropic";
-  imageGen?: boolean;
   rewriteHistory: (replacements: Record<string, HistoryEvent>) => Promise<void>;
   compactHistory?: (history: HistoryEvent[]) => Promise<void>;
   historyCompactionTokenThreshold?: number;

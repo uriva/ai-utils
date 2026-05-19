@@ -4,7 +4,6 @@ import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
 import {
   agentDeps,
   b64,
-  collectAttachment,
   findTextualAnswer,
   noopRewriteHistory,
   recognizedTheDog,
@@ -13,72 +12,6 @@ import {
 
 const mentionsDogLikeContent = (text: string) =>
   /dog|retriever|puppy|canine|malinois/i.test(text);
-
-runForAllProviders(
-  "agent emits native image and separate agent verifies it",
-  async (runAgentWithProvider) => {
-    const generationHistory: HistoryEvent[] = [
-      participantUtteranceTurn({
-        name: "creator",
-        text:
-          "Produce a vibrant poster that displays the single word SUNRISE in bold orange letters. Create the image directly in your response and then briefly confirm what you rendered.",
-      }),
-    ];
-
-    await agentDeps(generationHistory)(runAgentWithProvider)({
-      maxIterations: 4,
-      onMaxIterationsReached: () => {},
-      tools: [],
-      prompt:
-        "You are a graphic designer who can emit inline images. When asked for a poster, respond with a PNG attachment via inline data that clearly shows the requested text, then acknowledge that text in plain language.",
-      imageGen: true,
-      rewriteHistory: noopRewriteHistory,
-      timezoneIANA: "UTC",
-    });
-
-    const attachment = collectAttachment(generationHistory);
-    assert(
-      attachment,
-      `Response should include an image attachment. Instead got ${
-        JSON.stringify(generationHistory)
-      }`,
-    );
-    assert(
-      attachment.mimeType?.startsWith("image/"),
-      `Expected image mime type, got ${attachment?.mimeType}`,
-    );
-
-    const verificationHistory: HistoryEvent[] = [
-      participantUtteranceTurn({
-        name: "inspector",
-        text:
-          "Inspect the attachment and reply with a sentence that repeats the exact word you see emblazoned on the poster.",
-        attachments: [attachment],
-      }),
-    ];
-
-    await agentDeps(verificationHistory)(runAgentWithProvider)({
-      maxIterations: 4,
-      onMaxIterationsReached: () => {},
-      tools: [],
-      prompt:
-        "You can read text from images. Double-check what the poster says and mention the word explicitly in your short reply.",
-      lightModel: true,
-      rewriteHistory: noopRewriteHistory,
-      timezoneIANA: "UTC",
-    });
-
-    const answer = findTextualAnswer(verificationHistory);
-    assert(answer, "Verification agent did not respond");
-    assert(
-      answer.text.trim().length > 0,
-      `Expected a non-empty verification response, got: ${answer.text}`,
-    );
-  },
-  3,
-  true,
-  false,
-);
 
 runForAllProviders(
   "tool inline attachment is forwarded to model",

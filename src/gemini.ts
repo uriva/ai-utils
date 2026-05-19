@@ -87,8 +87,6 @@ const openAiToGeminiMessage = pipe(
 
 export const geminiProVersion = "gemini-3.5-flash";
 export const geminiFlashVersion = "gemini-3.5-flash";
-export const geminiFlashImageVersion = "gemini-2.5-flash-image";
-export const geminiProImageVersion = "gemini-3-pro-image-preview";
 
 export const geminiThinkingConfig = (mini: boolean | undefined) => ({
   includeThoughts: true,
