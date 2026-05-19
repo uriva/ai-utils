@@ -12,9 +12,11 @@ import {
 } from "./src/agent.ts";
 import { anthropicAgentCaller } from "./src/anthropicAgent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
+import { createConsultTool } from "./src/consultTool.ts";
 import { geminiAgentCaller, prepareGeminiHistory } from "./src/geminiAgent.ts";
 import { inspectMediaUrlTool } from "./src/inspectMediaTool.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
+export { consultToolName } from "./src/consultTool.ts";
 export {
   appendInternalSentTimestamp,
   formatInternalSentTimestamp,
@@ -116,6 +118,11 @@ const resolveCallModel = (spec: AgentSpec): CallModel => {
 
 const builtinTools = [inspectMediaUrlTool];
 
+const consultBuiltin = (spec: AgentSpec) =>
+  spec.lightModel
+    ? [createConsultTool(resolveCallModel({ ...spec, lightModel: false }))]
+    : [];
+
 const addBuiltinTools = (spec: AgentSpec): AgentSpec => {
   const existingToolNames = new Set(spec.tools.map(({ name }) => name));
   const scratchTool = spec.toolOutputScratchPad
@@ -127,6 +134,9 @@ const addBuiltinTools = (spec: AgentSpec): AgentSpec => {
       ...spec.tools,
       ...builtinTools.filter(({ name }) => !existingToolNames.has(name)),
       ...scratchTool.filter(({ name }) => !existingToolNames.has(name)),
+      ...consultBuiltin(spec).filter(({ name }) =>
+        !existingToolNames.has(name)
+      ),
     ],
   };
 };
