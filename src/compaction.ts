@@ -204,6 +204,9 @@ const structuredSummarySchema = z.object({
   pendingItems: z.string().describe(
     "Open questions, unresolved requests, or next steps the user expects.",
   ),
+  abandonedItems: z.string().describe(
+    "Proposals, suggestions, or options that were raised but the user moved on from without confirming or rejecting. Include the specific name of the abandoned item and why it was not pursued.",
+  ),
   context: z.string().describe(
     "Any other important context needed to continue the conversation coherently.",
   ),
@@ -214,6 +217,7 @@ const formatStructuredSummary = ({
   decisions,
   actions,
   pendingItems,
+  abandonedItems,
   context,
 }: z.infer<typeof structuredSummarySchema>) =>
   [
@@ -231,6 +235,9 @@ const formatStructuredSummary = ({
     "## Pending Items",
     pendingItems,
     "",
+    "## Abandoned Items",
+    abandonedItems,
+    "",
     "## Context",
     context,
   ].join("\n");
@@ -241,7 +248,13 @@ export const summarizeEvents = async (
   formatStructuredSummary(
     await geminiGenJson(
       { mini: false },
-      `Summarize the following conversation into structured sections. Write from the assistant's perspective. Be concise but preserve all important details, especially names, numbers, and specific facts that would be needed to continue the conversation.`,
+      `Summarize the following conversation into structured sections. Write from the assistant's perspective. Be concise but preserve all important details, especially names, numbers, and specific facts that would be needed to continue the conversation.
+
+Important rules for Pending Items vs Abandoned Items:
+- If the user explicitly confirmed or rejected a proposal, note that in Decisions.
+- If the user moved on to a different topic or chose an alternative WITHOUT explicitly confirming or rejecting a proposal, treat the original proposal as ABANDONED (put it in Abandoned Items, not Pending Items).
+- Only put something in Pending Items if there is a clear open question, unresolved request, or next step the user still expects.
+- Never keep a specific proposal as pending just because the user did not explicitly say no to it.`,
       structuredSummarySchema,
     )(eventsToPlainText(events)),
   );

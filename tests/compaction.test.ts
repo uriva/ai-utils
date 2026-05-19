@@ -6,7 +6,9 @@ import {
   groupToolCallPairs,
   partitionSegments,
   segmentHistoryEvents,
+  summarizeEvents,
 } from "../src/compaction.ts";
+import { injectSecrets, llmTest } from "../test_helpers.ts";
 
 const makeOwnUtterance = (
   text: string,
@@ -397,6 +399,260 @@ Deno.test("segmentation never splits non-adjacent tool_call from its tool_result
     }
   }
 });
+
+llmTest(
+  "summarizeEvents excludes implicitly rejected proposals from pending items",
+  injectSecrets(async () => {
+    const base = Date.now();
+    const events: HistoryEvent[] = [
+      makeParticipantUtterance("I need a hotel for my trip", base),
+      makeOwnUtterance(
+        "I recommend the Grand Plaza Hotel. It has excellent reviews and a central location.",
+        base + 1000,
+      ),
+      makeParticipantUtterance(
+        "What else is available?",
+        base + 2000,
+      ),
+      makeOwnUtterance(
+        "Another option is the Seaside Resort with ocean views, or the Artisan Inn which is a boutique hotel in the old town.",
+        base + 3000,
+      ),
+      makeParticipantUtterance(
+        "The Artisan Inn sounds perfect. Let's book that.",
+        base + 4000,
+      ),
+      makeOwnUtterance(
+        "Excellent choice! The Artisan Inn is booked for you.",
+        base + 5000,
+      ),
+    ];
+
+    const summary = await summarizeEvents(events);
+    console.log("Summary:\n", summary);
+
+    const pendingMatch = summary.match(/## Pending Items\n([\s\S]*?)(?=## |$)/);
+    const pendingSection = pendingMatch ? pendingMatch[1] : "";
+
+    assertEquals(
+      pendingSection.toLowerCase().includes("grand plaza"),
+      false,
+      `Rejected proposal 'Grand Plaza Hotel' should not appear in Pending Items.\nFull summary:\n${summary}`,
+    );
+  }),
+);
+
+llmTest(
+  "summarizeEvents excludes abandoned proposals when user complains and moves on",
+  injectSecrets(async () => {
+    const base = Date.now();
+    const events: HistoryEvent[] = [
+      makeParticipantUtterance("I need a hotel for my trip", base),
+      makeOwnUtterance(
+        "I recommend the Grand Plaza Hotel. It has excellent reviews and a central location.",
+        base + 1000,
+      ),
+      makeParticipantUtterance(
+        "Can you tell me about the neighborhood?",
+        base + 2000,
+      ),
+      makeOwnUtterance(
+        "The Grand Plaza is near the central station. From there you can take the blue line to the museum district in about 10 minutes. The walk from the hotel to the station is roughly 5 minutes.",
+        base + 3000,
+      ),
+      makeParticipantUtterance(
+        "Please stop repeating the same transit details, I already understood that",
+        base + 4000,
+      ),
+      makeOwnUtterance(
+        "Sorry about that! Let me focus on what you actually need.",
+        base + 5000,
+      ),
+      makeParticipantUtterance(
+        "What about boutique options?",
+        base + 6000,
+      ),
+      makeOwnUtterance(
+        "The Artisan Inn is a lovely boutique hotel in the old town with unique rooms.",
+        base + 7000,
+      ),
+      makeParticipantUtterance(
+        "The Artisan Inn sounds perfect. Let's book that.",
+        base + 8000,
+      ),
+      makeOwnUtterance(
+        "Excellent choice! The Artisan Inn is confirmed for your dates.",
+        base + 9000,
+      ),
+    ];
+
+    const summary = await summarizeEvents(events);
+    console.log("Summary:\n", summary);
+
+    const pendingMatch = summary.match(/## Pending Items\n([\s\S]*?)(?=## |$)/);
+    const pendingSection = pendingMatch ? pendingMatch[1] : "";
+
+    assertEquals(
+      pendingSection.toLowerCase().includes("grand plaza"),
+      false,
+      `Abandoned proposal 'Grand Plaza Hotel' should not appear in Pending Items after user complained and chose an alternative.\nFull summary:\n${summary}`,
+    );
+  }),
+);
+
+llmTest(
+  "summarizeEvents marks implicitly rejected items as abandoned when user moves on without explicit no",
+  injectSecrets(async () => {
+    const base = Date.now();
+    const events: HistoryEvent[] = [
+      makeParticipantUtterance(
+        "I need hotels for two parts of my trip. First, somewhere for the beginning.",
+        base,
+      ),
+      makeOwnUtterance(
+        "For the first part, I recommend the Grand Plaza Hotel. It has excellent reviews and a central location.",
+        base + 1000,
+      ),
+      makeParticipantUtterance(
+        "Okay noted. Now what about the second part of the trip?",
+        base + 2000,
+      ),
+      makeOwnUtterance(
+        "For the second part, the Seaside Resort has beautiful ocean views.",
+        base + 3000,
+      ),
+      makeParticipantUtterance(
+        "The Seaside Resort looks great, let's book it.",
+        base + 4000,
+      ),
+      makeOwnUtterance(
+        "Excellent! The Seaside Resort is booked for the second part.",
+        base + 5000,
+      ),
+    ];
+
+    const summary = await summarizeEvents(events);
+    console.log("Summary:\n", summary);
+
+    const pendingMatch = summary.match(/## Pending Items\n([\s\S]*?)(?=## |$)/);
+    const pendingSection = pendingMatch ? pendingMatch[1] : "";
+
+    assertEquals(
+      pendingSection.toLowerCase().includes("grand plaza"),
+      false,
+      `Implicitly rejected proposal 'Grand Plaza Hotel' should not appear in Pending Items when user moved on to alternatives without explicitly saying no.\nFull summary:\n${summary}`,
+    );
+  }),
+);
+
+llmTest(
+  "summarizeEvents does not list a specific rejected hotel as pending when user complains and switches segments",
+  injectSecrets(async () => {
+    const base = Date.now();
+    const events: HistoryEvent[] = [
+      makeParticipantUtterance(
+        "I need a hotel for the first part of my trip.",
+        base,
+      ),
+      makeOwnUtterance(
+        "I recommend the Grand Plaza Hotel. It has excellent reviews and a central location near the main station.",
+        base + 1000,
+      ),
+      makeParticipantUtterance(
+        "Tell me about getting around from there.",
+        base + 2000,
+      ),
+      makeOwnUtterance(
+        "From the Grand Plaza you can take the blue line to the museum district in about 10 minutes. The walk to the station is roughly 5 minutes through the shopping arcade.",
+        base + 3000,
+      ),
+      makeParticipantUtterance(
+        "Stop repeating the same transit info please",
+        base + 4000,
+      ),
+      makeOwnUtterance(
+        "Sorry about that! I'll stop repeating those details.",
+        base + 5000,
+      ),
+      makeParticipantUtterance(
+        "Let's talk about the second part of the trip. What do you recommend?",
+        base + 6000,
+      ),
+      makeOwnUtterance(
+        "For the second part, the Seaside Resort has beautiful ocean views and a private beach.",
+        base + 7000,
+      ),
+      makeParticipantUtterance(
+        "Perfect, book the Seaside Resort for the second part.",
+        base + 8000,
+      ),
+      makeOwnUtterance(
+        "Done! The Seaside Resort is confirmed for the second part of your trip.",
+        base + 9000,
+      ),
+    ];
+
+    const summary = await summarizeEvents(events);
+    console.log("Summary:\n", summary);
+
+    const pendingMatch = summary.match(/## Pending Items\n([\s\S]*?)(?=## |$)/);
+    const pendingSection = pendingMatch ? pendingMatch[1] : "";
+
+    assertEquals(
+      pendingSection.toLowerCase().includes("grand plaza"),
+      false,
+      `Specific rejected hotel 'Grand Plaza Hotel' should not appear in Pending Items after user complained and switched to a different trip segment.\nFull summary:\n${summary}`,
+    );
+  }),
+);
+
+llmTest(
+  "summarizeEvents marks proposal as abandoned when user moves on without confirming or rejecting it",
+  injectSecrets(async () => {
+    const base = Date.now();
+    const events: HistoryEvent[] = [
+      makeParticipantUtterance(
+        "I need a hotel for the first part of my trip.",
+        base,
+      ),
+      makeOwnUtterance(
+        "I recommend the Grand Plaza Hotel. It has excellent reviews.",
+        base + 1000,
+      ),
+      makeParticipantUtterance(
+        "Okay I'll think about it. Now what about the second part?",
+        base + 2000,
+      ),
+      makeOwnUtterance(
+        "For the second part, the Seaside Resort has beautiful ocean views.",
+        base + 3000,
+      ),
+      makeParticipantUtterance(
+        "The Seaside Resort looks great, let's book it.",
+        base + 4000,
+      ),
+      makeOwnUtterance(
+        "Excellent! The Seaside Resort is booked for the second part.",
+        base + 5000,
+      ),
+    ];
+
+    const summary = await summarizeEvents(events);
+    console.log("Summary:\n", summary);
+
+    const pendingMatch = summary.match(/## Pending Items\n([\s\S]*?)(?=## |$)/);
+    const pendingSection = pendingMatch ? pendingMatch[1] : "";
+
+    // When a proposal was made but the user moved on to a different topic
+    // without confirming or rejecting it, the specific proposal should be
+    // treated as abandoned, not kept as pending.
+    assertEquals(
+      pendingSection.toLowerCase().includes("grand plaza"),
+      false,
+      `Proposal 'Grand Plaza Hotel' should be treated as abandoned when user moved on without confirming or rejecting it.\nFull summary:\n${summary}`,
+    );
+  }),
+);
 
 Deno.test("trimming within single segment respects tool_call/tool_result atomicity", () => {
   const base = Date.now();
