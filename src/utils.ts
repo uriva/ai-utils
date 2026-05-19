@@ -50,3 +50,8 @@ const maxEmojis = 100;
 
 export const isEmojiFlood = (text: string) =>
   (text.match(emojiPattern)?.length ?? 0) > maxEmojis;
+
+const repetitionFloodPattern = /(.{1,15}?)\1{29,}/s;
+
+export const isRepetitionFlood = (text: string) =>
+  repetitionFloodPattern.test(text);

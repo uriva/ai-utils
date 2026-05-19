@@ -7,7 +7,7 @@ import {
   hasInternalSentTimestampSuffix,
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
-import { isEmojiFlood } from "./utils.ts";
+import { isEmojiFlood, isRepetitionFlood } from "./utils.ts";
 export type MediaAttachment =
   | { kind: "inline"; mimeType: string; dataBase64: string; caption?: string }
   | { kind: "file"; mimeType: string; fileUri: string; caption?: string };
@@ -1354,7 +1354,12 @@ export type AgentSpec = {
 const hasEmojiFlood = (events: HistoryEvent[]) =>
   events.some((e) => e.type === "own_utterance" && isEmojiFlood(e.text));
 
+const hasRepetitionFlood = (events: HistoryEvent[]) =>
+  events.some((e) => e.type === "own_utterance" && isRepetitionFlood(e.text));
+
 const maxEmojiFloodRetries = 3;
+
+const maxRepetitionFloodRetries = 3;
 
 const maxTruncationRetries = 2;
 
@@ -1388,6 +1393,7 @@ export const runAbstractAgent = async (
   const skillNames = (skills ?? []).map((s) => s.name);
   let c = 0;
   let emojiFloodRetries = 0;
+  let repetitionFloodRetries = 0;
   let truncationRetries = 0;
   let ephemeralHistory: HistoryEvent[] = [];
   while (true) {
@@ -1415,6 +1421,16 @@ export const runAbstractAgent = async (
       );
       if (emojiFloodRetries >= maxEmojiFloodRetries) {
         throw new Error("model keeps producing emoji flood responses");
+      }
+      continue;
+    }
+    if (hasRepetitionFlood(rawModelResponse)) {
+      repetitionFloodRetries++;
+      console.warn(
+        `[repetition-flood] detected repetition flood in model response (attempt ${repetitionFloodRetries}/${maxRepetitionFloodRetries})`,
+      );
+      if (repetitionFloodRetries >= maxRepetitionFloodRetries) {
+        throw new Error("model keeps producing repetition flood responses");
       }
       continue;
     }

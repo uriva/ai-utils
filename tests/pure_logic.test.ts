@@ -21,6 +21,7 @@ import {
 } from "../src/geminiAgent.ts";
 import {
   isEmojiFlood,
+  isRepetitionFlood,
   isRetryableError,
   isSyntheticTimeoutError,
   syntheticTimeoutMarker,
@@ -523,6 +524,126 @@ Deno.test(
           timestamp: Date.now(),
           isOwn: true as const,
           text: "🤖".repeat(200),
+        }]);
+      }
+      return Promise.resolve([{
+        type: "own_utterance" as const,
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        isOwn: true as const,
+        text: "A normal response",
+      }]);
+    };
+
+    await injectAccessHistory(() => Promise.resolve(history))(
+      injectOutputEvent((event) => {
+        history.push(event);
+        return Promise.resolve();
+      })(runAbstractAgent),
+    )(
+      {
+        maxIterations: 10,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        prompt: "test",
+        rewriteHistory: async () => {},
+        timezoneIANA: "UTC",
+      },
+      mockCallModel,
+    );
+
+    assertEquals(callCount, 3, "should have called model 3 times");
+    assertEquals(history.length, 1, "should have emitted the normal response");
+    const emitted = history[0];
+    assertEquals(emitted.type, "own_utterance");
+    if (emitted.type === "own_utterance") {
+      assertEquals(emitted.text, "A normal response");
+    }
+  },
+);
+
+Deno.test("isRepetitionFlood returns false for normal text", () => {
+  assertEquals(isRepetitionFlood("Hello world! This is normal text."), false);
+  assertEquals(isRepetitionFlood("ha ha ha ha ha"), false);
+  assertEquals(isRepetitionFlood("yes yes yes"), false);
+});
+
+Deno.test("isRepetitionFlood returns true for </u> flood", () => {
+  const flood = "Some text " + "</u>".repeat(70);
+  assertEquals(isRepetitionFlood(flood), true);
+});
+
+Deno.test("isRepetitionFlood returns true for varied repeated tokens", () => {
+  assertEquals(isRepetitionFlood("</b>".repeat(50)), true);
+  assertEquals(isRepetitionFlood("ab".repeat(40)), true);
+  assertEquals(isRepetitionFlood("x".repeat(30)), true);
+});
+
+Deno.test("isRepetitionFlood boundary: exactly 30 reps triggers, 29 does not", () => {
+  assertEquals(isRepetitionFlood("</u>".repeat(30)), true);
+  assertEquals(isRepetitionFlood("</u>".repeat(29)), false);
+});
+
+Deno.test(
+  "repetition flood in model response causes retry and eventual throw",
+  async () => {
+    const history: HistoryEvent[] = [];
+    const repetitionFlood = "Hello " + "</u>".repeat(100);
+    let callCount = 0;
+
+    const mockCallModel = (_h: HistoryEvent[]): Promise<HistoryEvent[]> => {
+      callCount++;
+      return Promise.resolve([{
+        type: "own_utterance" as const,
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        isOwn: true as const,
+        text: repetitionFlood,
+      }]);
+    };
+
+    await assertRejects(
+      () =>
+        injectAccessHistory(() => Promise.resolve(history))(
+          injectOutputEvent((event) => {
+            history.push(event);
+            return Promise.resolve();
+          })(runAbstractAgent),
+        )(
+          {
+            maxIterations: 10,
+            onMaxIterationsReached: () => {},
+            tools: [],
+            prompt: "test",
+            rewriteHistory: async () => {},
+            timezoneIANA: "UTC",
+          },
+          mockCallModel,
+        ),
+      Error,
+      "model keeps producing repetition flood responses",
+    );
+
+    assertEquals(callCount, 3, "should have retried exactly 3 times");
+    assertEquals(history.length, 0, "no events should have been emitted");
+  },
+);
+
+Deno.test(
+  "repetition flood recovery: model succeeds after initial flood",
+  async () => {
+    const history: HistoryEvent[] = [];
+    let callCount = 0;
+
+    const mockCallModel = (_h: HistoryEvent[]): Promise<HistoryEvent[]> => {
+      callCount++;
+      if (callCount <= 2) {
+        return Promise.resolve([{
+          type: "own_utterance" as const,
+          id: crypto.randomUUID(),
+          timestamp: Date.now(),
+          isOwn: true as const,
+          text: "Hi " + "</u>".repeat(100),
         }]);
       }
       return Promise.resolve([{
