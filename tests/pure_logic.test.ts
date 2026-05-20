@@ -22,6 +22,11 @@ import {
   stripEmbeddedThoughtPatterns,
 } from "../src/geminiAgent.ts";
 import {
+  geminiFallbackVersion,
+  geminiFlashVersion,
+  geminiProVersion,
+} from "../src/gemini.ts";
+import {
   isEmojiFlood,
   isRepetitionFlood,
   isRetryableError,
@@ -1015,6 +1020,11 @@ Deno.test("isSyntheticTimeoutError marks errors that should skip same-model retr
   const timeout = buildSyntheticTimeoutError();
   assert(isSyntheticTimeoutError(timeout));
   assert(!isRetryableError(timeout));
+});
+
+Deno.test("Gemini timeout fallback model differs from primary models", () => {
+  assertEquals(new Set([geminiFallbackVersion, geminiFlashVersion]).size, 2);
+  assertEquals(new Set([geminiFallbackVersion, geminiProVersion]).size, 2);
 });
 
 Deno.test("Gemini MALFORMED_FUNCTION_CALL is retryable instead of do_nothing", () => {

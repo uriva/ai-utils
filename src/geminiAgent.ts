@@ -50,6 +50,7 @@ import {
   accessGeminiToken,
   attachmentsToParts,
   ensureGeminiAttachmentIsLink,
+  geminiFallbackVersion,
   geminiFlashVersion,
   geminiProVersion,
   geminiThinkingConfig,
@@ -120,9 +121,9 @@ const normalizeError = (error: unknown): Error => {
 
 const alternateModel = (model: string) =>
   model === geminiProVersion
-    ? geminiFlashVersion
+    ? geminiFallbackVersion
     : model === geminiFlashVersion
-    ? geminiProVersion
+    ? geminiFallbackVersion
     : model;
 
 const geminiError: Injection<
