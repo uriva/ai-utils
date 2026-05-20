@@ -48,11 +48,10 @@ import {
 } from "./agent.ts";
 import {
   accessGeminiToken,
+  alternateGeminiModelVersion,
   attachmentsToParts,
   ensureGeminiAttachmentIsLink,
-  geminiFallbackVersion,
-  geminiFlashVersion,
-  geminiProVersion,
+  geminiModelVersion,
   geminiThinkingConfig,
   isGeminiFileUri,
   zodToGeminiParameters,
@@ -118,13 +117,6 @@ const normalizeError = (error: unknown): Error => {
   }
   return new Error(String(error));
 };
-
-const alternateModel = (model: string) =>
-  model === geminiProVersion
-    ? geminiFallbackVersion
-    : model === geminiFlashVersion
-    ? geminiFallbackVersion
-    : model;
 
 const geminiError: Injection<
   (_1: Error, _2: GenerateContentParameters) => void
@@ -254,7 +246,9 @@ export const stripExpiredFile = (
   };
 };
 
-const modelCallTimeoutMs = 60_000;
+const modelCallTimeoutMs: Injection<() => number> = context(() => 60_000);
+
+export const injectGeminiModelCallTimeoutMs = modelCallTimeoutMs.inject;
 
 const errorDetails = (error: unknown) => {
   const status = (error && typeof error === "object" && "status" in error)
@@ -274,15 +268,16 @@ const withTimeout = <Args extends unknown[], Result>(
   new Promise((resolve, reject) => {
     const startedAt = Date.now();
     const controller = new AbortController();
+    const timeoutMs = modelCallTimeoutMs.access();
     const timer = setTimeout(() => {
       console.warn(
-        `[gemini-step] model-call-timeout after ${modelCallTimeoutMs}ms`,
+        `[gemini-step] model-call-timeout after ${timeoutMs}ms`,
       );
       controller.abort();
       const err = new Error("Model call timed out");
       Object.assign(err, { status: 503, [syntheticTimeoutMarker]: true });
       reject(err);
-    }, modelCallTimeoutMs);
+    }, timeoutMs);
     console.log("[gemini-step] rawCallGemini-start");
     fn(controller.signal, ...args).then(
       (result) => {
@@ -519,7 +514,7 @@ const callGemini = (
     return fallbackModelRetry({
       req: {
         ...req,
-        model: alternateModel(req.model),
+        model: alternateGeminiModelVersion(req.model),
       },
       disableStreaming,
     });
@@ -746,7 +741,7 @@ export const buildReq = (
   maxOutputTokens: number | undefined,
 ) =>
 (events: GeminiHistoryEvent[]): GenerateContentParameters => ({
-  model: lightModel ? geminiFlashVersion : geminiProVersion,
+  model: geminiModelVersion(lightModel),
   config: {
     systemInstruction: prompt,
     tools: [{ functionDeclarations: tools.map(actionToTool) }],

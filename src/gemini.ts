@@ -85,9 +85,39 @@ const openAiToGeminiMessage = pipe(
   remove(({ parts }: Content) => empty(parts ?? [])),
 );
 
-export const geminiProVersion = "gemini-3-flash-preview";
-export const geminiFlashVersion = "gemini-3-flash-preview";
-export const geminiFallbackVersion = "gemini-3.1-pro-preview";
+type GeminiModelVersions = {
+  pro: string;
+  flash: string;
+  fallback: string;
+};
+
+const defaultGeminiModelVersions: GeminiModelVersions = {
+  pro: "gemini-3-flash-preview",
+  flash: "gemini-3-flash-preview",
+  fallback: "gemini-3.1-pro-preview",
+};
+
+const geminiModelVersions: Injection<() => GeminiModelVersions> = context(() =>
+  defaultGeminiModelVersions
+);
+
+export const injectGeminiModelVersions = geminiModelVersions.inject;
+
+export const geminiProVersion = defaultGeminiModelVersions.pro;
+export const geminiFlashVersion = defaultGeminiModelVersions.flash;
+export const geminiFallbackVersion = defaultGeminiModelVersions.fallback;
+
+export const geminiModelVersion = (mini: boolean | undefined) => {
+  const versions = geminiModelVersions.access();
+  return mini ? versions.flash : versions.pro;
+};
+
+export const alternateGeminiModelVersion = (model: string) => {
+  const versions = geminiModelVersions.access();
+  return model === versions.pro || model === versions.flash
+    ? versions.fallback
+    : model;
+};
 
 export const geminiThinkingConfig = (mini: boolean | undefined) => ({
   includeThoughts: true,
@@ -111,7 +141,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
   );
   return JSON.parse(
     await cachedCall({
-      model: mini ? geminiFlashVersion : geminiProVersion,
+      model: geminiModelVersion(mini),
       config: {
         responseMimeType: "application/json",
         responseSchema: zodToGeminiParameters(zodType),
@@ -152,7 +182,7 @@ export const geminiGenText = async (
   const result = await new GoogleGenAI({
     apiKey: tokenInjection.access(),
   }).models.generateContent({
-    model: mini ? geminiFlashVersion : geminiProVersion,
+    model: geminiModelVersion(mini),
     config: { thinkingConfig: geminiThinkingConfig(mini) },
     contents: [{
       role: "user",

@@ -39,10 +39,12 @@ export {
   geminiGenJson,
   geminiGenJsonFromConvo,
   geminiGenText,
+  injectGeminiModelVersions,
   injectGeminiToken,
 } from "./src/gemini.ts";
 export {
   injectGeminiErrorLogger,
+  injectGeminiModelCallTimeoutMs,
   injectTokenUsage,
   type TokenUsage,
 } from "./src/geminiAgent.ts";
