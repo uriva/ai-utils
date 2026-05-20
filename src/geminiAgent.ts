@@ -16,7 +16,11 @@ import {
   pipe,
   sum,
 } from "gamla";
-import { isRetryableError, syntheticTimeoutMarker } from "./utils.ts";
+import {
+  isRetryableError,
+  isSyntheticTimeoutError,
+  syntheticTimeoutMarker,
+} from "./utils.ts";
 import type { ZodType } from "zod/v4";
 import {
   accessMetadataStore,
@@ -249,7 +253,7 @@ export const stripExpiredFile = (
   };
 };
 
-const modelCallTimeoutMs = 180_000;
+const modelCallTimeoutMs = 60_000;
 
 const errorDetails = (error: unknown) => {
   const status = (error && typeof error === "object" && "status" in error)
@@ -510,7 +514,7 @@ const callGemini = (
   disableStreaming?: boolean,
 ): Promise<GeminiOutput> =>
   callGeminiWithRetry({ req, disableStreaming }).catch((err: unknown) => {
-    if (!isRetryableError(err)) throw err;
+    if (!isRetryableError(err) && !isSyntheticTimeoutError(err)) throw err;
     return fallbackModelRetry({
       req: {
         ...req,

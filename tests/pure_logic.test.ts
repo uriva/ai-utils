@@ -1011,6 +1011,12 @@ Deno.test("isRetryableError excludes synthetic timeouts to prevent retry-amplifi
   assert(isRetryableError(rateLimit));
 });
 
+Deno.test("isSyntheticTimeoutError marks errors that should skip same-model retry but use fallback model", () => {
+  const timeout = buildSyntheticTimeoutError();
+  assert(isSyntheticTimeoutError(timeout));
+  assert(!isRetryableError(timeout));
+});
+
 Deno.test("Gemini MALFORMED_FUNCTION_CALL is retryable instead of do_nothing", () => {
   const error = assertThrows(
     () => rejectMalformedFunctionCall("MALFORMED_FUNCTION_CALL", []),
