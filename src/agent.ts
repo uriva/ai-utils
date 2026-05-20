@@ -1,3 +1,4 @@
+import { deepStrict } from "./deepStrict.ts";
 import { context, type Injection } from "@uri/inject";
 import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
@@ -495,11 +496,7 @@ const parseWithCatch = <T extends ZodType>(
   try {
     const unknownKeysError = rejectUnknownKeys(parameters, args);
     if (unknownKeysError) throw unknownKeysError;
-    const p = "strict" in parameters &&
-        typeof (parameters as unknown as { strict?: () => ZodType }).strict ===
-          "function"
-      ? (parameters as unknown as { strict: () => ZodType }).strict()
-      : parameters;
+    const p = deepStrict(parameters);
     return { ok: true, result: p.parse(args) as z.infer<T> };
   } catch (error) {
     return { ok: false, error: error as Error };
