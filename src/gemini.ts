@@ -92,8 +92,8 @@ type GeminiModelVersions = {
 };
 
 const defaultGeminiModelVersions: GeminiModelVersions = {
-  pro: "gemini-3-flash-preview",
-  flash: "gemini-3-flash-preview",
+  pro: "gemini-3.5-flash",
+  flash: "gemini-3.5-flash",
   fallback: "gemini-3.1-pro-preview",
 };
 
@@ -120,8 +120,10 @@ export const alternateGeminiModelVersion = (model: string) => {
 };
 
 export const geminiThinkingConfig = (mini: boolean | undefined) => ({
-  includeThoughts: true,
-  thinkingLevel: mini ? ThinkingLevel.MEDIUM : ThinkingLevel.HIGH,
+  includeThoughts: false,
+  ...(mini
+    ? { thinkingLevel: ThinkingLevel.LOW }
+    : { thinkingLevel: ThinkingLevel.HIGH }),
 });
 
 export const geminiGenJsonFromConvo: <T extends ZodType>(

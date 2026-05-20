@@ -22,6 +22,7 @@ const reproModel = Deno.env.get("GEMINI_REPRO_MODEL") ??
 const reproTimeoutMs = Number(
   Deno.env.get("GEMINI_REPRO_TIMEOUT_MS") ?? 60_000,
 );
+const reproVariant = Deno.env.get("GEMINI_REPRO_VARIANT") ?? "default";
 
 const designBrief = [
   "Fictional project: a premium seaside hotel landing page.",
@@ -48,7 +49,7 @@ const syntheticHistory: HistoryEvent[] = [
     isOwn: false,
     name: "user",
     text:
-      `Please build a polished landing page for a fictional seaside hotel. Use the provided tools to create the page files.\n\nSynthetic model-under-test marker: ${reproModel}.\n\n${designBrief}`,
+      `Please build a polished landing page for a fictional seaside hotel. Use the provided tools to create the page files.\n\nSynthetic model-under-test marker: ${reproModel}. Synthetic variant marker: ${reproVariant}.\n\n${designBrief}`,
   },
   {
     type: "own_thought",

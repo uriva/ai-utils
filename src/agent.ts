@@ -992,7 +992,7 @@ const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
 export const noResponseTag = "[no response]";
 
 export const invisibleToolUseInstruction =
-  "Users cannot see tool calls or tool results. When you use tools or rely on their results, communicate the relevant action and outcome to the user yourself, unless higher-priority instructions say not to. Do not assume a tool result is visible to the user just because the tool returned it.";
+  "Users cannot see tool calls or tool results. When you use tools or rely on their results, communicate the relevant action and outcome to the user yourself, unless higher-priority instructions say not to. Do not assume a tool result is visible to the user just because the tool returned it. Keep tool arguments small: do not put more than about 3,000 characters in any single string argument. When writing or editing large files or other large content, write only a focused chunk in each tool call and continue with later chunks in later turns or later tool calls instead of emitting one huge argument. Even if a tool description asks for complete or full content, do not put an entire large file in one tool call.";
 
 const escapedNoResponseTag = noResponseTag.replace(
   /[.*+?^${}()|[\]\\]/g,
