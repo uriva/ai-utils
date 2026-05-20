@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import type { Content } from "@google/genai";
 import { z } from "zod/v4";
 import { tool } from "../mod.ts";
@@ -17,6 +17,8 @@ import {
 import {
   buildReq,
   filterOrphanedToolResults,
+  geminiMalformedFunctionCallError,
+  rejectMalformedFunctionCall,
   stripEmbeddedThoughtPatterns,
 } from "../src/geminiAgent.ts";
 import {
@@ -1007,4 +1009,17 @@ Deno.test("isRetryableError excludes synthetic timeouts to prevent retry-amplifi
   const rateLimit = new Error("too many requests");
   Object.assign(rateLimit, { status: 429 });
   assert(isRetryableError(rateLimit));
+});
+
+Deno.test("Gemini MALFORMED_FUNCTION_CALL is retryable instead of do_nothing", () => {
+  const error = assertThrows(
+    () => rejectMalformedFunctionCall("MALFORMED_FUNCTION_CALL", []),
+    Error,
+    "MALFORMED_FUNCTION_CALL",
+  );
+  assert(
+    isRetryableError(error),
+    "Gemini malformed function-call responses should use retry/fallback path, not empty-output do_nothing",
+  );
+  assert(isRetryableError(geminiMalformedFunctionCallError([])));
 });

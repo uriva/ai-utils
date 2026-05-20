@@ -146,6 +146,25 @@ export const extractFileIdFromError = (error: Error) => {
   return match ? match[1] : null;
 };
 
+const geminiMalformedFunctionCallReason = "MALFORMED_FUNCTION_CALL";
+
+export const geminiMalformedFunctionCallError = (parts: Part[]) => {
+  const err = new Error(
+    `Gemini returned ${geminiMalformedFunctionCallReason} with ${parts.length} parts`,
+  );
+  Object.assign(err, { status: 503 });
+  return err;
+};
+
+export const rejectMalformedFunctionCall = (
+  finishReason: string | undefined,
+  parts: Part[],
+) => {
+  if (finishReason !== geminiMalformedFunctionCallReason) return;
+  if (!empty(parts)) return;
+  throw geminiMalformedFunctionCallError(parts);
+};
+
 export const is403PermissionError = (error: Error) => {
   if ("status" in error && (error as { status: number }).status === 403) {
     return true;
@@ -444,6 +463,8 @@ const rawCallGemini = async (
   if (finalFinishReason) {
     finishReasonSink.access(finalFinishReason);
   }
+
+  rejectMalformedFunctionCall(finalFinishReason, accumulatedParts);
 
   return accumulatedParts.flatMap((part: Part): GeminiOutput => {
     const {
