@@ -200,12 +200,23 @@ runForAllProviders(
     assertEquals(rewriteReplacements["test-id"].type, "own_thought");
     assertEquals(rewriteReplacements["utterance-id"].type, "own_thought");
     assertEquals(rewriteReplacements["result-id"].type, "own_thought");
-    assert(
-      ("text" in rewriteReplacements["utterance-id"]
+    assertEquals(
+      "text" in rewriteReplacements["test-id"]
+        ? rewriteReplacements["test-id"].text
+        : "",
+      "I previously called the tool testTool with parameters: {}",
+    );
+    assertEquals(
+      "text" in rewriteReplacements["utterance-id"]
         ? rewriteReplacements["utterance-id"].text
-        : "")?.includes(
-          "Removed own_utterance from response containing invalid tool call: I am going to call the tool.",
-        ),
+        : "",
+      "I am going to call the tool.",
+    );
+    assertEquals(
+      "text" in rewriteReplacements["result-id"]
+        ? rewriteReplacements["result-id"].text
+        : "",
+      "The tool returned: tool result",
     );
   },
   3,

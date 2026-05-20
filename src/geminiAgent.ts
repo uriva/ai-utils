@@ -348,6 +348,30 @@ const usageDiag = (
   );
 };
 
+const logFunctionCallsMissingThoughtSignature = (
+  model: string,
+  finishReason: string | undefined,
+  parts: Part[],
+) => {
+  const missing = parts
+    .map((part, index) => ({ part, index }))
+    .filter(({ part }) => part.functionCall && !part.thoughtSignature?.trim())
+    .map(({ part, index }) => ({
+      index,
+      name: part.functionCall?.name,
+      id: part.functionCall?.id,
+      argBytes: part.functionCall?.args
+        ? JSON.stringify(part.functionCall.args).length
+        : 0,
+    }));
+  if (empty(missing)) return;
+  console.warn(
+    `[gemini-diag] response function calls missing thoughtSignature model=${model} finish=${finishReason} calls=${
+      JSON.stringify(missing)
+    }`,
+  );
+};
+
 const withAbortSignal = (
   signal: AbortSignal,
   req: GenerateContentParameters,
@@ -378,6 +402,11 @@ const rawCallGemini = async (
     finalFinishReason = response.candidates?.[0]?.finishReason;
     const parts = response.candidates?.[0]?.content?.parts ?? [];
     usageDiag("buffered", finalUsageMetadata, finalFinishReason, parts);
+    logFunctionCallsMissingThoughtSignature(
+      req.model,
+      finalFinishReason,
+      parts,
+    );
     for (const part of parts) {
       if (
         typeof part.text === "string" && !part.thought
@@ -451,6 +480,11 @@ const rawCallGemini = async (
     usageDiag(
       "stream",
       finalUsageMetadata,
+      finalFinishReason,
+      accumulatedParts,
+    );
+    logFunctionCallsMissingThoughtSignature(
+      req.model,
       finalFinishReason,
       accumulatedParts,
     );
@@ -934,11 +968,9 @@ const toolCallToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
   isOwn: true,
   id: e.id,
   timestamp: e.timestamp,
-  text: `[Removed tool call "${
+  text: `I previously called the tool ${
     "name" in e ? e.name : "unknown"
-  }" due to missing thought signature. Parameters: ${
-    JSON.stringify("parameters" in e ? e.parameters : {})
-  }]`,
+  } with parameters: ${JSON.stringify("parameters" in e ? e.parameters : {})}`,
 });
 
 const toolResultToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
@@ -946,7 +978,7 @@ const toolResultToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
   isOwn: true,
   id: e.id,
   timestamp: e.timestamp,
-  text: `[Removed tool result: ${"result" in e ? e.result : ""}]`,
+  text: `The tool returned: ${"result" in e ? e.result : ""}`,
 });
 
 const textToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
@@ -954,9 +986,7 @@ const textToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
   isOwn: true,
   id: e.id,
   timestamp: e.timestamp,
-  text: `[Removed ${e.type} from response containing invalid tool call: ${
-    "text" in e ? (e.text as string).slice(0, 200) : ""
-  }]`,
+  text: "text" in e ? (e.text as string) : "",
 });
 
 const computeInvalidToolCallReplacements = (

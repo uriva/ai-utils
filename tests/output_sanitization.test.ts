@@ -148,6 +148,25 @@ Deno.test("sanitizeModelOutput reclassifies leaked thought without timestamp to 
   );
 });
 
+Deno.test("sanitizeModelOutput reclassifies embedded system notifications", () => {
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [
+      ownUtteranceTurn(
+        '[System notification: internal plan] — sent May 20, 2026, 1:28 PM[System notification: [Removed tool call "run_command" due to missing thought signature.]]',
+      ),
+    ],
+  );
+  assertEquals(result.emit.length, 1);
+  const event = result.emit[0];
+  assertEquals(event.type, "own_thought");
+  if (event.type !== "own_thought") throw new Error("unreachable");
+  assertEquals(
+    event.text.includes("Removed tool call"),
+    true,
+  );
+});
+
 Deno.test("sanitizeModelOutput does not reclassify normal utterances", () => {
   const output = [ownUtteranceTurn("Hello! How can I help you?")];
   const result = sanitizeModelOutput(

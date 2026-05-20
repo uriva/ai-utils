@@ -978,12 +978,16 @@ const sanitizeInternalSentTimestampLeak = (
 const internalThoughtPattern =
   /^\[Internal thought, visible only to you: ([\s\S]*?)\]$/;
 
+const systemNotificationPattern = /\[System notification: [\s\S]*?\]/;
+
 const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
   output.map((event) => {
     if (event.type !== "own_utterance") return event;
-    const match = stripInternalSentTimestampSuffix(event.text).match(
-      internalThoughtPattern,
-    );
+    const text = stripInternalSentTimestampSuffix(event.text);
+    if (systemNotificationPattern.test(text)) {
+      return { ...event, type: "own_thought" as const, text };
+    }
+    const match = text.match(internalThoughtPattern);
     return match
       ? { ...event, type: "own_thought" as const, text: match[1] }
       : event;

@@ -16,6 +16,7 @@ import {
 } from "../src/agent.ts";
 import {
   buildReq,
+  filterAndRewriteInvalidToolCalls,
   filterOrphanedToolResults,
   geminiMalformedFunctionCallError,
   rejectMalformedFunctionCall,
@@ -355,6 +356,48 @@ Deno.test("stripEmbeddedThoughtPatterns returns empty for thought-only text", ()
   const thoughtOnly =
     "[Internal thought, visible only to you: some thought content]";
   assertEquals(stripEmbeddedThoughtPatterns(thoughtOnly), "");
+});
+
+Deno.test("invalid Gemini tool calls rewrite to useful thoughts without internals", () => {
+  const replacements: Record<string, HistoryEvent> = {};
+  const filter = filterAndRewriteInvalidToolCalls((r) => {
+    Object.assign(replacements, r);
+    return Promise.resolve();
+  });
+  const history: Parameters<typeof filter>[0] = [
+    {
+      type: "tool_call",
+      isOwn: true,
+      id: "call-id",
+      timestamp: 1,
+      name: "run_command",
+      parameters: { command: "x", params: { query: "abc" } },
+      modelMetadata: {
+        type: "gemini",
+        responseId: "resp",
+        thoughtSignature: "",
+      },
+    },
+    {
+      type: "tool_result",
+      isOwn: true,
+      id: "result-id",
+      timestamp: 2,
+      toolCallId: "call-id",
+      result: "useful result",
+    },
+  ];
+
+  const filtered = filter(history);
+
+  assertEquals(filtered.length, 0);
+  assertEquals(replacements["call-id"].type, "own_thought");
+  assertEquals(replacements["result-id"].type, "own_thought");
+  const replacementText = JSON.stringify(replacements);
+  assert(replacementText.includes("I previously called the tool run_command"));
+  assert(replacementText.includes("useful result"));
+  assertEquals(replacementText.includes("thought signature"), false);
+  assertEquals(replacementText.includes("Removed tool"), false);
 });
 
 Deno.test("tool_call with empty thoughtSignature omits field from API request", () => {
