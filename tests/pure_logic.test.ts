@@ -1082,3 +1082,10 @@ Deno.test("Gemini MALFORMED_FUNCTION_CALL is retryable instead of do_nothing", (
   );
   assert(isRetryableError(geminiMalformedFunctionCallError([])));
 });
+
+Deno.test("isRepetitionFlood detects repeated sub-strings", () => {
+  assert(isRepetitionFlood("abc".repeat(30)));
+  assert(isRepetitionFlood("X".repeat(30)));
+  assert(!isRepetitionFlood("abcabc"));
+  assert(!isRepetitionFlood("normal sentence with normal words"));
+});
