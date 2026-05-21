@@ -136,10 +136,15 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
   zodType: T,
 ): Promise<z.infer<T>> => {
   const cacher = makeCache("geminiCompletionResponseText-v2");
-  const cachedCall = cacher((req: GenerateContentParameters) =>
-    new GoogleGenAI({ apiKey: tokenInjection.access() }).models.generateContent(
-      req,
-    ).then(({ text }) => text || "{}")
+  const cachedCall = cacher(
+    conditionalRetry(isRetryableError)(
+      1000,
+      3,
+      (req: GenerateContentParameters) =>
+        new GoogleGenAI({ apiKey: tokenInjection.access() }).models
+          .generateContent(req)
+          .then(({ text }) => text || "{}"),
+    ),
   );
   return JSON.parse(
     await cachedCall({
@@ -181,16 +186,21 @@ export const geminiGenText = async (
   prompt: string,
   attachments: MediaAttachment[],
 ): Promise<string> => {
-  const result = await new GoogleGenAI({
-    apiKey: tokenInjection.access(),
-  }).models.generateContent({
-    model: geminiModelVersion(mini),
-    config: { thinkingConfig: geminiThinkingConfig(mini) },
-    contents: [{
-      role: "user",
-      parts: [...attachmentsToParts(attachments), { text: prompt }],
-    }],
-  });
+  const result = await conditionalRetry(isRetryableError)(
+    1000,
+    3,
+    () =>
+      new GoogleGenAI({
+        apiKey: tokenInjection.access(),
+      }).models.generateContent({
+        model: geminiModelVersion(mini),
+        config: { thinkingConfig: geminiThinkingConfig(mini) },
+        contents: [{
+          role: "user",
+          parts: [...attachmentsToParts(attachments), { text: prompt }],
+        }],
+      }),
+  )();
   return result.text ?? "";
 };
 
