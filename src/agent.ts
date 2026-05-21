@@ -1010,7 +1010,9 @@ const noResponseSuffixPattern = new RegExp(
 const isOwnTextEvent = (event: HistoryEvent) =>
   (event.type === "own_utterance" || event.type === "own_edit_message") &&
   (noResponsePattern.test(event.text.trim()) ||
-    !event.text.replace(/[\[\]'"\s\u200B\u200C\u200D\uFEFF]/g, ""));
+    (event.text.trim() !== "" &&
+      !event.text.replace(/[\[\]'"\s\u200B\u200C\u200D\uFEFF]/g, "") &&
+      empty(event.attachments ?? [])));
 
 const cleanNoResponseSuffix = (event: HistoryEvent): HistoryEvent => {
   if (event.type !== "own_utterance" && event.type !== "own_edit_message") {
