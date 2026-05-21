@@ -1009,7 +1009,8 @@ const noResponseSuffixPattern = new RegExp(
 
 const isOwnTextEvent = (event: HistoryEvent) =>
   (event.type === "own_utterance" || event.type === "own_edit_message") &&
-  noResponsePattern.test(event.text.trim());
+  (noResponsePattern.test(event.text.trim()) ||
+    !event.text.replace(/[\[\]'"\s\u200B\u200C\u200D\uFEFF]/g, ""));
 
 const cleanNoResponseSuffix = (event: HistoryEvent): HistoryEvent => {
   if (event.type !== "own_utterance" && event.type !== "own_edit_message") {
@@ -1028,7 +1029,11 @@ const isEmptyUtterance = (event: HistoryEvent) => {
   if (event.type !== "own_utterance" && event.type !== "own_edit_message") {
     return false;
   }
-  return !event.text.trim() && empty(event.attachments ?? []);
+  const stripped = event.text.replace(
+    /[\[\]'"\s\u200B\u200C\u200D\uFEFF]/g,
+    "",
+  );
+  return !stripped && empty(event.attachments ?? []);
 };
 
 const reclassifyEmptyUtterances = (output: HistoryEvent[]): HistoryEvent[] =>
