@@ -19,6 +19,7 @@ import {
 import {
   isRetryableError,
   isSyntheticTimeoutError,
+  stripAnsi,
   syntheticTimeoutMarker,
 } from "./utils.ts";
 import type { ZodType } from "zod/v4";
@@ -686,13 +687,10 @@ const historyEventToContent = (
           id: e.toolCallId,
           name,
           response: {
-            result: stampText(
-              e.result + toolResultAttachmentText(e.attachments),
-            ),
+            result: stampText(stripAnsi(e.result)),
           },
         },
       },
-      ...inlineAttachmentParts(e.attachments),
     ];
     return wrapUserContent(parts);
   }
