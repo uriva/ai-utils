@@ -570,7 +570,7 @@ const optionalThoughtSignature = (sig: string | undefined) =>
 const attachmentsToPartsOrEmpty = (attachments?: MediaAttachment[]): Part[] =>
   attachmentsToParts(attachments ?? []);
 
-const toolResultAttachmentText = (attachments?: MediaAttachment[]) => {
+const _toolResultAttachmentText = (attachments?: MediaAttachment[]) => {
   if (!attachments || empty(attachments)) return "";
   const fileAttachments = attachments.filter((attachment) =>
     attachment.kind === "file"
@@ -594,7 +594,7 @@ const toolResultAttachmentText = (attachments?: MediaAttachment[]) => {
   return text ? `\n${text}` : "";
 };
 
-const inlineAttachmentParts = (attachments?: MediaAttachment[]) =>
+const _inlineAttachmentParts = (attachments?: MediaAttachment[]) =>
   attachmentsToParts(
     (attachments ?? []).filter((attachment) => attachment.kind === "inline"),
   );

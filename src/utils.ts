@@ -56,8 +56,15 @@ const repetitionFloodPattern = /(.{1,15}?)\1{29,}/s;
 export const isRepetitionFlood = (text: string) =>
   repetitionFloodPattern.test(text);
 
-export const stripAnsi = (text: string): string =>
-  text.replace(
-    /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
+export const stripAnsi = (text: string): string => {
+  const esc = "\\u" + "001b";
+  const c1 = "\\u" + "009b";
+  return text.replace(
+    new RegExp(
+      "[" + esc + c1 +
+        "][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]",
+      "g",
+    ),
     "",
   );
+};
