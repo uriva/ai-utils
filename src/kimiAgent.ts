@@ -567,7 +567,7 @@ const didNothing = (output: KimiOutputPart[]) =>
   output.length === 0 ||
   (output.length === 1 &&
     output[0].type === "text" &&
-    (!output[0].text.replace(/[\s\u200B\u200C\u200D\uFEFF]/g, "") ||
+    (!output[0].text.replace(/[\s\u200B\u200C\u200D\uFEFF\u200E\u200F]/g, "") ||
       output[0].text.trim().toLowerCase() === noResponseTag));
 
 const storeKimiMetadata = (eventId: string, metadata: KimiMetadata) =>

@@ -1011,7 +1011,10 @@ const isOwnTextEvent = (event: HistoryEvent) =>
   (event.type === "own_utterance" || event.type === "own_edit_message") &&
   (noResponsePattern.test(event.text.trim()) ||
     (event.text.trim() !== "" &&
-      !event.text.replace(/[\[\]'"\s\u200B\u200C\u200D\uFEFF]/g, "") &&
+      !event.text.replace(
+        /[\[\]'"\s\u200B\u200C\u200D\uFEFF\u200E\u200F]/g,
+        "",
+      ) &&
       empty(event.attachments ?? [])));
 
 const cleanNoResponseSuffix = (event: HistoryEvent): HistoryEvent => {
@@ -1032,7 +1035,7 @@ const isEmptyUtterance = (event: HistoryEvent) => {
     return false;
   }
   const stripped = event.text.replace(
-    /[\[\]'"\s\u200B\u200C\u200D\uFEFF]/g,
+    /[\[\]'"\s\u200B\u200C\u200D\uFEFF\u200E\u200F]/g,
     "",
   );
   return !stripped && empty(event.attachments ?? []);

@@ -838,7 +838,7 @@ const didNothing = (output: GeminiOutput) =>
   !sawFunction(output) &&
   !output.some((p: GeminiPartOfInterest) =>
     (p.type === "text" && !p.thought &&
-      p.text.replace(/['"\s\u200B\u200C\u200D\uFEFF]/g, "")) ||
+      p.text.replace(/['"\s\u200B\u200C\u200D\uFEFF\u200E\u200F]/g, "")) ||
     p.type === "inline_data" ||
     p.type === "file_data"
   );

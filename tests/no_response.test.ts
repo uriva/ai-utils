@@ -105,3 +105,27 @@ Deno.test("agent strips no-response tag from utterance suffix", async () => {
   const visible = history.filter((e) => e.type === "own_utterance");
   assertEquals(visible.map((e) => e.text), ["Hi there."]);
 });
+
+Deno.test("agent treats LRM and RLM empty responses as do_nothing", async () => {
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({ name: "user", text: "ok good" }),
+  ];
+  // Model returns a left-to-right mark character
+  const fakeCallModel = () => Promise.resolve([ownUtteranceTurn("\u200E")]);
+
+  await injectCallModel(fakeCallModel)(async () => {
+    await agentDeps(history)(runAgent)({
+      maxIterations: 1,
+      onMaxIterationsReached: () => {},
+      tools: [],
+      prompt: "unused in fake",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  })();
+
+  const visible = history.filter((e) => e.type === "own_utterance");
+  assertEquals(visible.length, 0);
+  const doNothing = history.filter((e) => e.type === "do_nothing");
+  assertEquals(doNothing.length, 1);
+});
