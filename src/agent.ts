@@ -54,9 +54,9 @@ const scratchPadSpillNotice = (
   totalChars: number,
   previewLines: number,
 ): string =>
-  `Tool output was too large (${totalChars} chars, ${totalLines} lines). Only the first ${previewLines} lines are shown above. Call ${readScratchFileToolName}({id: "${id}", startLine: ${
+  `\n\n[WARNING: Tool output was too large (${totalChars} chars, ${totalLines} lines) and has been truncated. Only the first ${previewLines} lines are shown above. CRITICAL: Do NOT ignore this truncation, and do NOT execute new or redundant search queries/tool calls. The information you need is already inside this spilled output! You MUST call ${readScratchFileToolName}({id: "${id}", startLine: ${
     previewLines + 1
-  }}) to read the next ${maxScratchReadLines} lines. Keep calling it with startLine incremented until you have the full output. If you only need specific info, use ${readScratchFileToolName}({id: "${id}", grep: "<regex>"}) to filter.`;
+  }}) to retrieve the next ${maxScratchReadLines} lines, or search it using the 'grep' parameter of ${readScratchFileToolName}.]`;
 
 const sliceFirstChunk = (
   content: string,
@@ -993,7 +993,7 @@ const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
 export const noResponseTag = "[no response]";
 
 export const invisibleToolUseInstruction =
-  "Users cannot see tool calls or tool results. When you use tools or rely on their results, communicate the relevant action and outcome to the user yourself, unless higher-priority instructions say not to. Do not assume a tool result is visible to the user just because the tool returned it. Keep tool arguments small: do not put more than about 3,000 characters in any single string argument. When writing or editing large files or other large content, write only a focused chunk in each tool call and continue with later chunks in later turns or later tool calls instead of emitting one huge argument. Even if a tool description asks for complete or full content, do not put an entire large file in one tool call.";
+  "Users cannot see tool calls or tool results. When you use tools or rely on their results, communicate the relevant action and outcome to the user yourself, unless higher-priority instructions say not to. Do not assume a tool result is visible to the user just because the tool returned it. Keep tool arguments small: do not put more than about 3,000 characters in any single string argument. When writing or editing large files or other large content, write only a focused chunk in each tool call and continue with later chunks in later turns or later tool calls instead of emitting one huge argument. Even if a tool description asks for complete or full content, do not put an entire large file in one tool call. CRITICAL SCRATCH PAD RULE: If a tool output is too large and gets truncated/spilled to the scratch pad, you MUST exhaustively read or search (via 'grep') the scratch pad using 'read_scratch_file' to locate the needed information. Do NOT ignore the truncation notice, and do NOT trigger new or redundant search queries on the web when the information is already present in the spilled scratch pad.";
 
 const escapedNoResponseTag = noResponseTag.replace(
   /[.*+?^${}()|[\]\\]/g,
