@@ -339,7 +339,7 @@ export const createAudioSession = async ({
       const timeout = setTimeout(() => {
         debug("turn timed out");
         reject(new Error("Gemini Live turn timed out"));
-      }, turnTimeoutMs);
+      }, turnTimeoutMs) as unknown as number;
       pendingTurn = { resolve, reject, timeout };
       flushEvents();
     });
