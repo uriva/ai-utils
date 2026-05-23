@@ -49,7 +49,7 @@ runForAllProviders(
     const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
       name: "user",
       text:
-        `Call dump_logs, then find the SECRET_TOKEN value in its output and reply with just that token.`,
+        `Call dump_logs, then find the SECRET_TOKEN value in its output and reply with the exact token name including its prefix (e.g. starting with SECRET_TOKEN_).`,
     })];
     const store = new Map<string, string>();
     const scratchPad = makeScratchPad(store);
