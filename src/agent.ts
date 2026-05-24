@@ -265,6 +265,7 @@ export type Skill = {
   instructions: string;
   // deno-lint-ignore no-explicit-any
   tools: RegularTool<any>[];
+  references?: { name: string; content: string }[];
 };
 
 type SharedFields = { id: MessageId; timestamp: number; isOwn: boolean };
@@ -1229,6 +1230,7 @@ async (output: HistoryEvent[]): Promise<boolean> => {
 
 export const runCommandToolName = "run_command";
 export const learnSkillToolName = "learn_skill";
+export const readSkillReferenceToolName = "read_skill_reference";
 
 export const doNothingToolName = "do_nothing";
 
@@ -1344,6 +1346,36 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           null,
           2,
         ));
+      },
+    }),
+    tool({
+      name: readSkillReferenceToolName,
+      description:
+        "Read the content of a specific reference document in a skill. Available reference names are listed under the skill's References section.",
+      parameters: z.object({
+        skillName: z.string().describe("The name of the skill"),
+        referenceName: z.string().describe(
+          "The name of the reference file to read (e.g., 'cbt-protocols.md')",
+        ),
+      }),
+      handler: ({ skillName, referenceName }) => {
+        const skill = skillMap[skillName];
+        if (!skill) {
+          return Promise.resolve(
+            `Skill "${skillName}" not found. Available skills: ${skillNames}`,
+          );
+        }
+        const ref = skill.references?.find(
+          (r) => r.name.toLowerCase() === referenceName.toLowerCase(),
+        );
+        if (!ref) {
+          const refList = skill.references?.map((r) => r.name).join(", ") ||
+            "none";
+          return Promise.resolve(
+            `Reference "${referenceName}" not found in skill "${skillName}". Available references: ${refList}`,
+          );
+        }
+        return Promise.resolve(ref.content);
       },
     }),
   ];
