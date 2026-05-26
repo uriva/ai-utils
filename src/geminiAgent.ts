@@ -1216,6 +1216,71 @@ const stripAllUnsupportedMimeTypes = async (
   return callGemini(eventsToRequest(currentEvents), disableStreaming);
 };
 
+const getCorruptedMediaText = (attachments: MediaAttachment[]) =>
+  !empty(attachments)
+    ? ` <media file corrupted or unsupported: ${
+      attachments.map((a: MediaAttachment) => a.caption || a.mimeType)
+        .join(", ")
+    }>`
+    : "";
+
+const stripAllCorruptedFileAttachments = (
+  events: GeminiHistoryEvent[],
+): {
+  updatedHistory: GeminiHistoryEvent[];
+  replacements: Record<string, GeminiHistoryEvent>;
+} => {
+  const replacements: Record<string, GeminiHistoryEvent> = {};
+  const updatedHistory = map(
+    (event: GeminiHistoryEvent): GeminiHistoryEvent => {
+      if (!("attachments" in event) || !event.attachments) return event;
+      const fileAttachments = event.attachments.filter((att) =>
+        att.kind === "file"
+      );
+      if (empty(fileAttachments)) return event;
+      const placeholder = getCorruptedMediaText(fileAttachments);
+      const kept = event.attachments.filter((att) => att.kind !== "file");
+      const updated = {
+        ...event,
+        ...event.type === "tool_result"
+          ? { result: event.result + placeholder }
+          : { text: ((event as { text?: string }).text ?? "") + placeholder },
+        attachments: empty(kept) ? undefined : kept,
+      } as GeminiHistoryEvent;
+      replacements[event.id] = updated;
+      return updated;
+    },
+  )(events);
+  return { updatedHistory, replacements };
+};
+
+const isImageProcessingOrInternalError = (error: Error) =>
+  error.message.includes("Unable to process input image") ||
+  error.message.includes("Internal error encountered");
+
+const stripAllCorruptedFileAttachmentsAndRetry = async (
+  originalError: Error,
+  events: GeminiHistoryEvent[],
+  eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
+  rewriteHistory: AgentSpec["rewriteHistory"],
+  disableStreaming?: boolean,
+): Promise<GeminiOutput> => {
+  console.warn(
+    "Stripping all file attachments due to image processing or internal error:",
+    originalError.message,
+  );
+  const nuclear = stripAllCorruptedFileAttachments(events);
+  if (empty(Object.keys(nuclear.replacements))) {
+    throw originalError;
+  }
+  const result = await callGemini(
+    eventsToRequest(nuclear.updatedHistory),
+    disableStreaming,
+  );
+  await rewriteHistory(nuclear.replacements);
+  return result;
+};
+
 const stripAllFileAttachments = (
   events: GeminiHistoryEvent[],
 ): {
@@ -1329,6 +1394,15 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
       }
       if (isUnsupportedMimeTypeError(err)) {
         return stripAllUnsupportedMimeTypes(
+          err,
+          events,
+          eventsToRequest,
+          rewriteHistory,
+          disableStreaming,
+        );
+      }
+      if (isImageProcessingOrInternalError(err)) {
+        return stripAllCorruptedFileAttachmentsAndRetry(
           err,
           events,
           eventsToRequest,
