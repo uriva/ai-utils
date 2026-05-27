@@ -1214,7 +1214,14 @@ async (output: HistoryEvent[]): Promise<boolean> => {
       return;
     }
     const fc: FunctionCall = { name: t.name, args: t.parameters, id: t.id };
+    const startedAt = Date.now();
     const callResult = await callToResult(tools, skills, scratchPad)(fc);
+    const durationMs = Date.now() - startedAt;
+    console.log(
+      `[tool-call] name=${t.name} durationMs=${durationMs} deferred=${
+        callResult === undefined
+      }`,
+    );
     if (callResult === undefined) {
       hadDeferred = true;
       return;
