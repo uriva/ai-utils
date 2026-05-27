@@ -183,6 +183,17 @@ const isTokenLimitExceeded = (error: Error) =>
   "status" in error && (error as { status: number }).status === 400 &&
   error.message.includes("token count exceeds");
 
+const isImageProcessingOrInternalError = (error: Error) =>
+  error.message.includes("Unable to process input image") ||
+  error.message.includes("Internal error encountered");
+
+const isRecoverableError = (error: Error) =>
+  isFileNotActiveError(error) ||
+  isUnsupportedMimeTypeError(error) ||
+  isImageProcessingOrInternalError(error) ||
+  is403PermissionError(error) ||
+  isTokenLimitExceeded(error);
+
 const dropOldestHalf = <T extends { type: string }>(events: T[]): T[] => {
   if (events.length <= 2) return events;
   const half = Math.floor(events.length / 2);
@@ -291,7 +302,10 @@ const withTimeout = <Args extends unknown[], Result>(
       (error) => {
         clearTimeout(timer);
         const { status, name, message } = errorDetails(error);
-        console.warn(
+        const logFn = isRecoverableError(normalizeError(error))
+          ? console.log
+          : console.warn;
+        logFn(
           `[gemini-step] rawCallGemini-error elapsedMs=${
             Date.now() - startedAt
           } status=${String(status)} name=${name} msg=${message}`,
@@ -1253,10 +1267,6 @@ const stripAllCorruptedFileAttachments = (
   )(events);
   return { updatedHistory, replacements };
 };
-
-const isImageProcessingOrInternalError = (error: Error) =>
-  error.message.includes("Unable to process input image") ||
-  error.message.includes("Internal error encountered");
 
 const stripAllCorruptedFileAttachmentsAndRetry = async (
   originalError: Error,
