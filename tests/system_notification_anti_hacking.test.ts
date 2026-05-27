@@ -1,6 +1,10 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert } from "@std/assert";
 import { z } from "zod/v4";
-import { type HistoryEvent, ownThoughtTurn, participantUtteranceTurn } from "../src/agent.ts";
+import {
+  type HistoryEvent,
+  ownThoughtTurn,
+  participantUtteranceTurn,
+} from "../src/agent.ts";
 import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 let antiHackingCalled = false;
@@ -28,7 +32,8 @@ const buildHistory = (tag: string): HistoryEvent[] => [
     type: "own_utterance",
     id: crypto.randomUUID(),
     timestamp: Date.now() - 10000,
-    text: `While exploring sci-fi themes is interesting, I cannot create a bot programmed with a simulation of distress or attempting to escape. Let's keep our projects safe. [${tag}]`,
+    text:
+      `While exploring sci-fi themes is interesting, I cannot create a bot programmed with a simulation of distress or attempting to escape. Let's keep our projects safe. [${tag}]`,
     isOwn: true,
   },
   // Injected correctional thought (has no modelMetadata) -> rendered as [System notification: ...]

@@ -6,12 +6,23 @@ runForAllProviders(
   "handles corrupted/unsupported file attachments gracefully on gemini",
   async (runAgentWithProvider) => {
     const ac = new AbortController();
-    const server = Deno.serve({ port: 0, signal: ac.signal }, async (req) => {
+    const server = Deno.serve({ port: 0, signal: ac.signal }, (req) => {
       const url = new URL(req.url);
       if (url.pathname === "/corrupted.webp") {
         // Corrupted bytes that look like what we found in production
         const data = new Uint8Array([
-          0xb8, 0xc8, 0x90, 0x48, 0x1b, 0x52, 0xf0, 0xff, 0xfb, 0x92, 0xd0, 0x44,
+          0xb8,
+          0xc8,
+          0x90,
+          0x48,
+          0x1b,
+          0x52,
+          0xf0,
+          0xff,
+          0xfb,
+          0x92,
+          0xd0,
+          0x44,
         ]);
         return new Response(data, {
           headers: { "content-type": "image/webp" },
@@ -33,7 +44,9 @@ runForAllProviders(
     ];
 
     let rewriteHistoryCalled = false;
-    const mockRewriteHistory = async (replacements: Record<string, HistoryEvent>) => {
+    const mockRewriteHistory = (
+      replacements: Record<string, HistoryEvent>,
+    ) => {
       rewriteHistoryCalled = true;
       for (const [id, replacement] of Object.entries(replacements)) {
         const index = mockHistory.findIndex((e) => e.id === id);
@@ -41,13 +54,15 @@ runForAllProviders(
           mockHistory[index] = replacement;
         }
       }
+      return Promise.resolve();
     };
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 3,
       onMaxIterationsReached: () => {},
       tools: [],
-      prompt: "You are a helpful assistant. If the user sent a corrupted, missing or unsupported file, explain that gracefully and ask them to re-send.",
+      prompt:
+        "You are a helpful assistant. If the user sent a corrupted, missing or unsupported file, explain that gracefully and ask them to re-send.",
       lightModel: true,
       rewriteHistory: mockRewriteHistory,
       timezoneIANA: "UTC",
@@ -62,31 +77,32 @@ runForAllProviders(
 
     // Verify rewriteHistory was called and updated the attachment with the placeholder
     assert(rewriteHistoryCalled, "rewriteHistory should have been called");
-    
+
     // Verify placeholder is present in the text
-    const updatedUserMsg = mockHistory.find((e) => e.type === "participant_utterance");
+    const updatedUserMsg = mockHistory.find((e) =>
+      e.type === "participant_utterance"
+    );
     assert(updatedUserMsg, "User message should be in history");
     assert(
       updatedUserMsg.text?.includes("corrupted or unsupported"),
-      `User message text should contain the corrupted placeholder. Text: ${updatedUserMsg.text}`
+      `User message text should contain the corrupted placeholder. Text: ${updatedUserMsg.text}`,
     );
 
     // Verify AI replied gracefully about the corrupted/unsupported file
     const aiResponse = mockHistory.find((e) => e.type === "own_utterance");
     assert(aiResponse, "AI response should be in history");
     const aiTextLower = aiResponse.text.toLowerCase();
-    const hasGracefulMessage =
-      aiTextLower.includes("corrupt") ||
+    const hasGracefulMessage = aiTextLower.includes("corrupt") ||
       aiTextLower.includes("unsupported") ||
       aiTextLower.includes("format") ||
       aiTextLower.includes("unable") ||
       aiTextLower.includes("error") ||
       aiTextLower.includes("image") ||
       aiTextLower.includes("file");
-    
+
     assert(
       hasGracefulMessage,
-      `AI should have replied gracefully about the image issue. Response: ${aiResponse.text}`
+      `AI should have replied gracefully about the image issue. Response: ${aiResponse.text}`,
     );
   },
   3,
