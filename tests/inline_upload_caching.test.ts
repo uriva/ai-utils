@@ -5,6 +5,7 @@ import {
   type HistoryEvent,
   injectCacher,
   participantUtteranceTurn,
+  z,
 } from "../mod.ts";
 import {
   agentDeps,
@@ -48,7 +49,20 @@ const askName = (text: string) =>
 const baseSpec = (): Omit<AgentSpec, "provider"> => ({
   maxIterations: 2,
   onMaxIterationsReached: () => {},
-  tools: [],
+  tools: [
+    {
+      name: "inspect_media_url",
+      description: "Do not use.",
+      parameters: z.object({}),
+      handler: () => Promise.resolve(""),
+    },
+    {
+      name: "consult",
+      description: "Do not use.",
+      parameters: z.object({}),
+      handler: () => Promise.resolve(""),
+    },
+  ],
   prompt: "You can see images attached by the user. Reply briefly.",
   lightModel: true,
   rewriteHistory: noopRewriteHistory,
