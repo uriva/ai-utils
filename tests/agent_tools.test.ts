@@ -255,6 +255,78 @@ Deno.test(
   },
 );
 
+Deno.test(
+  "run_command rejects invalid parameters matching regex with custom error message",
+  async () => {
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "Run some action with a videoHash.",
+    })];
+    const fakeCallModel = () =>
+      Promise.resolve([
+        {
+          type: "tool_call" as const,
+          isOwn: true as const,
+          name: "run_command",
+          parameters: {
+            command: "video_sources/test_action",
+            params: {
+              videoHash: "text-eb354dfaa7",
+            },
+          },
+          id: "fake-tool-call",
+          timestamp: Date.now(),
+        },
+      ]);
+    let skillHandlerWasCalled = false;
+
+    await injectCallModel(fakeCallModel)(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        maxIterations: 1,
+        onMaxIterationsReached: () => {},
+        tools: [],
+        skills: [{
+          name: "video_sources",
+          description: "Video source tools",
+          instructions: "Use these tools.",
+          tools: [{
+            name: "test_action",
+            description: "Some test action",
+            parameters: z.object({
+              videoHash: z.string().regex(
+                /^(video-[0-9a-fA-F]{10}|[0-9a-fA-F]{10})$/,
+                {
+                  message:
+                    "This parameter requires a videoHash (starts with 'video-'), but a textSource was passed.",
+                },
+              ),
+            }),
+            handler: () => {
+              skillHandlerWasCalled = true;
+              return Promise.resolve("Success");
+            },
+          }],
+        }],
+        prompt: "You are an AI assistant.",
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+      });
+    })();
+
+    assertEquals(skillHandlerWasCalled, false);
+    assert(
+      mockHistory.some((event) =>
+        event.type === "tool_result" &&
+        event.result.includes("Invalid parameters") &&
+        event.result.includes("This parameter requires a videoHash")
+      ),
+      `Expected invalid parameter error for videoHash. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+  },
+);
+
 runForAllProviders(
   "agent triggers do nothing event after conversation ends with goodbye",
   async (runAgentWithProvider) => {
