@@ -125,6 +125,11 @@ export const coerceArgs = (
   schema: any,
   args: unknown,
 ): { args: unknown; corrections: string[] } => {
+  if (args === undefined || args === null) {
+    if (schema?.type === "object" || schemaProperties(schema) !== undefined) {
+      args = {};
+    }
+  }
   if (!isPlainObject(args)) return { args, corrections: [] };
   const pathIndex = new Map<string, Path[]>();
   collectPaths(schema, [], pathIndex);

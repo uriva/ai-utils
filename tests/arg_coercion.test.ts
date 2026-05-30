@@ -150,3 +150,10 @@ Deno.test("coerceArgs nests flat title under query for video source schema", () 
   assertEquals(args, { query: { title: "Never Let Me Go" } });
   assertEquals(corrections.length, 1);
 });
+
+Deno.test("coerceArgs treats undefined as empty object when schema expects an object", () => {
+  const schema = schemaOf(z.object({}));
+  const { args, corrections } = coerceArgs(schema, undefined);
+  assertEquals(args, {});
+  assertEquals(corrections, []);
+});

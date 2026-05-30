@@ -175,3 +175,32 @@ Deno.test("run_command error includes expected object shape when string is passe
     throw new Error(`expected field hint, got: ${out}`);
   }
 });
+
+Deno.test("run_command handles undefined params when sub-tool expects object", async () => {
+  const skillTools = createSkillTools([
+    {
+      name: "video",
+      description: "video skill",
+      instructions: "x",
+      tools: [
+        tool({
+          name: "check_quota",
+          description: "check quota",
+          parameters: z.object({}),
+          handler: () => Promise.resolve("success"),
+        }),
+      ],
+    },
+  ]);
+  const runCommand = skillTools.find((t) => t.name === "run_command");
+  if (!runCommand) throw new Error("run_command missing");
+  const out = await runCommand.handler(
+    {
+      command: "video/check_quota",
+      params: undefined,
+    },
+    "call-id",
+  );
+  if (typeof out !== "string") throw new Error("expected string result");
+  assertEquals(out.includes("success"), true);
+});
