@@ -1397,7 +1397,7 @@ export type AgentSpec = {
   onStreamThinkingChunk?: (chunk: string) => Promise<void> | void;
   maxIterations: number;
   // deno-lint-ignore no-explicit-any
-  onMaxIterationsReached: () => any;
+  onMaxIterationsReached?: () => any;
   lightModel?: boolean;
   disableStreaming?: boolean;
   provider?: "google" | "moonshot" | "anthropic";
