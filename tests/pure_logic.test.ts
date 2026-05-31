@@ -238,8 +238,10 @@ Deno.test(
       },
     });
 
-    const mockCallModel = (_h: HistoryEvent[]): Promise<HistoryEvent[]> =>
-      Promise.resolve([{
+    const mockCallModel = (h: HistoryEvent[]): Promise<HistoryEvent[]> => {
+      const hasCall = h.some((e) => e.type === "tool_call");
+      if (hasCall) return Promise.resolve([ownUtteranceTurn("Done")]);
+      return Promise.resolve([{
         type: "tool_call" as const,
         id: crypto.randomUUID(),
         timestamp: Date.now(),
@@ -248,6 +250,7 @@ Deno.test(
         parameters: { query: "test" },
         modelMetadata: undefined,
       }]);
+    };
 
     await injectAccessHistory(() => Promise.resolve(history))(
       injectOutputEvent((event) => {
@@ -295,8 +298,10 @@ Deno.test(
       },
     });
 
-    const mockCallModel = (_h: HistoryEvent[]): Promise<HistoryEvent[]> =>
-      Promise.resolve([{
+    const mockCallModel = (h: HistoryEvent[]): Promise<HistoryEvent[]> => {
+      const hasCall = h.some((e) => e.type === "tool_call");
+      if (hasCall) return Promise.resolve([ownUtteranceTurn("Done")]);
+      return Promise.resolve([{
         type: "tool_call" as const,
         id: crypto.randomUUID(),
         timestamp: Date.now(),
@@ -305,6 +310,7 @@ Deno.test(
         parameters: { url: "https://example.com" },
         modelMetadata: undefined,
       }]);
+    };
 
     await injectAccessHistory(() => Promise.resolve(history))(
       injectOutputEvent((event) => {
