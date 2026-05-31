@@ -135,10 +135,15 @@ Deno.test(
   async () => {
     const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
       name: "user",
-      text: "Find the video source for Spider-Man 2.",
+      text: "Find the video source for Spider-Man 3.",
     })];
-    const fakeCallModel = () =>
-      Promise.resolve([
+    let callCount = 0;
+    const fakeCallModel = (_h: HistoryEvent[]) => {
+      callCount += 1;
+      if (callCount > 1) {
+        return Promise.resolve([ownUtteranceTurn("Done")]);
+      }
+      return Promise.resolve([
         {
           type: "tool_call" as const,
           isOwn: true as const,
@@ -147,7 +152,7 @@ Deno.test(
             command: "video_sources/get_best_video_source",
             params: {
               query: {
-                movieName: "Spider-Man 2",
+                movieName: "Spider-Man 3",
                 year: 2004,
               },
             },
@@ -156,6 +161,7 @@ Deno.test(
           timestamp: Date.now(),
         },
       ]);
+    };
     let skillHandlerWasCalled = false;
 
     await injectCallModel(fakeCallModel)(async () => {
@@ -206,10 +212,15 @@ Deno.test(
   async () => {
     const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
       name: "user",
-      text: "Run some action with a videoHash.",
+      text: "Run some action with a videoHash and code.",
     })];
-    const fakeCallModel = () =>
-      Promise.resolve([
+    let callCount = 0;
+    const fakeCallModel = (_h: HistoryEvent[]) => {
+      callCount += 1;
+      if (callCount > 1) {
+        return Promise.resolve([ownUtteranceTurn("Done")]);
+      }
+      return Promise.resolve([
         {
           type: "tool_call" as const,
           isOwn: true as const,
@@ -217,13 +228,14 @@ Deno.test(
           parameters: {
             command: "video_sources/test_action",
             params: {
-              videoHash: "text-eb354dfaa7",
+              videoHash: "text-eb354dfaa8",
             },
           },
           id: "fake-tool-call",
           timestamp: Date.now(),
         },
       ]);
+    };
     let skillHandlerWasCalled = false;
 
     await injectCallModel(fakeCallModel)(async () => {

@@ -5,6 +5,7 @@ import {
   type HistoryEvent,
   injectCallModel,
   learnSkillToolName,
+  ownUtteranceTurn,
   participantUtteranceTurn,
   runCommandToolName,
 } from "../src/agent.ts";
@@ -161,7 +162,7 @@ Deno.test(
           timestamp: Date.now(),
         }]);
       }
-      return Promise.resolve([]);
+      return Promise.resolve([ownUtteranceTurn("Done")]);
     };
     await injectCallModel(fakeCallModel)(async () => {
       await agentDeps(mockHistory)(runAgent)({
@@ -227,7 +228,7 @@ Deno.test(
           timestamp: Date.now(),
         }]);
       }
-      return Promise.resolve([]);
+      return Promise.resolve([ownUtteranceTurn("Done")]);
     };
     await injectCallModel(fakeCallModel)(async () => {
       await agentDeps(mockHistory)(runAgent)({
@@ -287,7 +288,7 @@ Deno.test(
           timestamp: Date.now(),
         }]);
       }
-      return Promise.resolve([]);
+      return Promise.resolve([ownUtteranceTurn("Done")]);
     };
     await injectCallModel(fakeCallModel)(async () => {
       await agentDeps(mockHistory)(runAgent)({
@@ -346,7 +347,7 @@ Deno.test(
           timestamp: Date.now(),
         }]);
       }
-      return Promise.resolve([]);
+      return Promise.resolve([ownUtteranceTurn("Done")]);
     };
     await injectCallModel(fakeCallModel)(async () => {
       await agentDeps(mockHistory)(runAgent)({
