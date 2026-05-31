@@ -257,7 +257,6 @@ Deno.test(
     )(
       {
         maxIterations: 2,
-        onMaxIterationsReached: () => {},
         tools: [],
         skills: [{
           name: "my_skill",
@@ -315,7 +314,6 @@ Deno.test(
     )(
       {
         maxIterations: 2,
-        onMaxIterationsReached: () => {},
         tools: [],
         skills: [{
           name: "web",
@@ -542,7 +540,6 @@ Deno.test(
         )(
           {
             maxIterations: 10,
-            onMaxIterationsReached: () => {},
             tools: [],
             prompt: "test",
             rewriteHistory: async () => {},
@@ -593,7 +590,6 @@ Deno.test(
     )(
       {
         maxIterations: 10,
-        onMaxIterationsReached: () => {},
         tools: [],
         prompt: "test",
         rewriteHistory: async () => {},
@@ -662,7 +658,6 @@ Deno.test(
         )(
           {
             maxIterations: 10,
-            onMaxIterationsReached: () => {},
             tools: [],
             prompt: "test",
             rewriteHistory: async () => {},
@@ -713,7 +708,6 @@ Deno.test(
     )(
       {
         maxIterations: 10,
-        onMaxIterationsReached: () => {},
         tools: [],
         prompt: "test",
         rewriteHistory: async () => {},
@@ -766,7 +760,6 @@ Deno.test(
     )(
       {
         maxIterations: 5,
-        onMaxIterationsReached: () => {},
         tools: [],
         prompt: "test",
         rewriteHistory: async () => {},
@@ -826,7 +819,6 @@ Deno.test(
     )(
       {
         maxIterations: 5,
-        onMaxIterationsReached: () => {},
         tools: [],
         prompt: "test",
         rewriteHistory: async () => {},
@@ -873,7 +865,6 @@ Deno.test(
     )(
       {
         maxIterations: 2,
-        onMaxIterationsReached: () => {},
         tools: [],
         prompt: "test",
         rewriteHistory: async () => {},
@@ -915,7 +906,6 @@ Deno.test(
     )(
       {
         maxIterations: 5,
-        onMaxIterationsReached: () => {},
         tools: [],
         prompt: "test",
         rewriteHistory: async () => {},
@@ -956,7 +946,6 @@ Deno.test(
     )(
       {
         maxIterations: 5,
-        onMaxIterationsReached: () => {},
         tools: [],
         prompt: "test",
         rewriteHistory: async () => {},

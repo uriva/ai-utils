@@ -36,7 +36,6 @@ Deno.test(
     await injectCallModel(fakeCallModel)(async () => {
       await agentDeps(history)(runAgent)({
         maxIterations: 1,
-        onMaxIterationsReached: () => {},
         tools: [],
         prompt: "unused in fake",
         rewriteHistory: noopRewriteHistory,

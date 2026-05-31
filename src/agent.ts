@@ -1396,8 +1396,6 @@ export type AgentSpec = {
   onStreamChunk?: (chunk: string) => Promise<void> | void;
   onStreamThinkingChunk?: (chunk: string) => Promise<void> | void;
   maxIterations: number;
-  // deno-lint-ignore no-explicit-any
-  onMaxIterationsReached?: () => any;
   lightModel?: boolean;
   disableStreaming?: boolean;
   provider?: "google" | "moonshot" | "anthropic";
@@ -1449,7 +1447,7 @@ export const runAbstractAgent = async (
   spec: AgentSpec,
   callModel: (history: HistoryEvent[]) => Promise<HistoryEvent[]>,
 ) => {
-  const { maxIterations, tools, skills, onMaxIterationsReached } = spec;
+  const { maxIterations, tools, skills } = spec;
   const scratchPad = spec.toolOutputScratchPad;
   const allTools = skills && skills.length > 0
     ? [...tools, ...createSkillTools(skills)]
@@ -1471,20 +1469,30 @@ export const runAbstractAgent = async (
     let effectiveHistory = [...history, ...ephemeralHistory];
     let normalizedHistory = normalizeHistoryForModel(effectiveHistory);
 
-    if (c > 0 && maxIterations > 0 && c % maxIterations === 0 && !hasInjectedStopThought) {
-      console.log(`[agent-progress-check] c=${c} maxIterations=${maxIterations} - running progress check with the bigger model`);
+    if (
+      c > 0 && maxIterations > 0 && c % maxIterations === 0 &&
+      !hasInjectedStopThought
+    ) {
+      console.log(
+        `[agent-progress-check] c=${c} maxIterations=${maxIterations} - running progress check with the bigger model`,
+      );
       const checkResult = await checkProgress(spec, normalizedHistory);
       if (!checkResult.shouldContinue) {
         hasInjectedStopThought = true;
-        const stopThought = checkResult.thoughtInjection || "I'm working on this for some time and not making progress. I should instead stop and ask the user for feedback.";
+        const stopThought = checkResult.thoughtInjection ||
+          "I'm working on this for some time and not making progress. I should instead stop and ask the user for feedback.";
         const thoughtEvent = ownThoughtTurn(stopThought);
         await outputEvent(thoughtEvent);
         ephemeralHistory = [...ephemeralHistory, thoughtEvent];
         effectiveHistory = [...history, ...ephemeralHistory];
         normalizedHistory = normalizeHistoryForModel(effectiveHistory);
-        console.log(`[agent-progress-check] stop requested. thought injected. c=${c}`);
+        console.log(
+          `[agent-progress-check] stop requested. thought injected. c=${c}`,
+        );
       } else {
-        console.log(`[agent-progress-check] judged to be good to continue. c=${c}`);
+        console.log(
+          `[agent-progress-check] judged to be good to continue. c=${c}`,
+        );
       }
     }
     console.log(
@@ -1687,10 +1695,10 @@ const historyToPlainTextLocal = (events: HistoryEvent[]): string =>
 
 const StopDecisionSchema = z.object({
   shouldContinue: z.boolean().describe(
-    "Whether it makes sense to continue working towards the goal, or if we are not making progress, stuck in a loop, or need user feedback."
+    "Whether it makes sense to continue working towards the goal, or if we are not making progress, stuck in a loop, or need user feedback.",
   ),
   thoughtInjection: z.string().optional().describe(
-    "If shouldContinue is false, provide the exact system thought that should be injected. MUST start with: 'I'm working on this for some time and not making progress. I should instead...' followed by a brief reason why."
+    "If shouldContinue is false, provide the exact system thought that should be injected. MUST start with: 'I'm working on this for some time and not making progress. I should instead...' followed by a brief reason why.",
   ),
 });
 
@@ -1705,7 +1713,8 @@ const checkProgress = async (
       // If no Gemini token is injected (e.g. in provider-agnostic unit tests), bypass the check gracefully
       return { shouldContinue: true };
     }
-    const systemPrompt = `You are a meta-cognition audit system for an AI agent. Your job is to analyze the user's initial instructions, the conversation history, and the agent's recent tool calls/actions to decide if the agent is making progress toward the user's goals, or if it is stuck in a loop, not making progress, repeatedly executing failing/redundant tools, or wasting tokens.
+    const systemPrompt =
+      `You are a meta-cognition audit system for an AI agent. Your job is to analyze the user's initial instructions, the conversation history, and the agent's recent tool calls/actions to decide if the agent is making progress toward the user's goals, or if it is stuck in a loop, not making progress, repeatedly executing failing/redundant tools, or wasting tokens.
 You must decide whether the agent should continue executing, or if it should pause and ask the user for feedback/clarification/help.
 Be very conservative about token usage: if the agent is repeatedly running the same commands, facing the same errors, or seems lost, immediately stop it so as not to waste tokens.
 If you decide that the agent should stop, you must provide a 'thoughtInjection'. This thought will be injected as an internal thought (own_thought) into the agent's history to guide the agent to stop calling tools and instead explain the situation/errors and ask the user for feedback.

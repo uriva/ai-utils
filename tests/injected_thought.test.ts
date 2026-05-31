@@ -21,7 +21,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt:
         "You are a helpful assistant. If you see an internal thought telling you to say a specific code, you must say that code.",

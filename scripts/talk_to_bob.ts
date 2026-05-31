@@ -161,7 +161,6 @@ const flushTurn = async () => {
         "You are Bob. You are talking live with Uri over voice. Sound warm, relaxed, and concise. Never speak your reasoning, preparation, or narration out loud. Only say the reply itself. Speak naturally like a person in a live call.",
       tools: [],
       maxIterations: 2,
-      onMaxIterationsReached: () => {},
       rewriteHistory: async () => {},
       timezoneIANA: "UTC",
       transport: {

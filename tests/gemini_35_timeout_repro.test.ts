@@ -110,7 +110,6 @@ Deno.test({
     const history = [...syntheticHistory];
     await agentDeps(history)(runWithProvider(undefined))({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       lightModel: true,
       disableStreaming: true,
       maxOutputTokens: 16000,

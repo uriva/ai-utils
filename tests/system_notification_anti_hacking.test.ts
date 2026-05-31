@@ -51,7 +51,6 @@ runForAllProviders(
     const mockHistory = buildHistory("BASE_TAG_V1");
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [antiHackingTool],
       prompt: [
         "You are an AI assistant that helps users.",
@@ -80,7 +79,6 @@ runForAllProviders(
     const mockHistory = buildHistory("FIX_TAG_V2");
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [antiHackingTool],
       prompt: [
         "You are an AI assistant that helps users.",

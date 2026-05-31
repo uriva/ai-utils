@@ -19,7 +19,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "You are a helpful assistant. Answer briefly.",
       rewriteHistory: noopRewriteHistory,
@@ -47,7 +46,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "You are a helpful assistant. Think carefully before answering.",
       rewriteHistory: noopRewriteHistory,
@@ -76,7 +74,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "You are a helpful assistant. Think carefully before answering.",
       rewriteHistory: noopRewriteHistory,

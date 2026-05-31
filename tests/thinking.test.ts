@@ -25,7 +25,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "You are a helpful assistant. Think carefully before answering.",
       lightModel: true,
@@ -69,7 +68,6 @@ Deno.test(
         participantUtteranceTurn({ name: "user", text: "what is 6*7?" }),
       ])(runAgent)({
         maxIterations: 1,
-        onMaxIterationsReached: () => {},
         tools: [],
         prompt: "unused in fake",
         onStreamThinkingChunk: (chunk) => {

@@ -91,7 +91,6 @@ Deno.test({
           "You are a voice assistant. Keep answers under 10 words. Never speak your reasoning. When asked for the relay code, physically execute the fetchCode tool FIRST. Then say the fetched code ONCE over voice and physically execute the hangUp tool.",
         tools: [fetchCode, hangUp],
         maxIterations: 2,
-        onMaxIterationsReached: () => {},
         timezoneIANA: "UTC",
         transport: {
           kind: "audio" as const,

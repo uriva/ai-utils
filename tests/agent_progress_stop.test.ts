@@ -1,13 +1,12 @@
-import { assertRejects, assertEquals } from "@std/assert";
-import { runAgent, injectCallModel } from "../mod.ts";
+import { assertEquals, assertRejects } from "@std/assert";
+import { injectCallModel, runAgent } from "../mod.ts";
+import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
 import {
-  type HistoryEvent,
-  participantUtteranceTurn,
-  ownUtteranceTurn,
-} from "../src/agent.ts";
-import { agentDeps, noopRewriteHistory, runForAllProviders } from "../test_helpers.ts";
+  agentDeps,
+  noopRewriteHistory,
+  runForAllProviders,
+} from "../test_helpers.ts";
 import { z } from "zod/v4";
-import { injectGeminiToken } from "../src/gemini.ts";
 
 Deno.test("runAgent - 200 iteration safety fail safe throws error", async () => {
   const mockHistory: HistoryEvent[] = [
@@ -23,8 +22,10 @@ Deno.test("runAgent - 200 iteration safety fail safe throws error", async () => 
   };
 
   // A fake model that always calls the dummy tool to keep the agent in a loop
-  const fakeCallModel = async (_history: HistoryEvent[]): Promise<HistoryEvent[]> => {
-    return [
+  const fakeCallModel = (
+    _history: HistoryEvent[],
+  ): Promise<HistoryEvent[]> => {
+    return Promise.resolve([
       {
         type: "tool_call" as const,
         id: crypto.randomUUID(),
@@ -33,13 +34,12 @@ Deno.test("runAgent - 200 iteration safety fail safe throws error", async () => 
         parameters: {},
         isOwn: true as const,
       },
-    ];
+    ]);
   };
 
   const agentRunner = injectCallModel(fakeCallModel)(() =>
     agentDeps(mockHistory)(runAgent)({
       maxIterations: 10,
-      onMaxIterationsReached: () => {},
       tools: [dummyTool],
       prompt: "Loop forever.",
       rewriteHistory: noopRewriteHistory,
@@ -52,7 +52,7 @@ Deno.test("runAgent - 200 iteration safety fail safe throws error", async () => 
       await agentRunner();
     },
     Error,
-    "Agent turn limit safety threshold (200) exceeded."
+    "Agent turn limit safety threshold (200) exceeded.",
   );
 });
 
@@ -65,7 +65,10 @@ runForAllProviders(
     // Since the history is a loop, the judge model will decide shouldContinue: false
     // and inject a stop thought, which guides the model to stop and explain.
     const mockHistory: HistoryEvent[] = [
-      participantUtteranceTurn({ name: "user", text: "Please list files in directory" }),
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please list files in directory",
+      }),
       {
         type: "tool_call",
         id: "call-1",
@@ -109,7 +112,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [listFilesTool],
       prompt: "Keep trying to list files in directory.",
       rewriteHistory: noopRewriteHistory,
@@ -119,13 +121,15 @@ runForAllProviders(
     // Verify that the stop thought was successfully injected in history
     const hasStopThought = mockHistory.some((e: HistoryEvent) =>
       e.type === "own_thought" &&
-      e.text.startsWith("I'm working on this for some time and not making progress.")
+      e.text.startsWith(
+        "I'm working on this for some time and not making progress.",
+      )
     );
 
     assertEquals(
       hasStopThought,
       true,
-      "Expected progress audit to run and inject the stop thought"
+      "Expected progress audit to run and inject the stop thought",
     );
   },
   3,

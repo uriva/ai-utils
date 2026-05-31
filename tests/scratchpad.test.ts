@@ -55,7 +55,6 @@ runForAllProviders(
     const scratchPad = makeScratchPad(store);
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 8,
-      onMaxIterationsReached: () => {},
       tools: [dumpLogsTool],
       prompt:
         `You are an AI assistant. When a tool output is spilled to a scratch pad, use the ${readScratchFileToolName} tool (with the grep argument for regex search) to find what you need.`,
@@ -196,7 +195,6 @@ const runFakeGrepAgent = async (
   await injectCallModel(fakeCallModel)(async () => {
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 4,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "test",
       rewriteHistory: noopRewriteHistory,

@@ -48,7 +48,6 @@ const askName = (text: string) =>
 
 const baseSpec = (): Omit<AgentSpec, "provider"> => ({
   maxIterations: 2,
-  onMaxIterationsReached: () => {},
   tools: [
     {
       name: "inspect_media_url",

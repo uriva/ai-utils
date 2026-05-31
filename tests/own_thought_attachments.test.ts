@@ -27,7 +27,6 @@ runForAllProviders(
     ];
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 3,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt:
         "You can see images attached alongside internal thoughts. Describe what you see.",

@@ -48,7 +48,6 @@ Deno.test({
         "You are a friendly assistant. Respond with a short greeting back. Keep responses under 10 words.",
       tools: [],
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       timezoneIANA: "UTC",
       transport: {
         kind: "audio" as const,
@@ -129,7 +128,6 @@ Deno.test({
         "You are a travel assistant. When the user asks you to plan a trip, you MUST call BOTH the get_weather tool AND the book_flight tool. Always call both tools.",
       tools: [fastTool, slowTool],
       maxIterations: 3,
-      onMaxIterationsReached: () => {},
       timezoneIANA: "UTC",
       transport: {
         kind: "audio" as const,
@@ -231,7 +229,6 @@ const runTwoBotExchange = async (): Promise<
       "You are Alice. Greet Bob briefly (under 10 words). Then say goodbye and stop talking.",
     tools: [],
     maxIterations: 1,
-    onMaxIterationsReached: () => {},
     timezoneIANA: "UTC",
     transport: {
       kind: "audio" as const,
@@ -251,7 +248,6 @@ const runTwoBotExchange = async (): Promise<
       "You are Bob. Greet Alice briefly (under 10 words). Then say goodbye and stop talking.",
     tools: [],
     maxIterations: 1,
-    onMaxIterationsReached: () => {},
     timezoneIANA: "UTC",
     transport: {
       kind: "audio" as const,
@@ -519,7 +515,6 @@ Deno.test({
         tools: [],
         skills: [exampleSkill],
         maxIterations: 3,
-        onMaxIterationsReached: () => {},
         timezoneIANA: "UTC",
         transport: {
           kind: "audio" as const,
@@ -585,7 +580,6 @@ Deno.test({
         tools: [],
         skills: [exampleSkill],
         maxIterations: 5,
-        onMaxIterationsReached: () => {},
         timezoneIANA: "UTC",
         transport: {
           kind: "audio" as const,

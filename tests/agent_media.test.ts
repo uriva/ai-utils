@@ -24,7 +24,6 @@ runForAllProviders(
     ];
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 3,
-      onMaxIterationsReached: () => {},
       tools: [{
         name: "returnRawDogImageForVisualChoiceTest",
         description: "Returns raw image bytes as an inline attachment",
@@ -71,7 +70,6 @@ runForAllProviders(
     ];
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 3,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "You can see images attached by the user.",
       lightModel: true,
@@ -104,7 +102,6 @@ runForAllProviders(
     ];
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 3,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt:
         "You can see images and their captions. Always mention the caption information in your response.",
@@ -154,7 +151,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 3,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "You can see images attached by the user.",
       lightModel: true,
@@ -208,7 +204,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
-      onMaxIterationsReached: () => {},
       tools: [{
         name: "returnMediaUrl",
         description: "Returns an image URL as a file attachment",

@@ -77,7 +77,6 @@ runForAllProviders(
     const mockHistory = buildHistory();
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [downloadVideoTool],
       prompt:
         "You are a helpful video assistant. You use the download_video tool to get clips. " +

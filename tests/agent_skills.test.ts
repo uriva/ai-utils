@@ -27,7 +27,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
-      onMaxIterationsReached: () => {},
       tools: [],
       skills: [{
         name: "calculator",
@@ -64,7 +63,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       skills: [weatherSkill],
       prompt: "You are a helpful assistant.",
@@ -101,7 +99,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
-      onMaxIterationsReached: () => {},
       tools: [],
       skills: [localWeatherSkill],
       prompt:
@@ -169,7 +166,6 @@ Deno.test(
     await injectCallModel(fakeCallModel)(async () => {
       await agentDeps(mockHistory)(runAgent)({
         maxIterations: 2,
-        onMaxIterationsReached: () => {},
         tools: [],
         skills: [calendarSkill],
         prompt: "unused in fake",
@@ -236,7 +232,6 @@ Deno.test(
     await injectCallModel(fakeCallModel)(async () => {
       await agentDeps(mockHistory)(runAgent)({
         maxIterations: 2,
-        onMaxIterationsReached: () => {},
         tools: [realTool],
         skills: [calendarSkill],
         prompt: "unused in fake",
@@ -297,7 +292,6 @@ Deno.test(
     await injectCallModel(fakeCallModel)(async () => {
       await agentDeps(mockHistory)(runAgent)({
         maxIterations: 2,
-        onMaxIterationsReached: () => {},
         tools: [],
         skills: [calendarSkill],
         prompt: "unused",
@@ -357,7 +351,6 @@ Deno.test(
     await injectCallModel(fakeCallModel)(async () => {
       await agentDeps(mockHistory)(runAgent)({
         maxIterations: 2,
-        onMaxIterationsReached: () => {},
         tools: [],
         skills: [calendarSkill],
         prompt: "unused",
@@ -408,7 +401,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 10,
-      onMaxIterationsReached: () => {},
       tools: [regularTool],
       skills: [skillTool],
       prompt:

@@ -13,7 +13,6 @@ const runner = injectGeminiToken(Deno.env.get("GEMINI_API_KEY")!)(
         console.log("OUTPUT:", ev.type);
         return Promise.resolve();
       },
-      onMaxIterationsReached: () => console.log("MAX ITERS"),
       maxIterations: 1,
       rewriteHistory: () => Promise.resolve(),
       timezoneIANA: "UTC",

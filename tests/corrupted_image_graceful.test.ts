@@ -59,7 +59,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 3,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt:
         "You are a helpful assistant. If the user sent a corrupted, missing or unsupported file, explain that gracefully and ask them to re-send.",

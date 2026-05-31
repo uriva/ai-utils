@@ -19,7 +19,6 @@ runForAllProviders(
     ];
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
-      onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt:
         "You are an AI assistant. Always think through your approach before taking action. Use [Internal thought, visible only to you: ...] to think.",

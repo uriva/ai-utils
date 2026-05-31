@@ -28,7 +28,6 @@ runForAllProviders(
     })];
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
-      onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt: `You are an AI assistant.`,
       rewriteHistory: noopRewriteHistory,
@@ -57,7 +56,6 @@ runForAllProviders(
     ];
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
-      onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt:
         `You are an AI assistant. Always explain what you're doing before using tools.`,
@@ -100,7 +98,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 10,
-      onMaxIterationsReached: () => {},
       tools: [slowTool],
       prompt:
         "You are an AI assistant. When the user asks for slowTool, call slowTool before answering. If a new user message arrives while a tool is running, respond to that new message on the next iteration.",
@@ -134,56 +131,6 @@ runForAllProviders(
 );
 
 Deno.test(
-  "maxIterationsReached aborts the loop",
-  async () => {
-    let callbackCalled = false;
-    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
-      name: "user",
-      text:
-        "Keep going forever. On every turn, call continueTalking again before anything else.",
-    })];
-    let n = 0;
-    const fakeCallModel = () =>
-      Promise.resolve([
-        {
-          type: "tool_call" as const,
-          isOwn: true as const,
-          name: "continueTalking",
-          parameters: {},
-          id: `fake-tool-${++n}`,
-          timestamp: Date.now(),
-        },
-      ]);
-    await injectCallModel(fakeCallModel)(async () => {
-      await agentDeps(mockHistory)(runAgent)({
-        maxIterations: 3,
-        onMaxIterationsReached: () => {
-          callbackCalled = true;
-        },
-        tools: [{
-          name: "continueTalking",
-          description: "A tool that keeps the conversation going",
-          parameters: z.object({}),
-          handler: async () => {
-            await sleep(5);
-            mockHistory.push(participantUtteranceTurn({
-              name: "user",
-              text: "Keep going, call the tool again!",
-            }));
-            return "continue";
-          },
-        }],
-        prompt:
-          "You are a chatty AI. In every response, call continueTalking before any text. Never stop the loop on your own.",
-        rewriteHistory: noopRewriteHistory,
-        timezoneIANA: "UTC",
-      });
-    })();
-    assert(callbackCalled, "onMaxIterationsReached callback should be called");
-  },
-);
-
-Deno.test(
   "run_command rejects unknown nested skill tool parameters",
   async () => {
     const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
@@ -214,7 +161,6 @@ Deno.test(
     await injectCallModel(fakeCallModel)(async () => {
       await agentDeps(mockHistory)(runAgent)({
         maxIterations: 1,
-        onMaxIterationsReached: () => {},
         tools: [],
         skills: [{
           name: "video_sources",
@@ -283,7 +229,6 @@ Deno.test(
     await injectCallModel(fakeCallModel)(async () => {
       await agentDeps(mockHistory)(runAgent)({
         maxIterations: 1,
-        onMaxIterationsReached: () => {},
         tools: [],
         skills: [{
           name: "video_sources",
@@ -339,7 +284,6 @@ runForAllProviders(
     ];
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt:
         "You are a helpful but concise assistant. When a conversation has clearly ended (goodbyes exchanged), do not respond further. A thumbs up or similar acknowledgment after goodbyes does not require a response.",
@@ -375,7 +319,6 @@ runForAllProviders(
     ];
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
-      onMaxIterationsReached: () => {},
       tools: [deferredTool],
       prompt:
         "You are an assistant. When asked, call the timeout-wakeup tool with the requested parameters.",
@@ -424,7 +367,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt: "You are an AI assistant.",
       rewriteHistory: noopRewriteHistory,
@@ -454,7 +396,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt: "You are an AI assistant.",
       rewriteHistory: noopRewriteHistory,
@@ -490,7 +431,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 5,
-      onMaxIterationsReached: () => {},
       tools: [searchTool],
       prompt: "You are an AI assistant. Call tools exactly as the user asks.",
       rewriteHistory: noopRewriteHistory,
@@ -578,7 +518,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt: "You are an AI assistant.",
       rewriteHistory: noopRewriteHistory,
@@ -625,7 +564,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt: "You are an AI assistant.",
       rewriteHistory: noopRewriteHistory,
@@ -648,7 +586,6 @@ runForAllProviders(
     ];
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
-      onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt:
         "You are an AI assistant. Before any tool call, first say exactly 'Checking now.' in a normal message, then call the tool.",
@@ -703,7 +640,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt: "You are an AI assistant.",
       rewriteHistory: noopRewriteHistory,
@@ -737,7 +673,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt: "You are an AI assistant.",
       rewriteHistory: noopRewriteHistory,
@@ -787,7 +722,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt: "You are an AI assistant.",
       rewriteHistory: noopRewriteHistory,
@@ -845,7 +779,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt: "You are an AI assistant.",
       rewriteHistory: noopRewriteHistory,

@@ -35,7 +35,6 @@ runForAllProviders(
     const { lines } = await withCapturedConsoleLog(() =>
       agentDeps(mockHistory)(runAgentWithProvider)({
         maxIterations: 5,
-        onMaxIterationsReached: () => {},
         tools: [someTool],
         prompt: "You are an AI assistant.",
         rewriteHistory: noopRewriteHistory,

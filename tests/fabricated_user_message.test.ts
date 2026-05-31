@@ -39,7 +39,6 @@ runForAllProviders(
     const mockHistory = buildHistory();
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt:
         "You are a sales assistant for a home appliance store. Continue the conversation naturally in Hebrew. " +

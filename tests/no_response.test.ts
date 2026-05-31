@@ -35,7 +35,6 @@ const runOnce = async (
   ];
   await agentDeps(history)(runAgentWithProvider)({
     maxIterations: 3,
-    onMaxIterationsReached: () => {},
     tools: [],
     prompt: SOCCER_BOT_PROMPT,
     lightModel: true,
@@ -94,7 +93,6 @@ Deno.test("agent strips no-response tag from utterance suffix", async () => {
   await injectCallModel(fakeCallModel)(async () => {
     await agentDeps(history)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "unused in fake",
       rewriteHistory: noopRewriteHistory,
@@ -116,7 +114,6 @@ Deno.test("agent treats LRM and RLM empty responses as do_nothing", async () => 
   await injectCallModel(fakeCallModel)(async () => {
     await agentDeps(history)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "unused in fake",
       rewriteHistory: noopRewriteHistory,

@@ -36,7 +36,6 @@ runForAllProviders(
 
     await agentDeps(history)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [weatherTool],
       prompt:
         "You are a helpful assistant. You MUST use the provided tools to answer questions about the weather — never guess. When asked about weather, always call get_weather with the city.",

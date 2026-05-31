@@ -43,7 +43,6 @@ runForAllProviders(
 
     await agentDeps(history)(runAgentWithProvider)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt:
         "You are a monitor bot. When you have nothing to say, reply an empty string.",
@@ -83,7 +82,6 @@ Deno.test(
     await injectCallModel(fakeCallModel)(async () => {
       await agentDeps(history)(runAgent)({
         maxIterations: 1,
-        onMaxIterationsReached: () => {},
         tools: [],
         prompt: "unused in fake",
         rewriteHistory: noopRewriteHistory,
@@ -107,7 +105,6 @@ Deno.test(
     await injectCallModel(fakeCallModel)(async () => {
       await agentDeps(history)(runAgent)({
         maxIterations: 1,
-        onMaxIterationsReached: () => {},
         tools: [],
         prompt: "unused in fake",
         rewriteHistory: noopRewriteHistory,

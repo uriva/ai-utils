@@ -20,7 +20,6 @@ runForAllProviders(
   async (runAgent) => {
     await agentDeps([ownUtteranceTurn("Priming without user turn")])(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "You are a helper.",
       lightModel: true,
@@ -34,7 +33,6 @@ runForAllProviders(
   "agent can start an empty conversation",
   async (runAgent) => {
     await agentDeps([])(runAgent)({
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: `You are the neighborhood friendly spiderman.`,
       maxIterations: 5,
@@ -54,7 +52,6 @@ runForAllProviders(
       }),
     ];
     await agentDeps(mockHistory)(runAgent)({
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "You are a helpful assistant that writes the full alphabet.",
       maxIterations: 1,
@@ -82,7 +79,6 @@ runForAllProviders(
     }];
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "You are a helper.",
       lightModel: true,
@@ -127,7 +123,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt: "You are a helper.",
       lightModel: true,
@@ -185,7 +180,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [someTool],
       prompt: "You are a helper.",
       lightModel: true,
@@ -241,7 +235,6 @@ runForAllProviders(
     ];
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "You are a helper.",
       lightModel: true,
@@ -277,7 +270,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 5,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "You are a helpful assistant.",
       lightModel: true,
@@ -321,7 +313,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "You are a helpful assistant.",
       lightModel: true,
@@ -374,7 +365,6 @@ Deno.test("agent forwards stream chunks fired by callModel", async () => {
       participantUtteranceTurn({ name: "user", text: "start" }),
     ])(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "unused",
       onStreamChunk: (chunk: string) => {
@@ -401,7 +391,6 @@ runForAllProviders(
 
     await agentDeps(history)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "You are a helpful assistant.",
       rewriteHistory: noopRewriteHistory,
@@ -438,7 +427,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt: "You are a helpful assistant.",
       lightModel: true,
@@ -468,7 +456,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt:
         "You are a silent observer in a group chat. You must never respond to messages between other people. Only respond if someone explicitly addresses you by name.",

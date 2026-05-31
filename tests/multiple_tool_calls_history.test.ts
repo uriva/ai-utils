@@ -84,7 +84,6 @@ runForAllProviders(
 
     await agentDeps(inMemoryHistory)(runAgent)({
       maxIterations: 1,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt:
         "You are a helpful assistant. Respond to the user with a natural, helpful message.",

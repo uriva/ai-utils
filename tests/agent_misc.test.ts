@@ -48,7 +48,6 @@ runForAllProviders(
 
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 5,
-      onMaxIterationsReached: () => {},
       tools: [],
       prompt:
         "You are an AI that strictly follows formatting instructions. When asked to list speakers, reply exactly as instructed without extra text.",
@@ -83,7 +82,6 @@ runForAllProviders(
 
       await agentDeps(mockHistory)(runAgentWithProvider)({
         maxIterations: 2,
-        onMaxIterationsReached: () => {},
         tools: [],
         prompt:
           "You are a helpful assistant. When asked about the time, look at the timestamp shown in brackets before the user's message.",
