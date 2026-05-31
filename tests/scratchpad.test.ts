@@ -5,9 +5,11 @@ import {
   compileGrepPattern,
   type HistoryEvent,
   injectCallModel,
+  maxToolOutputChars,
   participantUtteranceTurn,
   readScratchFileToolName,
   type ToolOutputScratchPad,
+  truncateToolOutput,
 } from "../src/agent.ts";
 import {
   agentDeps,
@@ -66,7 +68,7 @@ runForAllProviders(
     const dumpResult = mockHistory.find(
       (e): e is Extract<HistoryEvent, { type: "tool_result" }> =>
         e.type === "tool_result" &&
-        e.result.includes("Tool output was too large"),
+        e.result.includes("Tool output was truncated"),
     );
     assert(
       dumpResult,
@@ -244,3 +246,22 @@ Deno.test(
     );
   },
 );
+
+Deno.test("truncateToolOutput trims the middle of very large texts and places a nice marker", () => {
+  const shortText = "Hello World";
+  assert(truncateToolOutput(shortText) === shortText);
+
+  const marker = "\n\n<content trimmed due to length>\n\n";
+  const prefix = "A".repeat(15000);
+  const suffix = "B".repeat(15000);
+  const largeText = prefix + suffix;
+  const truncated = truncateToolOutput(largeText);
+
+  assert(truncated.length === maxToolOutputChars);
+  assert(truncated.includes(marker));
+
+  const expectedKeepStart = Math.ceil((maxToolOutputChars - marker.length) / 2);
+  const expectedKeepEnd = Math.floor((maxToolOutputChars - marker.length) / 2);
+  assert(truncated.startsWith("A".repeat(expectedKeepStart)));
+  assert(truncated.endsWith("B".repeat(expectedKeepEnd)));
+});
