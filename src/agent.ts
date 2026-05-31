@@ -1,6 +1,7 @@
 import { context, type Injection } from "@uri/inject";
 import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
+import { accessGeminiToken, geminiGenJson } from "./gemini.ts";
 import { zodToTypingString } from "./toolTyping.ts";
 import { coerceArgs } from "./argCoercion.ts";
 import {
@@ -1459,16 +1460,33 @@ export const runAbstractAgent = async (
   let repetitionFloodRetries = 0;
   let truncationRetries = 0;
   let ephemeralHistory: HistoryEvent[] = [];
+  let hasInjectedStopThought = false;
   while (true) {
     if (await shouldAbort()) return;
     c++;
-    if (c > maxIterations) {
-      onMaxIterationsReached();
-      return;
+    if (c > 200) {
+      throw new Error("Agent turn limit safety threshold (200) exceeded.");
     }
     const history = await getHistory();
-    const effectiveHistory = [...history, ...ephemeralHistory];
-    const normalizedHistory = normalizeHistoryForModel(effectiveHistory);
+    let effectiveHistory = [...history, ...ephemeralHistory];
+    let normalizedHistory = normalizeHistoryForModel(effectiveHistory);
+
+    if (c > 0 && maxIterations > 0 && c % maxIterations === 0 && !hasInjectedStopThought) {
+      console.log(`[agent-progress-check] c=${c} maxIterations=${maxIterations} - running progress check with the bigger model`);
+      const checkResult = await checkProgress(spec, normalizedHistory);
+      if (!checkResult.shouldContinue) {
+        hasInjectedStopThought = true;
+        const stopThought = checkResult.thoughtInjection || "I'm working on this for some time and not making progress. I should instead stop and ask the user for feedback.";
+        const thoughtEvent = ownThoughtTurn(stopThought);
+        await outputEvent(thoughtEvent);
+        ephemeralHistory = [...ephemeralHistory, thoughtEvent];
+        effectiveHistory = [...history, ...ephemeralHistory];
+        normalizedHistory = normalizeHistoryForModel(effectiveHistory);
+        console.log(`[agent-progress-check] stop requested. thought injected. c=${c}`);
+      } else {
+        console.log(`[agent-progress-check] judged to be good to continue. c=${c}`);
+      }
+    }
     console.log(
       `[agent-iter] iter=${c} histLen=${history.length} ephLen=${ephemeralHistory.length} normLen=${normalizedHistory.length}`,
     );
@@ -1654,3 +1672,61 @@ export const estimateAgentInputTokens = (
   history.reduce((total, event) => total + estimateTokens(event), 0) +
   tools.reduce((total, tool) => total + estimateToolTokens(tool), 0) +
   skills.reduce((total, skill) => total + estimateSkillTokens(skill), 0);
+
+const eventToPlainTextLocal = (e: HistoryEvent): string =>
+  e.type === "participant_utterance" || e.type === "own_utterance"
+    ? e.text
+    : e.type === "tool_call"
+    ? `TOOL CALL ${e.name} ${JSON.stringify(e.parameters)}`
+    : e.type === "tool_result"
+    ? `TOOL RESULT ${JSON.stringify(e.result)}`
+    : JSON.stringify(e);
+
+const historyToPlainTextLocal = (events: HistoryEvent[]): string =>
+  events.map(eventToPlainTextLocal).join("\n\n");
+
+const StopDecisionSchema = z.object({
+  shouldContinue: z.boolean().describe(
+    "Whether it makes sense to continue working towards the goal, or if we are not making progress, stuck in a loop, or need user feedback."
+  ),
+  thoughtInjection: z.string().optional().describe(
+    "If shouldContinue is false, provide the exact system thought that should be injected. MUST start with: 'I'm working on this for some time and not making progress. I should instead...' followed by a brief reason why."
+  ),
+});
+
+const checkProgress = async (
+  spec: AgentSpec,
+  normalizedHistory: HistoryEvent[],
+): Promise<{ shouldContinue: boolean; thoughtInjection?: string }> => {
+  try {
+    try {
+      accessGeminiToken();
+    } catch {
+      // If no Gemini token is injected (e.g. in provider-agnostic unit tests), bypass the check gracefully
+      return { shouldContinue: true };
+    }
+    const systemPrompt = `You are a meta-cognition audit system for an AI agent. Your job is to analyze the user's initial instructions, the conversation history, and the agent's recent tool calls/actions to decide if the agent is making progress toward the user's goals, or if it is stuck in a loop, not making progress, repeatedly executing failing/redundant tools, or wasting tokens.
+You must decide whether the agent should continue executing, or if it should pause and ask the user for feedback/clarification/help.
+Be very conservative about token usage: if the agent is repeatedly running the same commands, facing the same errors, or seems lost, immediately stop it so as not to waste tokens.
+If you decide that the agent should stop, you must provide a 'thoughtInjection'. This thought will be injected as an internal thought (own_thought) into the agent's history to guide the agent to stop calling tools and instead explain the situation/errors and ask the user for feedback.
+The thoughtInjection MUST start with: "I'm working on this for some time and not making progress. I should instead..." followed by a description of what it should do instead (e.g., stop and ask the user for help because ...).`;
+
+    const userPrompt = `User Instructions/Goals:
+${spec.prompt}
+
+Conversation History (most recent events):
+${historyToPlainTextLocal(normalizedHistory)}`;
+
+    const decision = await geminiGenJson(
+      { mini: false },
+      systemPrompt,
+      StopDecisionSchema,
+    )(userPrompt);
+
+    return decision;
+  } catch (error) {
+    console.error("Error in meta-cognition stop check:", error);
+    // On error, default to true to avoid blocking the agent due to API hiccups
+    return { shouldContinue: true };
+  }
+};
