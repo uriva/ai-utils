@@ -1,4 +1,4 @@
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { z } from "zod/v4";
 import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
 import {
@@ -252,3 +252,25 @@ runForAllProviders(
   true,
   false,
 );
+
+import { normalizeMimeType } from "../src/gemini.ts";
+
+Deno.test("normalizeMimeType maps TypeScript and code files to text/plain", () => {
+  assertEquals(
+    normalizeMimeType("video/vnd.dlna.mpeg-tts", "file.ts"),
+    "text/plain",
+  );
+  assertEquals(
+    normalizeMimeType("application/octet-stream", "App.tsx"),
+    "text/plain",
+  );
+  assertEquals(
+    normalizeMimeType("application/octet-stream", "index.ts"),
+    "text/plain",
+  );
+  assertEquals(
+    normalizeMimeType("application/octet-stream", "data.json"),
+    "text/plain",
+  );
+  assertEquals(normalizeMimeType("image/jpeg", "dog.jpg"), "image/jpeg");
+});

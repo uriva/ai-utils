@@ -280,6 +280,39 @@ const uploadToGeminiFromFile = (
 export const isGeminiFileUri = (uri: string): boolean =>
   uri.startsWith("https://generativelanguage.googleapis.com/");
 
+const textExtensions = [
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".json",
+  ".css",
+  ".html",
+  ".md",
+  ".py",
+  ".rs",
+  ".go",
+  ".sh",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".xml",
+  ".txt",
+  ".csv",
+];
+
+export const normalizeMimeType = (
+  mimeType: string,
+  fileUri?: string,
+): string => {
+  const normalized = mimeType.toLowerCase().trim();
+  const uriLower = fileUri?.toLowerCase().trim();
+  return normalized === "video/vnd.dlna.mpeg-tts" ||
+      (uriLower && textExtensions.some((ext) => uriLower.endsWith(ext)))
+    ? "text/plain"
+    : mimeType;
+};
+
 export const ensureGeminiAttachmentIsLink = async (
   attachment: MediaAttachment,
 ): Promise<MediaAttachment> => {
@@ -289,7 +322,7 @@ export const ensureGeminiAttachmentIsLink = async (
   if (attachment.kind === "file" && attachment.fileUri.trim()) {
     const { geminiUri, mimeType } = await uploadToGeminiFromUrl(
       attachment.fileUri,
-      attachment.mimeType,
+      normalizeMimeType(attachment.mimeType, attachment.fileUri),
     );
     return {
       kind: "file",
@@ -300,7 +333,7 @@ export const ensureGeminiAttachmentIsLink = async (
   }
   if (attachment.kind === "inline") {
     const { geminiUri, mimeType } = await uploadToGeminiFromFile(
-      attachment.mimeType,
+      normalizeMimeType(attachment.mimeType, attachment.caption),
       attachment.dataBase64,
     );
     return {
