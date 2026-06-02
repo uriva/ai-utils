@@ -710,31 +710,54 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
   const { name, args, id } = fc;
   const toolCallId = id;
   if (!name) throw new Error("Function call name is missing");
+  let normalizedName = name;
+  let normalizedArgs = args;
+  if (
+    name.endsWith(`/${learnSkillToolName}`) ||
+    name.endsWith(`:${learnSkillToolName}`)
+  ) {
+    normalizedName = learnSkillToolName;
+    if (!args || (!args.skillName && !args.skill)) {
+      const separator = name.includes("/") ? "/" : ":";
+      const parts = name.split(separator);
+      normalizedArgs = { ...args, skillName: parts[0] };
+    }
+  }
+  if (
+    normalizedName === learnSkillToolName &&
+    normalizedArgs &&
+    !normalizedArgs.skillName &&
+    normalizedArgs.skill
+  ) {
+    const { skill, ...rest } = normalizedArgs;
+    normalizedArgs = { ...rest, skillName: skill };
+  }
+
   const directMatch: Tool<T> | undefined = actions.find((
     { name: n },
-  ) => n === name);
+  ) => n === normalizedName);
   const slashSkillCall = !directMatch &&
-    (name.includes("/") || name.includes(":"));
+    (normalizedName.includes("/") || normalizedName.includes(":"));
   const unambiguousBare = !directMatch && !slashSkillCall
-    ? resolveUnambiguousBareName(name, skills)
+    ? resolveUnambiguousBareName(normalizedName, skills)
     : undefined;
   const isSkillCall = slashSkillCall || unambiguousBare !== undefined;
-  const skillCommand = unambiguousBare ?? name;
+  const skillCommand = unambiguousBare ?? normalizedName;
   const [action, effectiveArgs] = directMatch
-    ? [directMatch, args]
+    ? [directMatch, normalizedArgs]
     : isSkillCall
     ? [
       actions.find(({ name: n }) => n === runCommandToolName) as
         | Tool<T>
         | undefined,
-      { command: skillCommand, params: args },
+      { command: skillCommand, params: normalizedArgs },
     ]
-    : [undefined, args];
+    : [undefined, normalizedArgs];
   if (!action) {
-    reportToolNotFound(name);
+    reportToolNotFound(normalizedName);
     return {
       toolCallId,
-      result: toolNotFoundMessage(name, actions, skills),
+      result: toolNotFoundMessage(normalizedName, actions, skills),
     };
   }
   const { handler, parameters } = action;

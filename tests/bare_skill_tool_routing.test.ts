@@ -75,3 +75,22 @@ Deno.test("bare unknown tool name returns not-found", async () => {
     true,
   );
 });
+
+Deno.test("prefixed or malformed learn_skill calls are normalized and routed correctly", async () => {
+  const skillTools = createSkillTools([todoSkill]);
+  const out1 = await callToResult(skillTools, [todoSkill])({
+    name: "todo/learn_skill",
+    args: {},
+    id: "call-4",
+  });
+  if (!out1) throw new Error("expected a result");
+  assertEquals(out1.result.includes("todo skill"), true);
+
+  const out2 = await callToResult(skillTools, [todoSkill])({
+    name: "learn_skill",
+    args: { skill: "todo" },
+    id: "call-5",
+  });
+  if (!out2) throw new Error("expected a result");
+  assertEquals(out2.result.includes("todo skill"), true);
+});
