@@ -17,6 +17,7 @@ import {
   sum,
 } from "gamla";
 import {
+  collapseDuplicatedText,
   isRetryableError,
   isSyntheticTimeoutError,
   stripAnsi,
@@ -1612,7 +1613,9 @@ const geminiOutputPartToHistoryEvent =
         responseId,
         thoughtSignature: p.thoughtSignature ?? "",
       };
-      const text = typeof p.text === "string" ? p.text : "";
+      const text = collapseDuplicatedText(
+        typeof p.text === "string" ? p.text : "",
+      );
 
       const stripped = stripInternalSentTimestampSuffix(text);
       const anchoredThoughtRegex = new RegExp(

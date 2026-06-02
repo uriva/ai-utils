@@ -68,3 +68,23 @@ export const stripAnsi = (text: string): string => {
     "",
   );
 };
+
+export const collapseDuplicatedText = (text: string): string => {
+  const trimmed = text.trim();
+  const len = trimmed.length;
+  if (len < 80) return text;
+  const halfLen = Math.floor(len / 2);
+  const firstHalf = trimmed.slice(0, halfLen).trim();
+  const secondHalf = trimmed.slice(halfLen).trim();
+  if (firstHalf === secondHalf) {
+    const origLen = text.length;
+    const origHalfLen = Math.floor(origLen / 2);
+    const origFirst = text.slice(0, origHalfLen);
+    const origSecond = text.slice(origHalfLen);
+    if (origFirst.trim() === origSecond.trim()) {
+      return origFirst;
+    }
+    return firstHalf;
+  }
+  return text;
+};

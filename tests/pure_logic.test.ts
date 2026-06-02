@@ -19,6 +19,7 @@ import {
   filterAndRewriteInvalidToolCalls,
   filterOrphanedToolResults,
   geminiMalformedFunctionCallError,
+  geminiOutputToHistoryEvents,
   rejectMalformedFunctionCall,
   stripEmbeddedThoughtPatterns,
 } from "../src/geminiAgent.ts";
@@ -28,6 +29,7 @@ import {
   geminiProVersion,
 } from "../src/gemini.ts";
 import {
+  collapseDuplicatedText,
   isEmojiFlood,
   isRepetitionFlood,
   isRetryableError,
@@ -618,6 +620,47 @@ Deno.test("isRepetitionFlood returns false for normal text", () => {
   assertEquals(isRepetitionFlood("Hello world! This is normal text."), false);
   assertEquals(isRepetitionFlood("ha ha ha ha ha"), false);
   assertEquals(isRepetitionFlood("yes yes yes"), false);
+});
+
+Deno.test("collapseDuplicatedText behavior", () => {
+  // 1. Should not interfere with short organic repetitions
+  assertEquals(collapseDuplicatedText("yes yes yes"), "yes yes yes");
+  assertEquals(
+    collapseDuplicatedText("ha ha ha ha ha ha ha ha ha ha ha ha ha ha"),
+    "ha ha ha ha ha ha ha ha ha ha ha ha ha ha",
+  );
+
+  // 2. Should collapse perfect duplicate > 80 chars
+  const longSentence =
+    "This is a very long sentence designed to test the duplication collapsing helper. It must be more than eighty characters long.";
+  const duplicated = `${longSentence} ${longSentence}`;
+  assertEquals(collapseDuplicatedText(duplicated), longSentence);
+
+  // 3. Should not collapse non-perfect duplicates
+  const almostDuplicated =
+    `${longSentence} ${longSentence} slightly different ending.`;
+  assertEquals(collapseDuplicatedText(almostDuplicated), almostDuplicated);
+});
+
+Deno.test("geminiOutputToHistoryEvents collapses duplicated text parts", () => {
+  const longSentence =
+    "This is a very long sentence designed to test the duplication collapsing helper. It must be more than eighty characters long.";
+  const duplicated = `${longSentence} ${longSentence}`;
+
+  const output = [
+    {
+      type: "text" as const,
+      text: duplicated,
+    },
+  ];
+
+  const events = geminiOutputToHistoryEvents(output);
+  assertEquals(events.length, 1);
+  assertEquals(events[0].type, "own_utterance");
+  assertEquals(
+    (events[0] as Extract<HistoryEvent, { type: "own_utterance" }>).text,
+    longSentence,
+  );
 });
 
 Deno.test("isRepetitionFlood returns true for </u> flood", () => {
