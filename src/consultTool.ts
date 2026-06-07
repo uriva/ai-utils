@@ -33,8 +33,21 @@ export const createConsultTool = (
   parameters: consultParameters,
   handler: async ({ question }) => {
     const history = await accessHistory();
+    const consultToolCall = [...history]
+      .reverse()
+      .find((e) => e.type === "tool_call" && e.name === consultToolName);
     const withQuestion: HistoryEvent[] = [
       ...history,
+      ...(consultToolCall
+        ? [{
+          type: "tool_result" as const,
+          id: `${consultToolCall.id}-synthetic-result`,
+          timestamp: Date.now(),
+          isOwn: true as const,
+          result: "[Consulting the stronger model...]",
+          toolCallId: consultToolCall.id,
+        }]
+        : []),
       participantUtteranceTurn({
         name: "weaker_model",
         text:

@@ -100,7 +100,7 @@ const injectDeterministic = (f: () => Promise<void>) => () =>
 const rmmbrCacher = (cacheId: string) =>
   cache({
     cacheId,
-    ttl: 60 * 60 * 24 * 30,
+    ttl: cacheId.includes("upload") ? 60 * 60 * 24 : 60 * 60 * 24 * 30,
     url: "https://rmmbr.net",
     token: rmmbrToken,
   }) as Injector;
