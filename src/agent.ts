@@ -1210,7 +1210,7 @@ export const normalizeHistoryForModel = (
       isOwn: true,
       id: `${event.id}-synthetic-result`,
       timestamp: event.timestamp,
-      result: "[Tool result unavailable]",
+      result: "[Tool result pending - still processing in the background]",
       toolCallId: event.id,
     };
     return [...acc, event, syntheticResult];

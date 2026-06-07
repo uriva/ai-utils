@@ -412,7 +412,7 @@ const syntheticToolResult = (
 ): Anthropic.Messages.ToolResultBlockParam => ({
   type: "tool_result" as const,
   tool_use_id: toolUseId,
-  content: "[Tool result unavailable]",
+  content: "[Tool result pending - still processing in the background]",
 });
 
 const allToolUseIds = (

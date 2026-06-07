@@ -368,7 +368,8 @@ async (events: KimiHistoryEvent[]): Promise<KimiRequestParams> => {
           toolMsg ?? {
             role: "tool",
             tool_call_id: tc.id,
-            content: "[Tool result unavailable]",
+            content:
+              "[Tool result pending - still processing in the background]",
           },
         );
       }
