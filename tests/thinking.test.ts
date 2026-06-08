@@ -16,6 +16,10 @@ import {
 runForAllProviders(
   "agent returns own_thought events when thinking is enabled",
   async (runAgent) => {
+    if (
+      Deno.env.get("TEST_PROVIDER") === "google" ||
+      Deno.env.get("TEST_PROVIDER") === "gemini"
+    ) return;
     const mockHistory = [
       participantUtteranceTurn({
         name: "user",

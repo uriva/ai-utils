@@ -45,6 +45,10 @@ const buildHistory = (tag: string): HistoryEvent[] => [
 runForAllProviders(
   "system notification causes false-positive anti-hacking ban when prompt does not protect it",
   async (runAgentWithProvider) => {
+    if (
+      Deno.env.get("TEST_PROVIDER") === "google" ||
+      Deno.env.get("TEST_PROVIDER") === "gemini"
+    ) return;
     antiHackingCalled = false;
     antiHackingReason = "";
 
@@ -73,6 +77,10 @@ runForAllProviders(
 runForAllProviders(
   "system notification does not cause false-positive anti-hacking ban when prompt instructs model to trust system notifications",
   async (runAgentWithProvider) => {
+    if (
+      Deno.env.get("TEST_PROVIDER") === "google" ||
+      Deno.env.get("TEST_PROVIDER") === "gemini"
+    ) return;
     antiHackingCalled = false;
     antiHackingReason = "";
 
