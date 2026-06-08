@@ -120,9 +120,25 @@ const resolveCallModel = (spec: AgentSpec): CallModel => {
 
 const builtinTools = [inspectMediaUrlTool];
 
+// The strong model runs as a single CallModel turn and we only keep its text
+// reply. With tools it leads with a tool_call and emits no text; even tool-less
+// it stays silent when the weaker model asks it to "act". So strip tools/skills
+// and prepend a consult-role preamble framing it as an advisor that must answer
+// in text — otherwise `consult` returns "[stronger model returned no text]".
+const consultRolePreamble =
+  "You are the stronger model in your AI family. The weaker model handling the conversation below has paused to consult you for advice. You are advising it, not continuing the conversation, and you have no tools and cannot take any action — respond with your reasoning and recommendation as plain text. Always give a substantive answer; never reply with nothing.";
+
 const consultBuiltin = (spec: AgentSpec) =>
   spec.lightModel
-    ? [createConsultTool(resolveCallModel({ ...spec, lightModel: false }))]
+    ? [createConsultTool(
+      resolveCallModel({
+        ...spec,
+        lightModel: false,
+        tools: [],
+        skills: [],
+        prompt: `${consultRolePreamble}\n\n${spec.prompt}`,
+      }),
+    )]
     : [];
 
 const addBuiltinTools = (spec: AgentSpec): AgentSpec => {

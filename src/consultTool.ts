@@ -51,7 +51,7 @@ export const createConsultTool = (
       participantUtteranceTurn({
         name: "weaker_model",
         text:
-          `I am the weaker model handling this conversation and I need advice. ${question}`,
+          `I am the weaker model handling this conversation and I need your advice. You have no tools here and cannot act on my behalf — answer me directly with text guidance based on the conversation and your own reasoning. ${question}`,
       }),
     ];
     const reply = await strongCallModel(withQuestion);

@@ -1,6 +1,7 @@
 import {
   type Content,
   type FunctionCall,
+  FunctionCallingConfigMode,
   type GenerateContentParameters,
   type GenerateContentResponseUsageMetadata,
   GoogleGenAI,
@@ -780,6 +781,22 @@ const fixStart = (history: Content[]) =>
     ]
     : history;
 
+// With no function declarations, force `NONE` so the model cannot emit a
+// (hallucinated) function call by mimicking function_call parts already in
+// history — it must answer with text. With declarations present, leave the
+// config empty (AUTO) so the model decides.
+const toolingConfig = (tools: Tool<ZodType>[]) =>
+  empty(tools)
+    ? {
+      toolConfig: {
+        functionCallingConfig: { mode: FunctionCallingConfigMode.NONE },
+      },
+    }
+    : {
+      tools: [{ functionDeclarations: tools.map(actionToTool) }],
+      toolConfig: { functionCallingConfig: {} },
+    };
+
 export const buildReq = (
   lightModel: boolean | undefined,
   prompt: string,
@@ -791,8 +808,7 @@ export const buildReq = (
   model: geminiModelVersion(lightModel),
   config: {
     systemInstruction: prompt,
-    tools: [{ functionDeclarations: tools.map(actionToTool) }],
-    toolConfig: { functionCallingConfig: {} },
+    ...toolingConfig(tools),
     thinkingConfig: geminiThinkingConfig(lightModel),
     ...(maxOutputTokens ? { maxOutputTokens } : {}),
   },
