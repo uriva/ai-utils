@@ -15,7 +15,7 @@ import {
   runWithProvider,
 } from "../test_helpers.ts";
 
-const inlineUploadCacheId = "gemini-inline-upload-v1";
+const inlineUploadCacheId = "gemini-inline-upload-v2";
 
 const countingCacher = (
   counters: Map<string, number>,
