@@ -897,3 +897,50 @@ llmTest(
   }),
   1,
 );
+
+llmTest(
+  "summarizeEvents identifies active skills that must be re-learned after compaction",
+  injectSecrets(async () => {
+    const base = Date.now();
+    const events: HistoryEvent[] = [
+      makeParticipantUtterance("I want to integrate a service", base),
+      {
+        id: "call-1",
+        type: "tool_call",
+        isOwn: true,
+        name: "learn_skill",
+        parameters: { skillName: "p2b-coder" },
+        timestamp: base + 1000,
+      },
+      {
+        id: crypto.randomUUID(),
+        type: "tool_result",
+        isOwn: true,
+        toolCallId: "call-1",
+        result: JSON.stringify({
+          name: "p2b-coder",
+          description: "Coder skill with strict guidelines",
+          instructions: "STRICT RULE: Do not ask for screenshots.",
+          tools: [],
+        }),
+        timestamp: base + 2000,
+      },
+      makeOwnUtterance("I loaded the p2b-coder skill guidelines.", base + 3000),
+    ];
+
+    const summary = await summarizeEvents(events);
+    console.log("Summary:\n", summary);
+
+    const lowercaseSummary = summary.toLowerCase();
+    assertEquals(
+      lowercaseSummary.includes("p2b-coder"),
+      true,
+      `Summary should identify 'p2b-coder' as a skill to re-learn.\nFull summary:\n${summary}`,
+    );
+    assertEquals(
+      summary.includes("Active Skills to Re-Learn"),
+      true,
+      `Summary should contain the active skills instruction block.\nFull summary:\n${summary}`,
+    );
+  }),
+);

@@ -210,6 +210,9 @@ const structuredSummarySchema = z.object({
   context: z.string().describe(
     "Any other important context needed to continue the conversation coherently.",
   ),
+  skillsToReLearn: z.string().describe(
+    "List of active/used skills from the history that were learned (via the learn_skill tool) and are now compacted away, which the assistant must call learn_skill on immediately on the next turn to reload. If no skills were learned/active, write 'None'.",
+  ),
 });
 
 const formatStructuredSummary = ({
@@ -219,8 +222,9 @@ const formatStructuredSummary = ({
   pendingItems,
   abandonedItems,
   context,
-}: z.infer<typeof structuredSummarySchema>) =>
-  [
+  skillsToReLearn,
+}: z.infer<typeof structuredSummarySchema>) => {
+  const parts = [
     "Past conversation history was compacted into a structured summary.",
     "",
     "## Key Entities",
@@ -240,7 +244,22 @@ const formatStructuredSummary = ({
     "",
     "## Context",
     context,
-  ].join("\n");
+  ];
+
+  if (
+    skillsToReLearn && skillsToReLearn.trim() &&
+    skillsToReLearn.toLowerCase() !== "none"
+  ) {
+    parts.push(
+      "",
+      "## Active Skills to Re-Learn",
+      "The following skills were active in the history but their instructions were compacted away. You MUST call learn_skill immediately for each of them on the next turn to recover your guidelines before taking any other action:",
+      skillsToReLearn,
+    );
+  }
+
+  return parts.join("\n");
+};
 
 export const summarizeEvents = async (
   events: HistoryEvent[],
@@ -260,7 +279,10 @@ Important rules for Pending Items vs Abandoned Items:
 - If the user explicitly confirmed or rejected a proposal, note that in Decisions.
 - If the user moved on to a different topic or chose an alternative WITHOUT explicitly confirming or rejecting a proposal, treat the original proposal as ABANDONED (put it in Abandoned Items, not Pending Items).
 - Only put something in Pending Items if there is a clear open question, unresolved request, or next step the user still expects.
-- Never keep a specific proposal as pending just because the user did not explicitly say no to it.`,
+- Never keep a specific proposal as pending just because the user did not explicitly say no to it.
+
+Important rule for Active Skills to Re-Learn:
+- Under skillsToReLearn, identify any skills that were actively learned or used in the history (look for learn_skill tool calls and results) and list them. If no skills were learned or used, write 'None'.`,
       structuredSummarySchema,
     )(eventsToPlainText(events)),
   );
