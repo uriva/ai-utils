@@ -1348,7 +1348,7 @@ export const stripAllExpiredFiles = async (
   let currentEvents = events;
   let currentError = initialError;
   const allReplacements: Record<string, GeminiHistoryEvent> = {};
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 20; attempt++) {
     const fixed = stripExpiredFile(currentError, currentEvents);
     if (!fixed) throw currentError;
     if (empty(Object.keys(fixed.replacements))) {
@@ -1388,7 +1388,7 @@ export const stripAllExpiredFiles = async (
     }
   }
   throw new Error(
-    `403 persists after 5 attempts to strip expired files: ${currentError.message}`,
+    `403 persists after 20 attempts to strip expired files: ${currentError.message}`,
   );
 };
 

@@ -241,7 +241,7 @@ const fetchAndUploadToGeminiCached = (
   url: string,
   mimeType: string,
 ): Promise<UploadResult> =>
-  makeCache("gemini-file-upload-v2")(
+  makeCache("gemini-file-upload-v3")(
     conditionalRetry(isRetryableUploadError)(1000, 3, fetchAndUploadToGemini),
   )(url, mimeType);
 
@@ -263,7 +263,7 @@ const uploadToGeminiFromFile = (
   mimeType: string,
   dataBase64: string,
 ): Promise<UploadResult> =>
-  makeCache("gemini-inline-upload-v2")(uploadToGeminiFromFileInner)(
+  makeCache("gemini-inline-upload-v3")(uploadToGeminiFromFileInner)(
     mimeType,
     dataBase64,
   );
