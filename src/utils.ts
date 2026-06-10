@@ -1,6 +1,10 @@
 import { type EitherOutput, type Func, throwerCatcher } from "gamla";
 
-export type ModelOpts = { mini: boolean; maxOutputTokens?: number };
+export type ModelOpts = {
+  mini: boolean;
+  maxOutputTokens?: number;
+  provider?: "google" | "openai" | "gemini";
+};
 
 const typeAdherenceError = throwerCatcher("AI refused to adhere to typing");
 

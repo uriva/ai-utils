@@ -13,7 +13,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z, type ZodType } from "zod/v4";
 import type { MediaAttachment } from "./agent.ts";
 import { makeCache } from "./cacher.ts";
-import { structuredMsgs } from "./openai.ts";
+
 import { pruneDefaultsFromRequired } from "./toolTyping.ts";
 
 export { zodToTypingString } from "./toolTyping.ts";
@@ -159,15 +159,6 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
     }),
   );
 };
-
-export const geminiGenJson =
-  <T extends ZodType>(opts: ModelOpts, systemMsg: string, zodType: T) =>
-  (userMsg: string): Promise<z.TypeOf<T>> =>
-    geminiGenJsonFromConvo(
-      opts,
-      structuredMsgs(systemMsg, userMsg),
-      zodType,
-    );
 
 export const attachmentsToParts = (
   attachments: MediaAttachment[],

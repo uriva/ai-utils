@@ -8,6 +8,7 @@ import type {
 import z, { type ZodType } from "zod/v4";
 import { makeCache } from "./cacher.ts";
 import { aiRefusesToAdhereTyping, type ModelOpts } from "./utils.ts";
+import { genJson } from "./genJson.ts";
 
 const tokenInjection: Injection<() => string> = context((): string => {
   throw new Error("no openai token injected");
@@ -55,15 +56,6 @@ export const structuredMsgs = (
   { role: "user", content: userMsg },
 ];
 
-export const openAiGenJson =
-  <T extends ZodType>(opts: ModelOpts, systemMsg: string, zodType: T) =>
-  (userMsg: string): Promise<z.infer<T>> =>
-    openAiGenJsonFromConvo(
-      opts,
-      structuredMsgs(systemMsg, userMsg),
-      zodType,
-    );
-
 const numberedItem = (x: string, i: number) => `(${i}): ${x}`;
 
 const makePromptForMatching = (
@@ -102,7 +94,7 @@ export const openAiMatching = <X, Y>(
 (xs: X[], ys: Y[]): Promise<[X, Y, string][]> =>
   pipe(
     makePromptForMatching,
-    openAiGenJson(opts, "", OutputZod),
+    genJson({ ...opts, provider: "openai" }, "", OutputZod),
     prop<Output>()("results"),
     map(([indA, indB, reasoning]: Output["results"][0]) =>
       [xs[indA], ys[indB], reasoning] satisfies [X, Y, string]

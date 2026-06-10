@@ -48,11 +48,11 @@ instead of running a full agent loop. Pass a Zod schema and get back a typed
 object.
 
 ```ts
-import { geminiGenJson, injectGeminiToken } from "@uri/ai-utils";
+import { genJson, injectGeminiToken } from "@uri/ai-utils";
 import { z } from "@uri/ai-utils";
 
-const extract = geminiGenJson(
-  { mini: true },
+const extract = genJson(
+  { provider: "google", mini: true },
   "Extract the person's name and age from the text.",
   z.object({ name: z.string(), age: z.number() }),
 );
@@ -63,7 +63,7 @@ const result = await injectGeminiToken("YOUR_KEY")(
 // { name: "Alice", age: 30 }
 ```
 
-Works the same way with OpenAI via `openAiGenJson`.
+Works the same way with OpenAI via `provider: "openai"`.
 
 ## History compaction
 

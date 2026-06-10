@@ -10,7 +10,7 @@ import {
   segmentHistoryEvents,
   summarizeEvents,
 } from "../src/compaction.ts";
-import { geminiGenJson } from "../src/gemini.ts";
+import { genJson } from "../src/genJson.ts";
 import { injectSecrets, llmTest } from "../test_helpers.ts";
 
 const makeOwnUtterance = (
@@ -834,8 +834,8 @@ const fabricationJudgeSchema = z.object({
 });
 
 const judgeFabrications = (source: string, summary: string) =>
-  geminiGenJson(
-    { mini: true },
+  genJson(
+    { provider: "google", mini: true },
     `You are checking whether a conversation summary fabricated specific named entities (proper nouns) that were not present in the original conversation events.
 
 You will be given:

@@ -1,7 +1,8 @@
 import { context, type Injection } from "@uri/inject";
 import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
-import { accessGeminiToken, geminiGenJson } from "./gemini.ts";
+import { accessGeminiToken } from "./gemini.ts";
+import { genJson } from "./genJson.ts";
 import { zodToTypingString } from "./toolTyping.ts";
 import { coerceArgs } from "./argCoercion.ts";
 import {
@@ -1757,8 +1758,8 @@ ${spec.prompt}
 Conversation History (most recent events):
 ${historyToPlainTextLocal(normalizedHistory)}`;
 
-    const decision = await geminiGenJson(
-      { mini: false },
+    const decision = await genJson(
+      { provider: "google", mini: false },
       systemPrompt,
       StopDecisionSchema,
     )(userPrompt);

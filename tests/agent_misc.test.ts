@@ -2,7 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import { each, pipe } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z } from "zod/v4";
-import { geminiGenJsonFromConvo, openAiGenJsonFromConvo } from "../mod.ts";
+import { genJsonFromConvo } from "../mod.ts";
 import {
   type HistoryEvent,
   overrideTime,
@@ -22,12 +22,16 @@ runForAllProviders(
       { role: "system", content: "Say hello as JSON." },
       { role: "user", content: "hello" },
     ];
-    await each((service) =>
+    await each((provider) =>
       each(async (mini) => {
-        const result = await service({ mini }, messages, schema);
+        const result = await genJsonFromConvo(
+          { provider, mini },
+          messages,
+          schema,
+        );
         assertEquals(result, { hello: result.hello });
       })([true, false])
-    )([openAiGenJsonFromConvo, geminiGenJsonFromConvo]);
+    )(["openai", "google"]);
   },
 );
 

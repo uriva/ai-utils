@@ -11,7 +11,7 @@ import {
 } from "gamla";
 import { z } from "zod/v4";
 import { estimateTokens, type HistoryEvent } from "./agent.ts";
-import { geminiGenJson } from "./gemini.ts";
+import { genJson } from "./genJson.ts";
 
 export type HistorySegment = {
   events: HistoryEvent[];
@@ -265,8 +265,8 @@ export const summarizeEvents = async (
   events: HistoryEvent[],
 ): Promise<string> =>
   formatStructuredSummary(
-    await geminiGenJson(
-      { mini: false },
+    await genJson(
+      { provider: "google", mini: false },
       `Summarize the following conversation into structured sections. Write from the assistant's perspective. Be concise but preserve all important details, especially names, numbers, and specific facts that would be needed to continue the conversation.
 
 Critical anti-fabrication rules:

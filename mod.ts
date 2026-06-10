@@ -36,12 +36,11 @@ export {
 } from "./src/compaction.ts";
 export { injectCacher } from "./src/cacher.ts";
 export {
-  geminiGenJson,
-  geminiGenJsonFromConvo,
   geminiGenText,
   injectGeminiModelVersions,
   injectGeminiToken,
 } from "./src/gemini.ts";
+export { genJson, genJsonFromConvo } from "./src/genJson.ts";
 export {
   injectGeminiErrorLogger,
   injectGeminiModelCallTimeoutMs,
@@ -50,12 +49,7 @@ export {
 } from "./src/geminiAgent.ts";
 export { injectKimiToken } from "./src/kimiAgent.ts";
 export { injectAnthropicToken } from "./src/anthropicAgent.ts";
-export {
-  injectOpenAiToken,
-  openAiGenJson,
-  openAiGenJsonFromConvo,
-  openAiMatching,
-} from "./src/openai.ts";
+export { injectOpenAiToken, openAiMatching } from "./src/openai.ts";
 export { catchAiRefusesToAdhereToTyping, type ModelOpts } from "./src/utils.ts";
 export {
   type AudioSessionConfig,
