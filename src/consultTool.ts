@@ -31,6 +31,7 @@ export const createConsultTool = (
   description:
     "Ask the stronger model in your family for advice on the current conversation. The stronger model receives the full conversation history plus your question and returns guidance. Use this for hard reasoning, ambiguous decisions, or when you are unsure.",
   parameters: consultParameters,
+  describe: ({ question }) => `Consulting stronger model about "${question}"`,
   handler: async ({ question }) => {
     const history = await accessHistory();
     const consultToolCall = [...history]

@@ -197,6 +197,7 @@ export const createReadScratchFileTool = (
   description:
     `Read a tool output that was spilled to the scratch pad. Returns up to ${maxScratchReadLines} lines per call. Use 'startLine' (1-indexed) to paginate, or 'grep' (regex) to filter lines.`,
   parameters: readScratchFileParameters,
+  describe: ({ id }) => `Reading scratch pad file "${id}"`,
   handler: async ({ id, startLine, numLines, grep }) => {
     const content = await scratchPad.get(id);
     if (content === undefined) {
@@ -249,6 +250,7 @@ type ToolBase<T extends ZodType> = {
   description: string;
   name: string;
   parameters: T;
+  describe?: (params: z.infer<T>) => string;
 };
 
 export type Tool<T extends ZodType> = ToolBase<T> & {
@@ -329,6 +331,7 @@ type ToolUseWithMetadata<T, ModelMetadata> = {
   name: string;
   modelMetadata?: ModelMetadata;
   parameters: T;
+  description?: string;
 } & SharedFields;
 
 export type ToolUse<T> = ToolUseWithMetadata<T, unknown>;
@@ -1279,6 +1282,7 @@ export const doNothingTool: Tool<
   description:
     "Call this tool when you have nothing to say and should not respond. Use this instead of writing an empty message, HTML comment, or any placeholder text.",
   parameters: z.object({ reason: z.string().optional() }),
+  describe: () => "Doing nothing",
   handler: () => Promise.resolve(""),
 };
 
@@ -1318,6 +1322,24 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         ),
         params: z.any().describe("The parameters for the tool"),
       }),
+      describe: ({ command, params }) => {
+        const separator = command.includes("/") ? "/" : ":";
+        const lastSep = command.lastIndexOf(separator);
+        const toolName = lastSep !== -1 ? command.slice(lastSep + 1) : command;
+        const skillName = lastSep !== -1 ? command.slice(0, lastSep) : "";
+        const fullToolName = lastSep !== -1
+          ? `${skillName}/${toolName}`
+          : command;
+        const targetTool = toolMap[fullToolName];
+        if (targetTool && targetTool.describe) {
+          try {
+            return targetTool.describe(params);
+          } catch {
+            // fallback
+          }
+        }
+        return `Running ${command}`;
+      },
       handler: async ({ command, params }, toolCallId) => {
         const separator = command.includes("/") ? "/" : ":";
         const lastSep = command.lastIndexOf(separator);
@@ -1363,6 +1385,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
       parameters: z.object({
         skillName: z.string().describe("The name of the skill to learn about"),
       }),
+      describe: ({ skillName }) => `Learning skill "${skillName}"`,
       handler: ({ skillName }) => {
         const skill = skillMap[skillName];
         if (!skill) {
@@ -1396,6 +1419,8 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           "The name of the reference file to read (e.g., 'cbt-protocols.md')",
         ),
       }),
+      describe: ({ skillName, referenceName }) =>
+        `Reading reference "${referenceName}" from skill "${skillName}"`,
       handler: ({ skillName, referenceName }) => {
         const skill = skillMap[skillName];
         if (!skill) {
@@ -1417,6 +1442,89 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
       },
     }),
   ];
+};
+
+export const resolveToolDescription = (
+  // deno-lint-ignore no-explicit-any
+  allTools: Tool<any>[],
+  name: string,
+  // deno-lint-ignore no-explicit-any
+  parameters: any,
+  skills: Skill[] = [],
+): string | undefined => {
+  let normalizedName = name;
+  let normalizedArgs = parameters;
+  if (
+    name.endsWith(`/${learnSkillToolName}`) ||
+    name.endsWith(`:${learnSkillToolName}`)
+  ) {
+    normalizedName = learnSkillToolName;
+    if (!parameters || (!parameters.skillName && !parameters.skill)) {
+      const separator = name.includes("/") ? "/" : ":";
+      const parts = name.split(separator);
+      normalizedArgs = { ...parameters, skillName: parts[0] };
+    }
+  }
+  if (
+    normalizedName === learnSkillToolName &&
+    normalizedArgs &&
+    !normalizedArgs.skillName &&
+    normalizedArgs.skill
+  ) {
+    const { skill, ...rest } = normalizedArgs;
+    normalizedArgs = { ...rest, skillName: skill };
+  }
+
+  const directMatch = allTools.find(({ name: n }) => n === normalizedName);
+  const slashSkillCall = !directMatch &&
+    (normalizedName.includes("/") || normalizedName.includes(":"));
+  const unambiguousBare = !directMatch && !slashSkillCall
+    ? resolveUnambiguousBareName(normalizedName, skills)
+    : undefined;
+  const isSkillCall = slashSkillCall || unambiguousBare !== undefined;
+  const skillCommand = unambiguousBare ?? normalizedName;
+
+  const action = directMatch
+    ? directMatch
+    : isSkillCall
+    ? allTools.find(({ name: n }) => n === runCommandToolName)
+    : undefined;
+
+  const effectiveArgs = directMatch
+    ? normalizedArgs
+    : isSkillCall
+    ? { command: skillCommand, params: normalizedArgs }
+    : normalizedArgs;
+
+  if (action && action.describe) {
+    try {
+      const desc = action.describe(effectiveArgs);
+      if (desc) return desc;
+    } catch {
+      // fallback
+    }
+  }
+
+  if (parameters && typeof parameters === "object") {
+    const fallbackFields = [
+      "description",
+      "comment",
+      "reason",
+      "explanation",
+      "thought",
+    ];
+    for (const field of fallbackFields) {
+      if (
+        field in parameters &&
+        typeof parameters[field] === "string" &&
+        parameters[field]
+      ) {
+        return parameters[field];
+      }
+    }
+  }
+
+  return undefined;
 };
 
 export type AgentSpec = {
@@ -1573,15 +1681,26 @@ export const runAbstractAgent = async (
       modelResponse,
     );
 
+    const emitWithDescriptions = emit.map((event) => {
+      if (event.type !== "tool_call") return event;
+      const desc = resolveToolDescription(
+        allTools,
+        event.name,
+        event.parameters,
+        skillsArr,
+      );
+      return desc ? { ...event, description: desc } : event;
+    });
+
     // Process what needs to be emitted
-    if (emit.length > 0) {
-      await each(outputEvent)(emit);
+    if (emitWithDescriptions.length > 0) {
+      await each(outputEvent)(emitWithDescriptions);
       const hadDeferred = await handleFunctionCalls(
         allTools,
         undefined,
         skillsArr,
         scratchPad,
-      )(emit);
+      )(emitWithDescriptions);
       if (hadDeferred) return;
 
       // We actually yielded things to the outside world, reset ephemeral history
@@ -1589,10 +1708,14 @@ export const runAbstractAgent = async (
 
       const updatedHistory = await getHistory();
       if (
-        !(emit.some((ev: HistoryEvent) => ev.type === "tool_call")) &&
+        !(emitWithDescriptions.some((ev: HistoryEvent) =>
+          ev.type === "tool_call"
+        )) &&
         nonempty(updatedHistory) &&
         last(updatedHistory).isOwn &&
-        !emit.every((ev: HistoryEvent) => ev.type === "own_thought")
+        !emitWithDescriptions.every((ev: HistoryEvent) =>
+          ev.type === "own_thought"
+        )
       ) return;
     } else {
       // Nothing was emitted to the outside world, accumulate the internal state (e.g., thoughts)

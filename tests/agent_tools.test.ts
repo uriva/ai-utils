@@ -798,3 +798,54 @@ runForAllProviders(
     });
   },
 );
+
+Deno.test(
+  "tool call description resolution populates description field on tool_call events",
+  async () => {
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "Run the custom test tool.",
+    })];
+    let callCount = 0;
+    const fakeCallModel = (_h: HistoryEvent[]) => {
+      callCount += 1;
+      if (callCount > 1) {
+        return Promise.resolve([ownUtteranceTurn("Done")]);
+      }
+      return Promise.resolve([
+        {
+          type: "tool_call" as const,
+          isOwn: true as const,
+          name: "test_tool",
+          parameters: { val: "myValue" },
+          id: "fake-tool-call",
+          timestamp: Date.now(),
+        },
+      ]);
+    };
+
+    const testTool = {
+      name: "test_tool",
+      description: "A test tool",
+      parameters: z.object({ val: z.string() }),
+      describe: ({ val }: { val: string }) => `Testing with value: ${val}`,
+      handler: () => Promise.resolve("Success"),
+    };
+
+    await injectCallModel(fakeCallModel)(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        maxIterations: 1,
+        tools: [testTool],
+        prompt: "You are an AI assistant.",
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+      });
+    })();
+
+    const toolCall = mockHistory.find((e) =>
+      e.type === "tool_call" && e.name === "test_tool"
+    );
+    assert(toolCall, "test_tool should be called");
+    assertEquals((toolCall as any).description, "Testing with value: myValue");
+  },
+);
