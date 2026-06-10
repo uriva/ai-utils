@@ -94,7 +94,7 @@ type GeminiModelVersions = {
 const defaultGeminiModelVersions: GeminiModelVersions = {
   pro: "gemini-3.5-flash",
   flash: "gemini-3.5-flash",
-  fallback: "gemini-3.1-pro-preview",
+  fallback: "gemini-3.1-flash-lite",
 };
 
 const geminiModelVersions: Injection<() => GeminiModelVersions> = context(() =>
