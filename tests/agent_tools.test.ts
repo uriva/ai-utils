@@ -846,6 +846,9 @@ Deno.test(
       e.type === "tool_call" && e.name === "test_tool"
     );
     assert(toolCall, "test_tool should be called");
-    assertEquals((toolCall as any).description, "Testing with value: myValue");
+    assertEquals(
+      toolCall.type === "tool_call" ? toolCall.description : undefined,
+      "Testing with value: myValue",
+    );
   },
 );
