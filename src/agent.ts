@@ -1602,7 +1602,7 @@ export const runAbstractAgent = async (
   let repetitionFloodRetries = 0;
   let truncationRetries = 0;
   let ephemeralHistory: HistoryEvent[] = [];
-  let hasInjectedStopThought = false;
+  let stopAdviceCount = 0;
   while (true) {
     if (await shouldAbort()) return;
     c++;
@@ -1613,16 +1613,27 @@ export const runAbstractAgent = async (
     let effectiveHistory = [...history, ...ephemeralHistory];
     let normalizedHistory = normalizeHistoryForModel(effectiveHistory);
 
-    if (
-      c > 0 && maxIterations > 0 && c % maxIterations === 0 &&
-      !hasInjectedStopThought
-    ) {
+    const shouldCheckProgress =
+      (c > 0 && maxIterations > 0 && c % maxIterations === 0) ||
+      (stopAdviceCount > 0);
+
+    if (shouldCheckProgress) {
       console.log(
-        `[agent-progress-check] c=${c} maxIterations=${maxIterations} - running progress check with the bigger model`,
+        `[agent-progress-check] c=${c} stopAdviceCount=${stopAdviceCount} - running progress check with the bigger model`,
       );
       const checkResult = await checkProgress(spec, normalizedHistory);
       if (!checkResult.shouldContinue) {
-        hasInjectedStopThought = true;
+        stopAdviceCount++;
+        if (stopAdviceCount >= 2) {
+          console.log(
+            `[agent-progress-check] stop requested multiple times (${stopAdviceCount}). Escalating to forced user-facing utterance. c=${c}`,
+          );
+          const stopUtterance =
+            "I'm sorry, I have been working on this for some time but am unable to make progress. I will stop here and ask for your feedback on how to proceed.";
+          const utteranceEvent = ownUtteranceTurn(stopUtterance);
+          await outputEvent(utteranceEvent);
+          return;
+        }
         const stopThought = checkResult.thoughtInjection ||
           "I'm working on this for some time and not making progress. I should instead stop and ask the user for feedback.";
         const thoughtEvent = ownThoughtTurn(stopThought);
@@ -1631,12 +1642,13 @@ export const runAbstractAgent = async (
         effectiveHistory = [...history, ...ephemeralHistory];
         normalizedHistory = normalizeHistoryForModel(effectiveHistory);
         console.log(
-          `[agent-progress-check] stop requested. thought injected. c=${c}`,
+          `[agent-progress-check] soft stop requested. thought injected. c=${c}`,
         );
       } else {
         console.log(
           `[agent-progress-check] judged to be good to continue. c=${c}`,
         );
+        stopAdviceCount = 0;
       }
     }
     console.log(
