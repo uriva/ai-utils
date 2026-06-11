@@ -1321,8 +1321,12 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           "The command in format skillName/toolName",
         ),
         params: z.any().describe("The parameters for the tool"),
+        description: z.string().optional().describe(
+          "A human-readable description of what this command/tool call does, to show to the user as a progress update.",
+        ),
       }),
-      describe: ({ command, params }) => {
+      describe: ({ command, params, description }) => {
+        if (description) return description;
         const separator = command.includes("/") ? "/" : ":";
         const lastSep = command.lastIndexOf(separator);
         const toolName = lastSep !== -1 ? command.slice(lastSep + 1) : command;
@@ -1499,7 +1503,7 @@ export const resolveToolDescription = (
   if (action && action.describe) {
     try {
       const desc = action.describe(effectiveArgs);
-      if (desc && !desc.startsWith("Running ")) return desc;
+      if (desc) return desc;
     } catch {
       // fallback
     }
@@ -1521,30 +1525,6 @@ export const resolveToolDescription = (
       ) {
         return parameters[field];
       }
-    }
-    if (
-      "params" in parameters &&
-      parameters.params &&
-      typeof parameters.params === "object"
-    ) {
-      for (const field of fallbackFields) {
-        if (
-          field in parameters.params &&
-          typeof parameters.params[field] === "string" &&
-          parameters.params[field]
-        ) {
-          return parameters.params[field];
-        }
-      }
-    }
-  }
-
-  if (action && action.describe) {
-    try {
-      const desc = action.describe(effectiveArgs);
-      if (desc) return desc;
-    } catch {
-      // fallback
     }
   }
 
