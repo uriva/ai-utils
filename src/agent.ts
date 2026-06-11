@@ -274,6 +274,16 @@ export type Skill = {
   references?: { name: string; content: string }[];
 };
 
+export const formatSkillsPrompt = (skills: Skill[]): string =>
+  skills.map((skill) => {
+    const toolsPart = skill.tools.length > 0
+      ? `\n  Tools:\n${
+        skill.tools.map((t) => `    - ${t.name}: ${t.description}`).join("\n")
+      }`
+      : "";
+    return `- ${skill.name}: ${skill.description}${toolsPart}`;
+  }).join("\n");
+
 type SharedFields = { id: MessageId; timestamp: number; isOwn: boolean };
 
 export type MessageId = string;

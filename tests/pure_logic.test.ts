@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 import { tool } from "../mod.ts";
 import {
   createSkillTools,
+  formatSkillsPrompt,
   type HistoryEvent,
   injectAccessHistory,
   injectOutputEvent,
@@ -13,6 +14,7 @@ import {
   runAbstractAgent,
   runCommandToolName,
   sanitizeModelOutput,
+  type Skill,
 } from "../src/agent.ts";
 import {
   buildReq,
@@ -1126,4 +1128,24 @@ Deno.test("isRepetitionFlood detects repeated sub-strings", () => {
   assert(isRepetitionFlood("X".repeat(30)));
   assert(!isRepetitionFlood("abcabc"));
   assert(!isRepetitionFlood("normal sentence with normal words"));
+});
+
+Deno.test("formatSkillsPrompt appends compact tool names and descriptions under each skill", () => {
+  const dummyTool = tool({
+    name: "add_numbers",
+    description: "Add two numbers together",
+    parameters: z.object({ a: z.number(), b: z.number() }),
+    handler: () => Promise.resolve(""),
+  });
+  const skills: Skill[] = [{
+    name: "calculator",
+    description: "Mathematical operations skill",
+    instructions: "Do math",
+    tools: [dummyTool],
+  }];
+  const prompt = formatSkillsPrompt(skills);
+  assertEquals(
+    prompt,
+    "- calculator: Mathematical operations skill\n  Tools:\n    - add_numbers: Add two numbers together",
+  );
 });

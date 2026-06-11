@@ -13,6 +13,7 @@ import {
   createSkillTools,
   doNothingEventWithMetadata,
   estimateTokens,
+  formatSkillsPrompt,
   generateId,
   getStreamChunk,
   getStreamThinkingChunk,
@@ -652,11 +653,7 @@ async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
     `${prompt}\n\n${invisibleToolUseInstruction}`,
     ...(skills && skills.length > 0
       ? [
-        `Available skills:\n${
-          skills.map((skill) => `- ${skill.name}: ${skill.description}`).join(
-            "\n",
-          )
-        }`,
+        `Available skills:\n${formatSkillsPrompt(skills)}`,
       ]
       : []),
     `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,

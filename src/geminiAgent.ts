@@ -31,6 +31,7 @@ import {
   createSkillTools,
   doNothingEventWithMetadata,
   estimateTokens,
+  formatSkillsPrompt,
   generateId,
   getStreamChunk,
   getStreamThinkingChunk,
@@ -1573,8 +1574,7 @@ const geminiAgentCallerInner = ({
           ? `${
             enhancePrompt(prompt)
           }${noResponseInstruction}\n\nAvailable skills:\n${
-            skills.map((skill) => `- ${skill.name}: ${skill.description}`)
-              .join("\n")
+            formatSkillsPrompt(skills)
           }`
           : `${enhancePrompt(prompt)}${noResponseInstruction}`,
         [
