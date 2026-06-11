@@ -1499,7 +1499,7 @@ export const resolveToolDescription = (
   if (action && action.describe) {
     try {
       const desc = action.describe(effectiveArgs);
-      if (desc) return desc;
+      if (desc && !desc.startsWith("Running ")) return desc;
     } catch {
       // fallback
     }
@@ -1521,6 +1521,30 @@ export const resolveToolDescription = (
       ) {
         return parameters[field];
       }
+    }
+    if (
+      "params" in parameters &&
+      parameters.params &&
+      typeof parameters.params === "object"
+    ) {
+      for (const field of fallbackFields) {
+        if (
+          field in parameters.params &&
+          typeof parameters.params[field] === "string" &&
+          parameters.params[field]
+        ) {
+          return parameters.params[field];
+        }
+      }
+    }
+  }
+
+  if (action && action.describe) {
+    try {
+      const desc = action.describe(effectiveArgs);
+      if (desc) return desc;
+    } catch {
+      // fallback
     }
   }
 
