@@ -1331,11 +1331,9 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           "The command in format skillName/toolName",
         ),
         params: z.any().describe("The parameters for the tool"),
-        description: z.string().optional().describe(
-          "A human-readable description of what this command/tool call does, to show to the user as a progress update.",
-        ),
       }),
-      describe: ({ command, params, description }) => {
+      // deno-lint-ignore no-explicit-any
+      describe: ({ command, params, description }: any) => {
         if (description) return description;
         const separator = command.includes("/") ? "/" : ":";
         const lastSep = command.lastIndexOf(separator);
@@ -1347,9 +1345,28 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         const targetTool = toolMap[fullToolName];
         if (targetTool && targetTool.describe) {
           try {
-            return targetTool.describe(params);
+            const desc = targetTool.describe(params);
+            if (desc) return desc;
           } catch {
             // fallback
+          }
+        }
+        if (params && typeof params === "object") {
+          const fallbackFields = [
+            "description",
+            "comment",
+            "reason",
+            "explanation",
+            "thought",
+          ];
+          for (const field of fallbackFields) {
+            if (
+              field in params &&
+              typeof params[field] === "string" &&
+              params[field]
+            ) {
+              return params[field];
+            }
           }
         }
         return `Running ${command}`;

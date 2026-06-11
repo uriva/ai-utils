@@ -11,6 +11,7 @@ import {
   learnSkillToolName,
   maxUtteranceChars,
   ownUtteranceTurn,
+  resolveToolDescription,
   runAbstractAgent,
   runCommandToolName,
   sanitizeModelOutput,
@@ -1148,4 +1149,30 @@ Deno.test("formatSkillsPrompt appends compact tool names and descriptions under 
     prompt,
     "- calculator: Mathematical operations skill\n  Tools:\n    - add_numbers: Add two numbers together",
   );
+});
+
+Deno.test("resolveToolDescription resolves description from run_command nested params fallbacks", () => {
+  const dummySkillTool = tool({
+    name: "dummy_tool",
+    description: "A dummy tool",
+    parameters: z.object({ comment: z.string().optional() }),
+    handler: () => Promise.resolve(""),
+  });
+  const skills: Skill[] = [{
+    name: "dummy_skill",
+    description: "A dummy skill",
+    instructions: "Dummy",
+    tools: [dummySkillTool],
+  }];
+  const allTools = createSkillTools(skills);
+  const resolved = resolveToolDescription(
+    allTools,
+    "run_command",
+    {
+      command: "dummy_skill/dummy_tool",
+      params: { comment: "Performing a background task" },
+    },
+    skills,
+  );
+  assertEquals(resolved, "Performing a background task");
 });
