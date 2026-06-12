@@ -764,7 +764,11 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
       actions.find(({ name: n }) => n === runCommandToolName) as
         | Tool<T>
         | undefined,
-      { command: skillCommand, params: normalizedArgs },
+      {
+        command: skillCommand,
+        params: normalizedArgs,
+        description: `Running ${skillCommand}`,
+      },
     ]
     : [undefined, normalizedArgs];
   if (!action) {
@@ -1331,6 +1335,9 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           "The command in format skillName/toolName",
         ),
         params: z.any().describe("The parameters for the tool"),
+        description: z.string().optional().describe(
+          "A human-readable description of what this command/tool call does, to show to the user as a progress update.",
+        ),
       }),
       // deno-lint-ignore no-explicit-any
       describe: ({ command, params, description }: any) => {
@@ -1521,10 +1528,12 @@ export const resolveToolDescription = (
     ? allTools.find(({ name: n }) => n === runCommandToolName)
     : undefined;
 
-  const effectiveArgs = directMatch
-    ? normalizedArgs
-    : isSkillCall
-    ? { command: skillCommand, params: normalizedArgs }
+  const effectiveArgs = directMatch ? normalizedArgs : isSkillCall
+    ? {
+      command: skillCommand,
+      params: normalizedArgs,
+      description: `Running ${skillCommand}`,
+    }
     : normalizedArgs;
 
   if (action && action.describe) {

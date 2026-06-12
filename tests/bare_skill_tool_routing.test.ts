@@ -1,6 +1,11 @@
 import { assertEquals } from "@std/assert";
 import { z } from "zod/v4";
-import { callToResult, createSkillTools, tool } from "../src/agent.ts";
+import {
+  callToResult,
+  createSkillTools,
+  resolveToolDescription,
+  tool,
+} from "../src/agent.ts";
 import type { Skill } from "../src/agent.ts";
 
 const todoWrite = tool({
@@ -93,4 +98,15 @@ Deno.test("prefixed or malformed learn_skill calls are normalized and routed cor
   });
   if (!out2) throw new Error("expected a result");
   assertEquals(out2.result.includes("todo skill"), true);
+});
+
+Deno.test("auto-routed skill tool name successfully resolves description", () => {
+  const skillTools = createSkillTools([todoSkill]);
+  const desc = resolveToolDescription(
+    skillTools,
+    "todo_write",
+    { todos: ["a", "b"] },
+    [todoSkill],
+  );
+  assertEquals(desc, "Running todo/todo_write");
 });
