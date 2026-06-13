@@ -55,10 +55,16 @@ const maxEmojis = 100;
 export const isEmojiFlood = (text: string) =>
   (text.match(emojiPattern)?.length ?? 0) > maxEmojis;
 
-const repetitionFloodPattern = /(.{1,15}?)\1{29,}/s;
-
-export const isRepetitionFlood = (text: string) =>
-  repetitionFloodPattern.test(text);
+export const isRepetitionFlood = (text: string) => {
+  const matches = text.matchAll(/(.{1,15}?)\1{29,}/gs);
+  for (const match of matches) {
+    const repeatedSeq = match[1];
+    if (!/^[ \t\n\r\-=_*.~#|:;()[\]{}]+$/.test(repeatedSeq)) {
+      return true;
+    }
+  }
+  return false;
+};
 
 export const stripAnsi = (text: string): string => {
   const esc = "\\u" + "001b";
