@@ -62,7 +62,7 @@ const kimiApiKeyInjection: Injection<() => string> = context((): string => {
 export const injectKimiToken = (token: string): Injector =>
   kimiApiKeyInjection.inject(() => token);
 
-const kimiModelVersion = "kimi-k2.6";
+const kimiModelVersion = "kimi-k2.7";
 
 const isTokenLimitExceeded = (error: Error) =>
   "status" in error && (error as { status: number }).status === 400 &&
