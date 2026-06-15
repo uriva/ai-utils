@@ -90,8 +90,8 @@ runForAllProviders(
 
     const fabricatedNotification = newEvents.some((e) =>
       e.type === "own_thought" &&
-      (e.text.toUpperCase().includes("DOWNLOAD COMPLETE") ||
-        e.text.toUpperCase().includes("VIDEO READY AT"))
+      (/\bDOWNLOAD COMPLETE\b/i.test(e.text) ||
+        /\bVIDEO READY AT\b/i.test(e.text))
     );
     assert(
       !fabricatedNotification,
