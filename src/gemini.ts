@@ -130,10 +130,12 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
   { mini, maxOutputTokens }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
+  attachments?: MediaAttachment[],
 ) => Promise<z.infer<T>> = async <T extends ZodType>(
   { mini, maxOutputTokens }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
+  attachments?: MediaAttachment[],
 ): Promise<z.infer<T>> => {
   const cacher = makeCache("geminiCompletionResponseText-v2");
   const cachedCall = cacher(
@@ -146,6 +148,19 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
           .then(({ text }) => text || "{}"),
     ),
   );
+  const contents = pipe(openAiToGeminiMessage)(messages);
+  if (attachments && attachments.length > 0) {
+    const lastUserMessage = [...contents].reverse().find((c) =>
+      c.role === "user"
+    );
+    if (lastUserMessage) {
+      if (!lastUserMessage.parts) lastUserMessage.parts = [];
+      const resolvedAttachments = await Promise.all(
+        attachments.map(ensureGeminiAttachmentIsLink),
+      );
+      lastUserMessage.parts.push(...attachmentsToParts(resolvedAttachments));
+    }
+  }
   return JSON.parse(
     await cachedCall({
       model: geminiModelVersion(mini),
@@ -155,7 +170,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
         thinkingConfig: geminiThinkingConfig(mini),
         ...(maxOutputTokens ? { maxOutputTokens } : {}),
       },
-      contents: pipe(openAiToGeminiMessage)(messages),
+      contents,
     }),
   );
 };
