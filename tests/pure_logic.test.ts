@@ -1176,3 +1176,17 @@ Deno.test("resolveToolDescription resolves description from run_command nested p
   );
   assertEquals(resolved, "Performing a background task");
 });
+
+import { zodToGeminiParameters } from "../src/gemini.ts";
+
+Deno.test("zodToGeminiParameters converts ZodLiteral (const) to enum with single value", () => {
+  const schema = z.object({
+    type: z.literal("custom_event"),
+    value: z.string(),
+  });
+  const result = zodToGeminiParameters(schema);
+  // deno-lint-ignore no-explicit-any
+  const typeProp = (result as any).properties?.type;
+  assertEquals(typeProp.const, undefined);
+  assertEquals(typeProp.enum, ["custom_event"]);
+});
