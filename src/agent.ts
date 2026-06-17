@@ -1545,6 +1545,33 @@ export const resolveToolDescription = (
     }
   }
 
+  if (isSkillCall) {
+    const bareToolName = (skillName: string, tName: string) =>
+      tName.startsWith(`${skillName}/`)
+        ? tName.slice(skillName.length + 1)
+        : tName;
+
+    const separator = skillCommand.includes("/") ? "/" : ":";
+    const lastSep = skillCommand.lastIndexOf(separator);
+    const toolName = lastSep !== -1 ? skillCommand.slice(lastSep + 1) : skillCommand;
+    const skillName = lastSep !== -1 ? skillCommand.slice(0, lastSep) : "";
+
+    const targetSkill = skills.find((s) => s.name === skillName);
+    const targetTool = targetSkill?.tools.find(
+      (t) =>
+        bareToolName(skillName, t.name) === bareToolName(skillName, toolName),
+    );
+
+    if (targetTool && targetTool.describe) {
+      try {
+        const desc = targetTool.describe(normalizedArgs);
+        if (desc) return desc;
+      } catch {
+        // fallback
+      }
+    }
+  }
+
   if (parameters && typeof parameters === "object") {
     const fallbackFields = [
       "description",
