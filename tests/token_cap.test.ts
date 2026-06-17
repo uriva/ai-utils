@@ -50,7 +50,7 @@ const makeToolResult = (id: string, toolCallId: string, timestamp: number) => ({
 });
 
 // ~650 chars => ~211 tokens each
-const longText = "x".repeat(650);
+const longText = "x ".repeat(650);
 
 Deno.test(
   "capEventsToTokenBudget drops oldest events when total exceeds budget",
