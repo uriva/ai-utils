@@ -67,7 +67,7 @@ const makeToolResult = (
 });
 
 const segmentGapMs = 30 * 60 * 1000;
-const longText = "x".repeat(2000);
+const longText = "x ".repeat(400);
 
 Deno.test("groupToolCallPairs keeps tool_call with following tool_results", () => {
   const events: HistoryEvent[] = [
@@ -280,7 +280,7 @@ Deno.test("oversized newest segment gets trimmed, old segment kept if within bud
 
 Deno.test("single segment exceeding token budget gets older events summarized", async () => {
   const baseTime = Date.now();
-  const veryLongText = "x".repeat(4000);
+  const veryLongText = "x ".repeat(2000);
   const events: HistoryEvent[] = Array.from(
     { length: 40 },
     (_, i) => makeUtterance(veryLongText, baseTime + i * 60_000, i % 2 === 0),
