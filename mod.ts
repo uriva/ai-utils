@@ -40,6 +40,7 @@ export {
   geminiGenText,
   injectGeminiModelVersions,
   injectGeminiToken,
+  zodToGeminiParameters,
 } from "./src/gemini.ts";
 export { genJson, genJsonFromConvo } from "./src/genJson.ts";
 export {
