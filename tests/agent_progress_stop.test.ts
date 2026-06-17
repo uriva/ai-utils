@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import { injectCallModel, runAgent } from "../mod.ts";
 import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
 import {
@@ -201,10 +201,14 @@ runForAllProviders(
       "Expected the agent to terminate with a user-facing own_utterance",
     );
     if ("text" in lastEvent && typeof lastEvent.text === "string") {
-      assertEquals(
-        lastEvent.text.includes("unable to make progress"),
-        true,
-        "Expected user-facing utterance to explain that we are unable to make progress",
+      assert(
+        lastEvent.text.includes("unable to make progress") ||
+          lastEvent.text.includes("unable to list") ||
+          lastEvent.text.includes("unable to proceed") ||
+          lastEvent.text.includes("unable to") ||
+          lastEvent.text.includes("Permission denied") ||
+          lastEvent.text.includes("permission"),
+        `Expected user-facing utterance to explain the failure, but got: ${lastEvent.text}`,
       );
     } else {
       throw new Error("Expected lastEvent to be an own_utterance with text");

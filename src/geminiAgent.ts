@@ -784,6 +784,21 @@ const fixStart = (history: Content[]) =>
     ]
     : history;
 
+const mergeConsecutiveRoles = (contents: Content[]): Content[] => {
+  if (empty(contents)) return [];
+  const result: Content[] = [{ ...contents[0] }];
+  for (let i = 1; i < contents.length; i++) {
+    const last = result[result.length - 1];
+    const current = contents[i];
+    if (last.role === current.role) {
+      last.parts = [...(last.parts ?? []), ...(current.parts ?? [])];
+    } else {
+      result.push({ ...current });
+    }
+  }
+  return result;
+};
+
 // With no function declarations, force `NONE` so the model cannot emit a
 // (hallucinated) function call by mimicking function_call parts already in
 // history — it must answer with text. With declarations present, leave the
@@ -824,6 +839,7 @@ export const buildReq = (
         combineContent,
       ),
     ),
+    mergeConsecutiveRoles,
     fixStart,
   )(events),
 });
@@ -1806,6 +1822,7 @@ export const countEventsTokens = async (
           combineContent,
         ),
       ),
+      mergeConsecutiveRoles,
       fixStart,
     )(geminiEvents);
 
