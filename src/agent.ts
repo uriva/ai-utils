@@ -1553,7 +1553,9 @@ export const resolveToolDescription = (
 
     const separator = skillCommand.includes("/") ? "/" : ":";
     const lastSep = skillCommand.lastIndexOf(separator);
-    const toolName = lastSep !== -1 ? skillCommand.slice(lastSep + 1) : skillCommand;
+    const toolName = lastSep !== -1
+      ? skillCommand.slice(lastSep + 1)
+      : skillCommand;
     const skillName = lastSep !== -1 ? skillCommand.slice(0, lastSep) : "";
 
     const targetSkill = skills.find((s) => s.name === skillName);
