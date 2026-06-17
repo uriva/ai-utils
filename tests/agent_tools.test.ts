@@ -156,6 +156,7 @@ Deno.test(
                 year: 2004,
               },
             },
+            description: "Running video_sources/get_best_video_source",
           },
           id: "fake-tool-call",
           timestamp: Date.now(),
@@ -230,6 +231,7 @@ Deno.test(
             params: {
               videoHash: "text-eb354dfaa8",
             },
+            description: "Running video_sources/test_action",
           },
           id: "fake-tool-call",
           timestamp: Date.now(),
