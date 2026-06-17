@@ -768,7 +768,7 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
       {
         command: skillCommand,
         params: normalizedArgs,
-        description: `Running ${skillCommand}`,
+        $description: `Running ${skillCommand}`,
       },
     ]
     : [undefined, normalizedArgs];
@@ -1336,12 +1336,13 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           "The command in format skillName/toolName",
         ),
         params: z.any().describe("The parameters for the tool"),
-        description: z.string().describe(
+        $description: z.string().describe(
           "A human-readable description of what this command/tool call does, to show to the user as a progress update.",
         ),
       }),
       // deno-lint-ignore no-explicit-any
-      describe: ({ command, params, description }: any) => {
+      describe: ({ command, params, $description, description }: any) => {
+        if ($description) return $description;
         if (description) return description;
         const separator = command.includes("/") ? "/" : ":";
         const lastSep = command.lastIndexOf(separator);
@@ -1523,6 +1524,27 @@ export const resolveToolDescription = (
   const isSkillCall = slashSkillCall || unambiguousBare !== undefined;
   const skillCommand = unambiguousBare ?? normalizedName;
 
+  if (parameters && typeof parameters === "object") {
+    if (
+      parameters.params && typeof parameters.params === "object" &&
+      (parameters.params.$description || parameters.params.description)
+    ) {
+      return parameters.params.$description || parameters.params.description;
+    }
+    if (
+      parameters.$description &&
+      parameters.$description !== `Running ${skillCommand}`
+    ) {
+      return parameters.$description;
+    }
+    if (
+      parameters.description &&
+      parameters.description !== `Running ${skillCommand}`
+    ) {
+      return parameters.description;
+    }
+  }
+
   const action = directMatch
     ? directMatch
     : isSkillCall
@@ -1533,7 +1555,7 @@ export const resolveToolDescription = (
     ? {
       command: skillCommand,
       params: normalizedArgs,
-      description: `Running ${skillCommand}`,
+      $description: `Running ${skillCommand}`,
     }
     : normalizedArgs;
 

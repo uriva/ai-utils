@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import {
   accessCallModel,
   accessCallModelWrapper,
@@ -9,6 +10,7 @@ import {
   injectStreamChunk,
   injectStreamThinkingChunk,
   runAbstractAgent,
+  type Tool,
 } from "./src/agent.ts";
 import { anthropicAgentCaller } from "./src/anthropicAgent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
@@ -155,10 +157,40 @@ const addBuiltinTools = (spec: AgentSpec): AgentSpec => {
   };
 };
 
+const extendToolWithDescription = <T extends z.ZodTypeAny>(
+  t: Tool<T>,
+): Tool<T> => {
+  if (t.parameters instanceof z.ZodObject) {
+    if ("$description" in t.parameters.shape) {
+      return t;
+    }
+    return {
+      ...t,
+      parameters: t.parameters.extend({
+        $description: z.string().describe(
+          "A human-readable description of what this command/tool call does, to show to the user as a progress update.",
+        ),
+      }),
+    } as unknown as Tool<T>;
+  }
+  return t;
+};
+
+const extendSpecToolsWithDescription = (spec: AgentSpec): AgentSpec => ({
+  ...spec,
+  tools: spec.tools.map(extendToolWithDescription),
+  skills: spec.skills?.map((skill) => ({
+    ...skill,
+    tools: skill.tools.map(extendToolWithDescription),
+  })),
+});
+
 const runAgentInner = (spec: AgentSpec): Promise<void> => {
-  const specWithBuiltins = addBuiltinTools(spec);
+  const specWithBuiltins = extendSpecToolsWithDescription(
+    addBuiltinTools(spec),
+  );
   return spec.transport?.kind === "audio"
-    ? runAudioTransportAgent(spec)
+    ? runAudioTransportAgent(specWithBuiltins)
     : runAbstractAgent(specWithBuiltins, resolveCallModel(specWithBuiltins));
 };
 

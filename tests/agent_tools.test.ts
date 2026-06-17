@@ -156,7 +156,7 @@ Deno.test(
                 year: 2004,
               },
             },
-            description: "Running video_sources/get_best_video_source",
+            $description: "Running video_sources/get_best_video_source",
           },
           id: "fake-tool-call",
           timestamp: Date.now(),
@@ -231,7 +231,7 @@ Deno.test(
             params: {
               videoHash: "text-eb354dfaa8",
             },
-            description: "Running video_sources/test_action",
+            $description: "Running video_sources/test_action",
           },
           id: "fake-tool-call",
           timestamp: Date.now(),
@@ -852,5 +852,126 @@ Deno.test(
       toolCall.type === "tool_call" ? toolCall.description : undefined,
       "Testing with value: myValue",
     );
+  },
+);
+
+Deno.test(
+  "tool call description resolution populates description field from LLM-generated description parameter",
+  async () => {
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "Run the custom test tool.",
+    })];
+    let callCount = 0;
+    const fakeCallModel = (_h: HistoryEvent[]) => {
+      callCount += 1;
+      if (callCount > 1) {
+        return Promise.resolve([ownUtteranceTurn("Done")]);
+      }
+      return Promise.resolve([
+        {
+          type: "tool_call" as const,
+          isOwn: true as const,
+          name: "test_tool",
+          parameters: {
+            val: "myValue",
+            description: "Doing test with myValue",
+          },
+          id: "fake-tool-call",
+          timestamp: Date.now(),
+        },
+      ]);
+    };
+
+    const testTool = {
+      name: "test_tool",
+      description: "A test tool",
+      parameters: z.object({ val: z.string() }),
+      handler: () => Promise.resolve("Success"),
+    };
+
+    await injectCallModel(fakeCallModel)(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        maxIterations: 1,
+        tools: [testTool],
+        prompt: "You are an AI assistant.",
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+      });
+    })();
+
+    const toolCall = mockHistory.find((e) =>
+      e.type === "tool_call" && e.name === "test_tool"
+    );
+    assert(toolCall, "test_tool should be called");
+    assertEquals(
+      toolCall.type === "tool_call" ? toolCall.description : undefined,
+      "Doing test with myValue",
+    );
+  },
+);
+
+Deno.test(
+  "tool call description resolution handles parameter collision with domain-level description field",
+  async () => {
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "Update description of test_tool.",
+    })];
+    let callCount = 0;
+    const fakeCallModel = (_h: HistoryEvent[]) => {
+      callCount += 1;
+      if (callCount > 1) {
+        return Promise.resolve([ownUtteranceTurn("Done")]);
+      }
+      return Promise.resolve([
+        {
+          type: "tool_call" as const,
+          isOwn: true as const,
+          name: "test_tool_with_desc",
+          parameters: {
+            description: "New domain-level description",
+            $description:
+              "Updating description to New domain-level description",
+          },
+          id: "fake-tool-call",
+          timestamp: Date.now(),
+        },
+      ]);
+    };
+
+    // deno-lint-ignore no-explicit-any
+    let receivedArgs: any = null;
+    const testTool = {
+      name: "test_tool_with_desc",
+      description: "A test tool with description param",
+      parameters: z.object({ description: z.string() }),
+      // deno-lint-ignore no-explicit-any
+      handler: (args: any) => {
+        receivedArgs = args;
+        return Promise.resolve("Success");
+      },
+    };
+
+    await injectCallModel(fakeCallModel)(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        maxIterations: 1,
+        tools: [testTool],
+        prompt: "You are an AI assistant.",
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+      });
+    })();
+
+    const toolCall = mockHistory.find((e) =>
+      e.type === "tool_call" && e.name === "test_tool_with_desc"
+    );
+    assert(toolCall, "test_tool_with_desc should be called");
+    assertEquals(
+      toolCall.type === "tool_call" ? toolCall.description : undefined,
+      "Updating description to New domain-level description",
+    );
+    assert(receivedArgs, "handler should have been called with args");
+    assertEquals(receivedArgs.description, "New domain-level description");
   },
 );
