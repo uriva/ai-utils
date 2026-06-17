@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 import { tool } from "../mod.ts";
 import {
   createSkillTools,
+  estimateAgentInputTokens,
   formatSkillsPrompt,
   type HistoryEvent,
   injectAccessHistory,
@@ -1189,4 +1190,48 @@ Deno.test("zodToGeminiParameters converts ZodLiteral (const) to enum with single
   const typeProp = (result as any).properties?.type;
   assertEquals(typeProp.const, undefined);
   assertEquals(typeProp.enum, ["custom_event"]);
+});
+
+Deno.test({
+  name:
+    "estimateAgentInputTokens accurately estimates non-ASCII (Hebrew) characters higher than English characters",
+}, () => {
+  const spec = {
+    prompt: "",
+    tools: [],
+    skills: [],
+    maxIterations: 5,
+    rewriteHistory: (_replacements: Record<string, HistoryEvent>) =>
+      Promise.resolve(),
+    timezoneIANA: "UTC",
+  };
+
+  const englishText =
+    "hello world! this is a test of english token estimation.";
+  const hebrewText =
+    "שלום עולם! זהו מבחן של הערכת אסימונים בעברית לעומת אנגלית.";
+
+  const englishEvent = {
+    id: "1",
+    timestamp: 1000,
+    type: "participant_utterance" as const,
+    text: englishText,
+    isOwn: false as const,
+    name: "user",
+  };
+
+  const hebrewEvent = {
+    id: "2",
+    timestamp: 1000,
+    type: "participant_utterance" as const,
+    text: hebrewText,
+    isOwn: false as const,
+    name: "user",
+  };
+
+  const englishTokens = estimateAgentInputTokens(spec, [englishEvent]);
+  const hebrewTokens = estimateAgentInputTokens(spec, [hebrewEvent]);
+
+  assertEquals(englishTokens < hebrewTokens, true);
+  assertEquals(hebrewTokens > 70, true);
 });

@@ -36,6 +36,7 @@ export {
 } from "./src/compaction.ts";
 export { injectCacher } from "./src/cacher.ts";
 export {
+  countTextTokens,
   geminiGenText,
   injectGeminiModelVersions,
   injectGeminiToken,

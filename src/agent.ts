@@ -1799,7 +1799,11 @@ const scheduleHistoryCompaction = (
 // relying on precise billing should override.
 const approxTextTokens = (text: string | undefined): number => {
   if (!text) return 0;
-  return Math.max(1, Math.ceil((text.length / 4) * 1.3));
+  // deno-lint-ignore no-control-regex
+  const nonAsciiCount = text.match(/[^\x00-\x7F]/g)?.length ?? 0;
+  const asciiCount = text.length - nonAsciiCount;
+  const estimated = Math.ceil((asciiCount / 4) * 1.3 + nonAsciiCount * 1.5);
+  return Math.max(1, estimated);
 };
 
 const approxJsonTokens = (obj: unknown): number => {

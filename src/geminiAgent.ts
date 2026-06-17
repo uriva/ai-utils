@@ -1400,8 +1400,34 @@ const callGeminiWithFixHistory = (
 ) =>
 async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
   try {
+    const req = eventsToRequest(events);
     try {
-      return await callGemini(eventsToRequest(events), disableStreaming);
+      const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
+      const { totalTokens } = await sdk.models.countTokens(
+        req as unknown as Parameters<typeof sdk.models.countTokens>[0],
+      );
+      if (totalTokens && totalTokens > 1040000) {
+        const truncated = dropOldestHalf(events);
+        if (truncated.length !== events.length) {
+          console.warn(
+            `Token limit exceeded via countTokens (${totalTokens} tokens, ${events.length} events). Dropping oldest half.`,
+          );
+          return callGeminiWithFixHistory(
+            rewriteHistory,
+            eventsToRequest,
+            disableStreaming,
+          )(truncated);
+        }
+      }
+    } catch (countError) {
+      console.warn(
+        "Failed calling Gemini countTokens, falling back to local estimation:",
+        countError,
+      );
+    }
+
+    try {
+      return await callGemini(req, disableStreaming);
     } catch (error) {
       const err = normalizeError(error);
       if (isTokenLimitExceeded(err)) {
@@ -1411,7 +1437,11 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
         );
         const truncated = dropOldestHalf(events);
         if (truncated.length === events.length) throw err;
-        return callGemini(eventsToRequest(truncated), disableStreaming);
+        return callGeminiWithFixHistory(
+          rewriteHistory,
+          eventsToRequest,
+          disableStreaming,
+        )(truncated);
       }
       if (isFileNotActiveError(err)) {
         return stripAllNotActiveFiles(

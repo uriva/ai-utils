@@ -358,3 +358,12 @@ export const ensureGeminiAttachmentIsLink = async (
     "File attachment missing fileUri or unsupported attachment kind",
   );
 };
+
+export const countTextTokens = async (text: string): Promise<number> => {
+  const sdk = new GoogleGenAI({ apiKey: tokenInjection.access() });
+  const { totalTokens } = await sdk.models.countTokens({
+    model: "gemini-3.5-flash",
+    contents: text,
+  });
+  return totalTokens ?? 0;
+};
