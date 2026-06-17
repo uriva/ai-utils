@@ -359,7 +359,10 @@ export const ensureGeminiAttachmentIsLink = async (
   );
 };
 
-export const countTextTokens = async (text: string): Promise<number> => {
+export const countTextTokens = async (
+  text: string | undefined,
+): Promise<number> => {
+  if (!text) return 0;
   const sdk = new GoogleGenAI({ apiKey: tokenInjection.access() });
   const { totalTokens } = await sdk.models.countTokens({
     model: "gemini-3.5-flash",

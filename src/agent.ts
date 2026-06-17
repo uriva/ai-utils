@@ -1780,13 +1780,34 @@ const scheduleHistoryCompaction = (
   spec: AgentSpec,
   history: HistoryEvent[],
 ): void => {
-  if (!spec.compactHistory || !spec.historyCompactionTokenThreshold) return;
-  const totalTokens = estimateAgentInputTokens(spec, history);
-  if (totalTokens <= spec.historyCompactionTokenThreshold) return;
-  spec.compactHistory(history).catch((error) =>
-    console.error("Failed scheduling history compaction", error)
-  );
+  const compactHistory = spec.compactHistory;
+  const threshold = spec.historyCompactionTokenThreshold;
+  if (!compactHistory || !threshold) return;
+  estimateAgentInputTokens(spec, history).then((totalTokens) => {
+    if (totalTokens <= threshold) return;
+    compactHistory(history).catch((error) =>
+      console.error("Failed scheduling history compaction", error)
+    );
+  }).catch((error) => {
+    console.error(
+      "Failed estimating tokens for history compaction check",
+      error,
+    );
+  });
 };
+
+export type TokenCounter = (events: HistoryEvent[]) => Promise<number>;
+
+const tokenCounterInjection: Injection<TokenCounter> = context(
+  (events: HistoryEvent[]): Promise<number> => {
+    return Promise.resolve(
+      events.reduce((sum, e) => sum + estimateTokensLocal(e), 0),
+    );
+  },
+);
+
+export const accessTokenCounter = tokenCounterInjection.access;
+export const injectTokenCounter = tokenCounterInjection.inject;
 
 // --- Token estimation -------------------------------------------------------
 // A lightweight, overridable heuristic for estimating the token cost of
@@ -1797,7 +1818,7 @@ const scheduleHistoryCompaction = (
 // Rough heuristic: ~1 token per ~4 characters (English) with a 30% buffer.
 // For base64 media we count each 4 chars as 1 token (very rough) – callers
 // relying on precise billing should override.
-const approxTextTokens = (text: string | undefined): number => {
+const approxTextTokensLocal = (text: string | undefined): number => {
   if (!text) return 0;
   // deno-lint-ignore no-control-regex
   const nonAsciiCount = text.match(/[^\x00-\x7F]/g)?.length ?? 0;
@@ -1806,25 +1827,24 @@ const approxTextTokens = (text: string | undefined): number => {
   return Math.max(1, estimated);
 };
 
-const approxJsonTokens = (obj: unknown): number => {
+const approxJsonTokensLocal = (obj: unknown): number => {
   try {
-    return approxTextTokens(JSON.stringify(obj));
+    return approxTextTokensLocal(JSON.stringify(obj));
   } catch (_) {
     return 10; // fallback small constant
   }
 };
 
-const attachmentTokens = (
+const attachmentTokensLocal = (
   attachments: MediaAttachment[] | undefined,
 ): number => {
   if (!attachments || attachments.length === 0) return 0;
   return attachments.reduce((sum, a) => {
     if (a.kind === "inline") {
-      // base64 length / 4 (very rough) with small buffer
       return sum + Math.ceil(a.dataBase64.length / 4 * 1.1);
     }
-    // file references assumed minimal (URI + metadata)
-    return sum + approxTextTokens(a.fileUri) + approxTextTokens(a.mimeType);
+    return sum + approxTextTokensLocal(a.fileUri) +
+      approxTextTokensLocal(a.mimeType);
   }, 0);
 };
 
@@ -1834,33 +1854,35 @@ const assertNever = (x: never): never => {
   );
 };
 
-export const estimateTokens = (e: HistoryEvent): number => {
+export const estimateTokensLocal = (e: HistoryEvent): number => {
   if (
     e.type === "participant_utterance" || e.type === "participant_edit_message"
   ) {
-    return approxTextTokens(e.name) + approxTextTokens(e.text) +
-      attachmentTokens(e.attachments) + 2;
+    return approxTextTokensLocal(e.name) + approxTextTokensLocal(e.text) +
+      attachmentTokensLocal(e.attachments) + 2;
   }
   if (e.type === "own_utterance" || e.type === "own_edit_message") {
-    return approxTextTokens(e.text) +
-      attachmentTokens(e.attachments) + 2;
+    return approxTextTokensLocal(e.text) +
+      attachmentTokensLocal(e.attachments) + 2;
   }
   if (e.type === "tool_call") {
-    return approxTextTokens(e.name) + approxJsonTokens(e.parameters) + 4;
+    return approxTextTokensLocal(e.name) + approxJsonTokensLocal(e.parameters) +
+      4;
   }
   if (e.type === "tool_result") {
-    return approxTextTokens(e.result) +
-      attachmentTokens(e.attachments) + 4;
+    return approxTextTokensLocal(e.result) +
+      attachmentTokensLocal(e.attachments) + 4;
   }
   if (e.type === "own_thought") {
-    return approxTextTokens(e.text) +
-      attachmentTokens(e.attachments) + 2;
+    return approxTextTokensLocal(e.text) +
+      attachmentTokensLocal(e.attachments) + 2;
   }
   if (e.type === "participant_reaction") {
-    return approxTextTokens(e.name) + approxTextTokens(e.reaction) + 2;
+    return approxTextTokensLocal(e.name) + approxTextTokensLocal(e.reaction) +
+      2;
   }
   if (e.type === "own_reaction") {
-    return approxTextTokens(e.reaction) + 2;
+    return approxTextTokensLocal(e.reaction) + 2;
   }
   if (e.type === "do_nothing") {
     return 1;
@@ -1868,29 +1890,59 @@ export const estimateTokens = (e: HistoryEvent): number => {
   return assertNever(e);
 };
 
-const estimateToolTokens = (
+export type TextTokenCounter = (text: string | undefined) => Promise<number>;
+
+const textTokenCounterInjection: Injection<TextTokenCounter> = context(
+  (text: string | undefined): Promise<number> => {
+    return Promise.resolve(approxTextTokensLocal(text));
+  },
+);
+
+export const accessTextTokenCounter = textTokenCounterInjection.access;
+export const injectTextTokenCounter = textTokenCounterInjection.inject;
+
+export const estimateTokens = async (e: HistoryEvent): Promise<number> => {
+  return await accessTokenCounter([e]);
+};
+
+const estimateToolTokensLocal = (
   { name, description, parameters }: Tool<ZodType>,
 ): number =>
-  approxTextTokens(name) + approxTextTokens(description) +
-  approxTextTokens(zodToTypingString(parameters));
+  approxTextTokensLocal(name) + approxTextTokensLocal(description) +
+  approxTextTokensLocal(zodToTypingString(parameters));
 
-const estimateSkillTokens = (
+const estimateSkillTokensLocal = (
   { name, description, instructions, tools }: Skill,
 ): number =>
-  approxTextTokens(name) + approxTextTokens(description) +
-  approxTextTokens(instructions) + tools.reduce(
-    (total, tool) => total + estimateToolTokens(tool),
+  approxTextTokensLocal(name) + approxTextTokensLocal(description) +
+  approxTextTokensLocal(instructions) + tools.reduce(
+    (total, tool) => total + estimateToolTokensLocal(tool),
     0,
   );
 
-export const estimateAgentInputTokens = (
+export const estimateAgentInputTokens = async (
   { prompt, tools, skills = [] }: AgentSpec,
   history: HistoryEvent[],
-): number =>
-  approxTextTokens(prompt) +
-  history.reduce((total, event) => total + estimateTokens(event), 0) +
-  tools.reduce((total, tool) => total + estimateToolTokens(tool), 0) +
-  skills.reduce((total, skill) => total + estimateSkillTokens(skill), 0);
+): Promise<number> => {
+  const promptTokensPromise = accessTextTokenCounter(prompt);
+  const historyTokensPromise = accessTokenCounter(history);
+
+  const [promptTokens, historyTokens] = await Promise.all([
+    promptTokensPromise,
+    historyTokensPromise,
+  ]);
+
+  const toolsTokens = tools.reduce(
+    (total, tool) => total + estimateToolTokensLocal(tool),
+    0,
+  );
+  const skillsTokens = skills.reduce(
+    (total, skill) => total + estimateSkillTokensLocal(skill),
+    0,
+  );
+
+  return promptTokens + historyTokens + toolsTokens + skillsTokens;
+};
 
 const eventToPlainTextLocal = (e: HistoryEvent): string =>
   e.type === "participant_utterance" || e.type === "own_utterance"

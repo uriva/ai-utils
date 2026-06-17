@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { capEventsToTokenBudget } from "../src/geminiAgent.ts";
-import { estimateTokens } from "../src/agent.ts";
+import { estimateTokensLocal } from "../src/agent.ts";
 import { map, sum } from "gamla";
 
 const makeUtterance = (id: string, text: string, timestamp: number) => ({
@@ -54,22 +54,22 @@ const longText = "x".repeat(650);
 
 Deno.test(
   "capEventsToTokenBudget drops oldest events when total exceeds budget",
-  () => {
+  async () => {
     // deno-lint-ignore no-explicit-any
     const events: any[] = Array.from(
       { length: 100 },
       (_, i) => makeUtterance(`msg${i}`, longText, i * 1000),
     );
 
-    const totalBefore = sum(map(estimateTokens)(events));
+    const totalBefore = sum(map(estimateTokensLocal)(events));
     assert(
       totalBefore > 10000,
       `Total tokens ${totalBefore} should exceed 10000`,
     );
 
     // deno-lint-ignore no-explicit-any
-    const capped = capEventsToTokenBudget(10000)(events as any);
-    const totalAfter = sum(map(estimateTokens)(capped));
+    const capped = await capEventsToTokenBudget(10000)(events as any);
+    const totalAfter = sum(map(estimateTokensLocal)(capped));
 
     assert(
       totalAfter <= 10000,
@@ -87,7 +87,7 @@ Deno.test(
 
 Deno.test(
   "capEventsToTokenBudget cleans up orphaned tool results after dropping",
-  () => {
+  async () => {
     // Create a history where old tool_call + tool_result pairs get split
     // when oldest events are dropped
     // deno-lint-ignore no-explicit-any
@@ -108,11 +108,11 @@ Deno.test(
     ];
 
     // Use a budget that keeps ~half the filler + the recent events
-    const totalTokens = sum(map(estimateTokens)(events));
+    const totalTokens = sum(map(estimateTokensLocal)(events));
     const budget = Math.floor(totalTokens / 2);
 
     // deno-lint-ignore no-explicit-any
-    const capped = capEventsToTokenBudget(budget)(events as any);
+    const capped = await capEventsToTokenBudget(budget)(events as any);
 
     // The old tool_result for tc0 should NOT be in the output
     // (either dropped with tc0 or cleaned as orphan)
@@ -138,16 +138,18 @@ Deno.test(
 
 Deno.test(
   "capEventsToTokenBudget is a no-op when events are within budget",
-  () => {
+  async () => {
     // deno-lint-ignore no-explicit-any
     const events: any[] = [
       makeUtterance("msg0", "Hello", 100),
       makeOwnUtterance("msg1", "Hi there", 200),
     ];
 
-    const totalTokens = sum(map(estimateTokens)(events));
-    // deno-lint-ignore no-explicit-any
-    const capped = capEventsToTokenBudget(totalTokens + 1000)(events as any);
+    const totalTokens = sum(map(estimateTokensLocal)(events));
+    const capped = await capEventsToTokenBudget(totalTokens + 1000)(
+      // deno-lint-ignore no-explicit-any
+      events as any,
+    );
 
     assertEquals(capped.length, events.length, "No events should be dropped");
     assertEquals(capped[0].id, "msg0");
@@ -157,7 +159,7 @@ Deno.test(
 
 Deno.test(
   "capEventsToTokenBudget also cleans orphaned tool_calls (no matching result)",
-  () => {
+  async () => {
     // deno-lint-ignore no-explicit-any
     const events: any[] = [
       // Old tool result that matches old call
@@ -172,11 +174,11 @@ Deno.test(
       makeOwnUtterance("final", "end", 10000),
     ];
 
-    const totalTokens = sum(map(estimateTokens)(events));
+    const totalTokens = sum(map(estimateTokensLocal)(events));
     const budget = Math.floor(totalTokens / 3);
 
     // deno-lint-ignore no-explicit-any
-    const capped = capEventsToTokenBudget(budget)(events as any);
+    const capped = await capEventsToTokenBudget(budget)(events as any);
 
     // After capping, if tr0 was dropped but tc0 somehow survived,
     // the orphan filter should handle it. Or both are dropped.

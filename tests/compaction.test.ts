@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { map, sum } from "gamla";
 import { z } from "zod/v4";
-import { estimateTokens, type HistoryEvent } from "../src/agent.ts";
+import { estimateTokensLocal, type HistoryEvent } from "../src/agent.ts";
 import {
   eventsToPlainText,
   eventToPlainText,
@@ -158,7 +158,7 @@ Deno.test("segmentation: tool_call/tool_result pair spanning gap stays together"
   );
 });
 
-Deno.test("partitionSegments never splits tool_call from tool_result across kept/summarized", () => {
+Deno.test("partitionSegments never splits tool_call from tool_result across kept/summarized", async () => {
   const base = Date.now();
   const oldEvents: HistoryEvent[] = [
     makeParticipantUtterance("old msg", base),
@@ -178,7 +178,7 @@ Deno.test("partitionSegments never splits tool_call from tool_result across kept
   );
   const allEvents = [...oldEvents, ...recentEvents];
   const segments = segmentHistoryEvents(allEvents, segmentGapMs);
-  const { kept, toSummarize } = partitionSegments(30000, segments);
+  const { kept, toSummarize } = await partitionSegments(30000, segments);
 
   const keptIds = new Set(kept.flatMap((s) => s.events.map((e) => e.id)));
   const summarizedIds = new Set(
@@ -212,7 +212,7 @@ Deno.test("partitionSegments never splits tool_call from tool_result across kept
   }
 });
 
-Deno.test("single large segment is kept, not summarized", () => {
+Deno.test("single large segment is kept, not summarized", async () => {
   const baseTime = Date.now();
   const events: HistoryEvent[] = Array.from(
     { length: 40 },
@@ -225,12 +225,12 @@ Deno.test("single large segment is kept, not summarized", () => {
   );
   const segments = segmentHistoryEvents(events, segmentGapMs);
   assertEquals(segments.length, 1, "Should be a single segment");
-  const { kept, toSummarize } = partitionSegments(30000, segments);
+  const { kept, toSummarize } = await partitionSegments(30000, segments);
   assertEquals(kept.length, 1, "Single segment must be kept");
   assertEquals(toSummarize.length, 0, "Nothing to summarize");
 });
 
-Deno.test("oversized newest segment gets trimmed, old segment kept if within budget", () => {
+Deno.test("oversized newest segment gets trimmed, old segment kept if within budget", async () => {
   const baseTime = Date.now();
   const events: HistoryEvent[] = Array.from(
     { length: 5 },
@@ -251,7 +251,7 @@ Deno.test("oversized newest segment gets trimmed, old segment kept if within bud
   );
   const segments = segmentHistoryEvents(events, segmentGapMs);
   assertEquals(segments.length, 2, "Should be two segments");
-  const { kept, toSummarize } = partitionSegments(30000, segments);
+  const { kept, toSummarize } = await partitionSegments(30000, segments);
   assertEquals(
     toSummarize.length,
     1,
@@ -268,7 +268,9 @@ Deno.test("oversized newest segment gets trimmed, old segment kept if within bud
     2,
     "Trimmed newest + old segment should both be kept",
   );
-  const keptTokens = sum(map(estimateTokens)(kept.flatMap((s) => s.events)));
+  const keptTokens = sum(
+    map(estimateTokensLocal)(kept.flatMap((s) => s.events)),
+  );
   assertEquals(
     keptTokens <= 30000,
     true,
@@ -276,14 +278,14 @@ Deno.test("oversized newest segment gets trimmed, old segment kept if within bud
   );
 });
 
-Deno.test("single segment exceeding token budget gets older events summarized", () => {
+Deno.test("single segment exceeding token budget gets older events summarized", async () => {
   const baseTime = Date.now();
   const veryLongText = "x".repeat(4000);
   const events: HistoryEvent[] = Array.from(
     { length: 40 },
     (_, i) => makeUtterance(veryLongText, baseTime + i * 60_000, i % 2 === 0),
   );
-  const totalTokens = sum(events.map(estimateTokens));
+  const totalTokens = sum(events.map(estimateTokensLocal));
   assertEquals(
     totalTokens > 30000,
     true,
@@ -291,7 +293,7 @@ Deno.test("single segment exceeding token budget gets older events summarized", 
   );
   const segments = segmentHistoryEvents(events, segmentGapMs);
   assertEquals(segments.length, 1, "Should be a single segment");
-  const { kept, toSummarize } = partitionSegments(30000, segments);
+  const { kept, toSummarize } = await partitionSegments(30000, segments);
   assertEquals(
     toSummarize.length > 0,
     true,
@@ -657,7 +659,7 @@ llmTest(
   }),
 );
 
-Deno.test("trimming within single segment respects tool_call/tool_result atomicity", () => {
+Deno.test("trimming within single segment respects tool_call/tool_result atomicity", async () => {
   const base = Date.now();
   const events: HistoryEvent[] = [];
   for (let i = 0; i < 30; i++) {
@@ -675,7 +677,7 @@ Deno.test("trimming within single segment respects tool_call/tool_result atomici
   }
 
   const segments = segmentHistoryEvents(events, segmentGapMs);
-  const { kept, toSummarize } = partitionSegments(30000, segments);
+  const { kept, toSummarize } = await partitionSegments(30000, segments);
 
   const keptEvents = kept.flatMap((s) => s.events);
   const summarizedEvents = toSummarize.flatMap((s) => s.events);

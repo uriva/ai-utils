@@ -7,10 +7,9 @@ import {
   pipe,
   reverse,
   sortCompare,
-  sum,
 } from "gamla";
 import { z } from "zod/v4";
-import { estimateTokens, type HistoryEvent } from "./agent.ts";
+import { accessTokenCounter, type HistoryEvent } from "./agent.ts";
 import { genJson } from "./genJson.ts";
 
 export type HistorySegment = {
@@ -118,8 +117,9 @@ export const eventToPlainText = (e: HistoryEvent): string =>
     ? `TOOL RESULT ${JSON.stringify(e.result)}`
     : JSON.stringify(e);
 
-const estimateSegmentTokens = ({ events }: HistorySegment) =>
-  sum(map(estimateTokens)(events));
+const estimateSegmentTokens = async (
+  { events }: HistorySegment,
+): Promise<number> => await accessTokenCounter(events);
 
 const makeSegmentFromEvents = (events: HistoryEvent[]): HistorySegment => ({
   events,
@@ -127,17 +127,21 @@ const makeSegmentFromEvents = (events: HistoryEvent[]): HistorySegment => ({
   end: last(events).timestamp,
 });
 
-const trimSegmentToTokenBudget = (
+const trimSegmentToTokenBudget = async (
   maxTokens: number,
   { events }: HistorySegment,
 ) => {
   const sorted = sortEventsChronologically(events);
   const groups = groupToolCallPairs(sorted);
   const reversedGroups = [...groups].reverse();
+  const groupTokensList = await Promise.all(
+    reversedGroups.map((group) => accessTokenCounter(group)),
+  );
   const kept: HistoryEvent[][] = [];
   let tokens = 0;
-  for (const group of reversedGroups) {
-    const groupTokens = sum(map(estimateTokens)(group));
+  for (let i = 0; i < reversedGroups.length; i++) {
+    const group = reversedGroups[i];
+    const groupTokens = groupTokensList[i];
     if (tokens + groupTokens > maxTokens && kept.length > 0) break;
     kept.unshift(group);
     tokens += groupTokens;
@@ -151,39 +155,49 @@ const trimSegmentToTokenBudget = (
   };
 };
 
-export const partitionSegments = (
+export const partitionSegments = async (
   maxTokens: number,
   segments: HistorySegment[],
-): { kept: HistorySegment[]; toSummarize: HistorySegment[] } => {
+): Promise<{ kept: HistorySegment[]; toSummarize: HistorySegment[] }> => {
   const segmentsNewestFirst = reverse(segments);
-  const [kept, , newestOverflow] = segmentsNewestFirst.reduce<
-    [HistorySegment[], number, HistorySegment | null]
-  >(
-    ([acc, used, overflow], seg, i) => {
-      const tks = estimateSegmentTokens(seg);
-      if (i === 0) {
-        if (tks <= maxTokens) return [[seg, ...acc], tks, null];
-        const trimmed = trimSegmentToTokenBudget(maxTokens, seg);
-        return [
-          [makeSegmentFromEvents(trimmed.kept), ...acc],
-          trimmed.keptTokens,
-          empty(trimmed.overflow)
-            ? null
-            : makeSegmentFromEvents(trimmed.overflow),
-        ];
+  const kept: HistorySegment[] = [];
+  let used = 0;
+  let newestOverflow: HistorySegment | null = null;
+
+  for (let i = 0; i < segmentsNewestFirst.length; i++) {
+    const seg = segmentsNewestFirst[i];
+    const tks = await estimateSegmentTokens(seg);
+    if (i === 0) {
+      if (tks <= maxTokens) {
+        kept.push(seg);
+        used = tks;
+      } else {
+        const trimmed = await trimSegmentToTokenBudget(maxTokens, seg);
+        kept.push(makeSegmentFromEvents(trimmed.kept));
+        used = trimmed.keptTokens;
+        if (!empty(trimmed.overflow)) {
+          newestOverflow = makeSegmentFromEvents(trimmed.overflow);
+        }
       }
-      return used + tks > maxTokens
-        ? [acc, used, overflow]
-        : [[...acc, seg], used + tks, overflow];
-    },
-    [[], 0, null],
+    } else {
+      if (used + tks > maxTokens) {
+        break;
+      } else {
+        kept.push(seg);
+        used += tks;
+      }
+    }
+  }
+
+  const keptChronological = reverse(kept);
+  const keptIds = new Set(
+    keptChronological.flatMap((s) => s.events.map((e) => e.id)),
   );
-  const keptIds = new Set(kept.flatMap((s) => s.events.map((e) => e.id)));
   const toSummarize = [
     ...segments.filter((s) => !s.events.some((e) => keptIds.has(e.id))),
     ...(newestOverflow ? [newestOverflow] : []),
   ];
-  return { kept, toSummarize };
+  return { kept: keptChronological, toSummarize };
 };
 
 export const eventsToPlainText: (events: HistoryEvent[]) => string = pipe(

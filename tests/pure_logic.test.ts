@@ -1195,7 +1195,7 @@ Deno.test("zodToGeminiParameters converts ZodLiteral (const) to enum with single
 Deno.test({
   name:
     "estimateAgentInputTokens accurately estimates non-ASCII (Hebrew) characters higher than English characters",
-}, () => {
+}, async () => {
   const spec = {
     prompt: "",
     tools: [],
@@ -1229,8 +1229,8 @@ Deno.test({
     name: "user",
   };
 
-  const englishTokens = estimateAgentInputTokens(spec, [englishEvent]);
-  const hebrewTokens = estimateAgentInputTokens(spec, [hebrewEvent]);
+  const englishTokens = await estimateAgentInputTokens(spec, [englishEvent]);
+  const hebrewTokens = await estimateAgentInputTokens(spec, [hebrewEvent]);
 
   assertEquals(englishTokens < hebrewTokens, true);
   assertEquals(hebrewTokens > 70, true);

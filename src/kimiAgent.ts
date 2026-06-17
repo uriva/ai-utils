@@ -552,7 +552,7 @@ async (events: KimiHistoryEvent[]): Promise<KimiOutputPart[]> => {
     const err = normalizeError(error);
 
     if (isTokenLimitExceeded(err)) {
-      const totalTokens = sum(map(estimateTokens)(events));
+      const totalTokens = sum(await map(estimateTokens)(events));
       console.warn(
         `Token limit exceeded (estimated ${totalTokens} tokens, ${events.length} events). Dropping oldest half.`,
       );

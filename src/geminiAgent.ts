@@ -31,10 +31,12 @@ import {
   createSkillTools,
   doNothingEventWithMetadata,
   estimateTokens,
+  estimateTokensLocal,
   formatSkillsPrompt,
   generateId,
   getStreamChunk,
   getStreamThinkingChunk,
+  type HistoryEvent,
   type HistoryEventWithMetadata,
   invisibleToolUseInstruction,
   type MediaAttachment,
@@ -204,10 +206,10 @@ const dropOldestHalf = <T extends { type: string }>(events: T[]): T[] => {
 };
 
 export const capEventsToTokenBudget = (maxTokens: number) =>
-(
+async (
   events: GeminiHistoryEvent[],
-): GeminiHistoryEvent[] => {
-  const tokenCounts = map(estimateTokens)(events);
+): Promise<GeminiHistoryEvent[]> => {
+  const tokenCounts = await map(estimateTokens)(events);
   const total = sum(tokenCounts);
   if (total <= maxTokens) return events;
   let cumulative = 0;
@@ -1431,7 +1433,7 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
     } catch (error) {
       const err = normalizeError(error);
       if (isTokenLimitExceeded(err)) {
-        const totalTokens = sum(map(estimateTokens)(events));
+        const totalTokens = sum(await map(estimateTokens)(events));
         console.warn(
           `Token limit exceeded (estimated ${totalTokens} tokens, ${events.length} events). Dropping oldest half.`,
         );
@@ -1786,4 +1788,38 @@ export const geminiOutputToHistoryEvents = (
     const event = geminiOutputPartToHistoryEvent(responseId)(part);
     return event ? [event] : [];
   });
+};
+
+export const countEventsTokens = async (
+  events: HistoryEvent[],
+): Promise<number> => {
+  if (events.length === 0) return 0;
+  try {
+    const timezoneIANA = "UTC";
+    const geminiEvents = events as GeminiHistoryEvent[];
+    const contents = pipe(
+      groupBy(getOriginalId),
+      Object.values<GeminiHistoryEvent[]>,
+      map(
+        pipe(
+          map(historyEventToContent(indexById(geminiEvents), timezoneIANA)),
+          combineContent,
+        ),
+      ),
+      fixStart,
+    )(geminiEvents);
+
+    const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
+    const { totalTokens } = await sdk.models.countTokens({
+      model: "gemini-3.5-flash",
+      contents,
+    });
+    return totalTokens ?? 0;
+  } catch (error) {
+    console.warn(
+      "Failed calling countTokens, falling back to local estimation:",
+      error,
+    );
+    return events.reduce((sum, e) => sum + estimateTokensLocal(e), 0);
+  }
 };

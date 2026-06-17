@@ -8,14 +8,21 @@ import {
   injectOutputEvent,
   injectStreamChunk,
   injectStreamThinkingChunk,
+  injectTextTokenCounter,
+  injectTokenCounter,
   runAbstractAgent,
 } from "./src/agent.ts";
 import { anthropicAgentCaller } from "./src/anthropicAgent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
 import { createConsultTool } from "./src/consultTool.ts";
-import { geminiAgentCaller, prepareGeminiHistory } from "./src/geminiAgent.ts";
+import {
+  countEventsTokens,
+  geminiAgentCaller,
+  prepareGeminiHistory,
+} from "./src/geminiAgent.ts";
 import { inspectMediaUrlTool } from "./src/inspectMediaTool.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
+import { countTextTokens } from "./src/gemini.ts";
 export { consultToolName } from "./src/consultTool.ts";
 export {
   appendInternalSentTimestamp,
@@ -157,9 +164,17 @@ const addBuiltinTools = (spec: AgentSpec): AgentSpec => {
 
 const runAgentInner = (spec: AgentSpec): Promise<void> => {
   const specWithBuiltins = addBuiltinTools(spec);
-  return spec.transport?.kind === "audio"
-    ? runAudioTransportAgent(spec)
-    : runAbstractAgent(specWithBuiltins, resolveCallModel(specWithBuiltins));
+  let runner = () =>
+    spec.transport?.kind === "audio"
+      ? runAudioTransportAgent(spec)
+      : runAbstractAgent(specWithBuiltins, resolveCallModel(specWithBuiltins));
+
+  if (spec.provider === "google" || spec.provider === undefined) {
+    runner = injectTokenCounter(countEventsTokens)(
+      injectTextTokenCounter(countTextTokens)(runner),
+    );
+  }
+  return runner();
 };
 
 export const runAgent = (spec: AgentSpec): Promise<void> => {
