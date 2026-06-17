@@ -1,4 +1,5 @@
 import { context, type Injection } from "@uri/inject";
+import { getEncoding } from "js-tiktoken";
 import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
 import { accessGeminiToken } from "./gemini.ts";
@@ -1825,6 +1826,56 @@ const scheduleHistoryCompaction = (
   });
 };
 
+const enc = getEncoding("cl100k_base");
+
+const countTokensLocal = (text: string | undefined): number => {
+  if (!text) return 0;
+  return enc.encode(text).length;
+};
+
+const eventToPlainTextLocal = (e: HistoryEvent): string => {
+  if (
+    e.type === "participant_utterance" || e.type === "own_utterance" ||
+    e.type === "participant_edit_message" || e.type === "own_edit_message"
+  ) {
+    const nameStr = "name" in e && e.name ? `${e.name}: ` : "";
+    const textStr = e.text || "";
+    const attachmentsStr = e.attachments
+      ? e.attachments.map((a) => a.kind === "inline" ? a.dataBase64 : a.fileUri)
+        .join(" ")
+      : "";
+    return `${nameStr}${textStr} ${attachmentsStr}`;
+  }
+  if (e.type === "tool_call") {
+    return `TOOL CALL ${e.name} ${JSON.stringify(e.parameters)}`;
+  }
+  if (e.type === "tool_result") {
+    const resultStr = e.result || "";
+    const attachmentsStr = e.attachments
+      ? e.attachments.map((a) => a.kind === "inline" ? a.dataBase64 : a.fileUri)
+        .join(" ")
+      : "";
+    return `TOOL RESULT ${resultStr} ${attachmentsStr}`;
+  }
+  if (e.type === "own_thought") {
+    const attachmentsStr = e.attachments
+      ? e.attachments.map((a) => a.kind === "inline" ? a.dataBase64 : a.fileUri)
+        .join(" ")
+      : "";
+    return `thought: ${e.text} ${attachmentsStr}`;
+  }
+  if (e.type === "participant_reaction") {
+    return `${e.name} reacted with ${e.reaction}`;
+  }
+  if (e.type === "own_reaction") {
+    return `reacted with ${e.reaction}`;
+  }
+  if (e.type === "do_nothing") {
+    return "did nothing";
+  }
+  return JSON.stringify(e);
+};
+
 export type TokenCounter = (events: HistoryEvent[]) => Promise<number>;
 
 const tokenCounterInjection: Injection<TokenCounter> = context(
@@ -1838,92 +1889,15 @@ const tokenCounterInjection: Injection<TokenCounter> = context(
 export const accessTokenCounter = tokenCounterInjection.access;
 export const injectTokenCounter = tokenCounterInjection.inject;
 
-// --- Token estimation -------------------------------------------------------
-// A lightweight, overridable heuristic for estimating the token cost of
-// processing a single HistoryEvent. This intentionally avoids binding to any
-// provider-specific tokenizer (so the library stays dependency‑light) while
-// still giving callers a way to reason about budget / pruning.
-//
-// Rough heuristic: ~1 token per ~4 characters (English) with a 30% buffer.
-// For base64 media we count each 4 chars as 1 token (very rough) – callers
-// relying on precise billing should override.
-const approxTextTokensLocal = (text: string | undefined): number => {
-  if (!text) return 0;
-  // deno-lint-ignore no-control-regex
-  const nonAsciiCount = text.match(/[^\x00-\x7F]/g)?.length ?? 0;
-  const asciiCount = text.length - nonAsciiCount;
-  const estimated = Math.ceil((asciiCount / 4) * 1.3 + nonAsciiCount * 1.5);
-  return Math.max(1, estimated);
-};
-
-const approxJsonTokensLocal = (obj: unknown): number => {
-  try {
-    return approxTextTokensLocal(JSON.stringify(obj));
-  } catch (_) {
-    return 10; // fallback small constant
-  }
-};
-
-const attachmentTokensLocal = (
-  attachments: MediaAttachment[] | undefined,
-): number => {
-  if (!attachments || attachments.length === 0) return 0;
-  return attachments.reduce((sum, a) => {
-    if (a.kind === "inline") {
-      return sum + Math.ceil(a.dataBase64.length / 4 * 1.1);
-    }
-    return sum + approxTextTokensLocal(a.fileUri) +
-      approxTextTokensLocal(a.mimeType);
-  }, 0);
-};
-
-const assertNever = (x: never): never => {
-  throw new Error(
-    `Unhandled HistoryEvent variant in token estimator: ${JSON.stringify(x)}`,
-  );
-};
-
 export const estimateTokensLocal = (e: HistoryEvent): number => {
-  if (
-    e.type === "participant_utterance" || e.type === "participant_edit_message"
-  ) {
-    return approxTextTokensLocal(e.name) + approxTextTokensLocal(e.text) +
-      attachmentTokensLocal(e.attachments) + 2;
-  }
-  if (e.type === "own_utterance" || e.type === "own_edit_message") {
-    return approxTextTokensLocal(e.text) +
-      attachmentTokensLocal(e.attachments) + 2;
-  }
-  if (e.type === "tool_call") {
-    return approxTextTokensLocal(e.name) + approxJsonTokensLocal(e.parameters) +
-      4;
-  }
-  if (e.type === "tool_result") {
-    return approxTextTokensLocal(e.result) +
-      attachmentTokensLocal(e.attachments) + 4;
-  }
-  if (e.type === "own_thought") {
-    return approxTextTokensLocal(e.text) +
-      attachmentTokensLocal(e.attachments) + 2;
-  }
-  if (e.type === "participant_reaction") {
-    return approxTextTokensLocal(e.name) + approxTextTokensLocal(e.reaction) +
-      2;
-  }
-  if (e.type === "own_reaction") {
-    return approxTextTokensLocal(e.reaction) + 2;
-  }
-  if (e.type === "do_nothing") {
-    return 1;
-  }
-  return assertNever(e);
+  return countTokensLocal(eventToPlainTextLocal(e));
 };
 
 export type TextTokenCounter = (text: string | undefined) => Promise<number>;
 
 const textTokenCounterInjection: Injection<TextTokenCounter> = context(
   (text: string | undefined): Promise<number> => {
-    return Promise.resolve(approxTextTokensLocal(text));
+    return Promise.resolve(countTokensLocal(text));
   },
 );
 
@@ -1937,14 +1911,14 @@ export const estimateTokens = async (e: HistoryEvent): Promise<number> => {
 const estimateToolTokensLocal = (
   { name, description, parameters }: Tool<ZodType>,
 ): number =>
-  approxTextTokensLocal(name) + approxTextTokensLocal(description) +
-  approxTextTokensLocal(zodToTypingString(parameters));
+  countTokensLocal(name) + countTokensLocal(description) +
+  countTokensLocal(zodToTypingString(parameters));
 
 const estimateSkillTokensLocal = (
   { name, description, instructions, tools }: Skill,
 ): number =>
-  approxTextTokensLocal(name) + approxTextTokensLocal(description) +
-  approxTextTokensLocal(instructions) + tools.reduce(
+  countTokensLocal(name) + countTokensLocal(description) +
+  countTokensLocal(instructions) + tools.reduce(
     (total, tool) => total + estimateToolTokensLocal(tool),
     0,
   );
@@ -1972,15 +1946,6 @@ export const estimateAgentInputTokens = async (
 
   return promptTokens + historyTokens + toolsTokens + skillsTokens;
 };
-
-const eventToPlainTextLocal = (e: HistoryEvent): string =>
-  e.type === "participant_utterance" || e.type === "own_utterance"
-    ? e.text
-    : e.type === "tool_call"
-    ? `TOOL CALL ${e.name} ${JSON.stringify(e.parameters)}`
-    : e.type === "tool_result"
-    ? `TOOL RESULT ${JSON.stringify(e.result)}`
-    : JSON.stringify(e);
 
 const historyToPlainTextLocal = (events: HistoryEvent[]): string =>
   events.map(eventToPlainTextLocal).join("\n\n");

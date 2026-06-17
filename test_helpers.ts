@@ -77,7 +77,7 @@ const eventsCacheKey = (events: HistoryEvent[]) =>
 
 const cachingCallModelWrapper: CallModelWrapper = ({ provider, inner }) => {
   const cached = rmmbrCacheWithKey(
-    `callModel-${provider ?? "google"}-v5`,
+    `callModel-${provider ?? "google"}-v6`,
     (events: HistoryEvent[]) => eventsCacheKey(events),
     (events: HistoryEvent[]) => inner(events),
   );

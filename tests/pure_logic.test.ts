@@ -1233,5 +1233,5 @@ Deno.test({
   const hebrewTokens = await estimateAgentInputTokens(spec, [hebrewEvent]);
 
   assertEquals(englishTokens < hebrewTokens, true);
-  assertEquals(hebrewTokens > 70, true);
+  assertEquals(hebrewTokens > 50, true);
 });

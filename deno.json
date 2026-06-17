@@ -1,6 +1,6 @@
 {
   "name": "@uri/ai-utils",
-  "version": "0.1.401",
+  "version": "0.1.402",
   "license": "MIT",
   "exports": "./mod.ts",
   "imports": {
@@ -11,6 +11,7 @@
     "@std/encoding": "jsr:@std/encoding@^1.0.10",
     "@uri/inject": "jsr:@uri/inject@0.0.2",
     "gamla": "jsr:@uri/gamla@0.0.16",
+    "js-tiktoken": "npm:js-tiktoken@1.0.21",
     "openai": "npm:openai@5.2.0",
     "rmmbr": "npm:rmmbr@0.0.26",
     "zod": "npm:zod@3.25.57"
