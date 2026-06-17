@@ -1335,7 +1335,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           "The command in format skillName/toolName",
         ),
         params: z.any().describe("The parameters for the tool"),
-        description: z.string().optional().describe(
+        description: z.string().describe(
           "A human-readable description of what this command/tool call does, to show to the user as a progress update.",
         ),
       }),

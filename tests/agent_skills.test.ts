@@ -157,6 +157,7 @@ Deno.test(
           parameters: {
             command: "@tank/google-calendar/list_calendars",
             params: {},
+            description: "list calendars",
           },
           id: "fake-call-1",
           timestamp: Date.now(),
@@ -283,7 +284,11 @@ Deno.test(
           type: "tool_call" as const,
           isOwn: true as const,
           name: runCommandToolName,
-          parameters: { command: "calendar/listEvents", params: {} },
+          parameters: {
+            command: "calendar/listEvents",
+            params: {},
+            description: "list events",
+          },
           id: "fake-call-1",
           timestamp: Date.now(),
         }]);
@@ -342,6 +347,7 @@ Deno.test(
           parameters: {
             command: "calendar/update_event",
             params: { title: "standup" },
+            description: "updating event",
           },
           id: "fake-call-1",
           timestamp: Date.now(),
