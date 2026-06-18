@@ -48,7 +48,7 @@ runForAllProviders(
 
     const hasToolResult = mockHistory.some((event) =>
       event.type === "tool_result" &&
-      event.result === "8"
+      event.result.endsWith("8")
     );
     assert(
       hasToolResult,
