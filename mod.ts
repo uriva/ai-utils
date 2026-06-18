@@ -157,34 +157,8 @@ const addBuiltinTools = (spec: AgentSpec): AgentSpec => {
   };
 };
 
-const extendToolWithDescription = <T extends z.ZodTypeAny>(
-  t: Tool<T>,
-): Tool<T> => {
-  if (t.parameters instanceof z.ZodObject) {
-    if ("_description" in t.parameters.shape) {
-      return t;
-    }
-    return {
-      ...t,
-      parameters: t.parameters.extend({
-        _description: z.string().optional().describe(
-          "A human-readable description of what this command/tool call does, to show to the user as a progress update.",
-        ),
-      }),
-    } as unknown as Tool<T>;
-  }
-  return t;
-};
-
-const extendSpecToolsWithDescription = (spec: AgentSpec): AgentSpec => ({
-  ...spec,
-  tools: spec.tools.map(extendToolWithDescription),
-});
-
 const runAgentInner = (spec: AgentSpec): Promise<void> => {
-  const specWithBuiltins = extendSpecToolsWithDescription(
-    addBuiltinTools(spec),
-  );
+  const specWithBuiltins = addBuiltinTools(spec);
   return spec.transport?.kind === "audio"
     ? runAudioTransportAgent(specWithBuiltins)
     : runAbstractAgent(specWithBuiltins, resolveCallModel(specWithBuiltins));

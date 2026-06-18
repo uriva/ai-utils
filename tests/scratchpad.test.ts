@@ -166,7 +166,7 @@ const fakeReadScratchCall = (
   type: "tool_call",
   isOwn: true,
   name: readScratchFileToolName,
-  parameters: { id, grep, _description: "reading scratchpad" },
+  parameters: { id, grep },
   id: "tc-grep",
   timestamp: Date.now(),
 });
