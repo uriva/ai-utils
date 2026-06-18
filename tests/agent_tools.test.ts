@@ -156,7 +156,7 @@ Deno.test(
                 year: 2004,
               },
             },
-            $description: "Running video_sources/get_best_video_source",
+            _description: "Running video_sources/get_best_video_source",
           },
           id: "fake-tool-call",
           timestamp: Date.now(),
@@ -231,7 +231,7 @@ Deno.test(
             params: {
               videoHash: "text-eb354dfaa8",
             },
-            $description: "Running video_sources/test_action",
+            _description: "Running video_sources/test_action",
           },
           id: "fake-tool-call",
           timestamp: Date.now(),
@@ -931,7 +931,7 @@ Deno.test(
           name: "test_tool_with_desc",
           parameters: {
             description: "New domain-level description",
-            $description:
+            _description:
               "Updating description to New domain-level description",
           },
           id: "fake-tool-call",

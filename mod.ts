@@ -161,13 +161,13 @@ const extendToolWithDescription = <T extends z.ZodTypeAny>(
   t: Tool<T>,
 ): Tool<T> => {
   if (t.parameters instanceof z.ZodObject) {
-    if ("$description" in t.parameters.shape) {
+    if ("_description" in t.parameters.shape) {
       return t;
     }
     return {
       ...t,
       parameters: t.parameters.extend({
-        $description: z.string().describe(
+        _description: z.string().describe(
           "A human-readable description of what this command/tool call does, to show to the user as a progress update.",
         ),
       }),
@@ -179,10 +179,6 @@ const extendToolWithDescription = <T extends z.ZodTypeAny>(
 const extendSpecToolsWithDescription = (spec: AgentSpec): AgentSpec => ({
   ...spec,
   tools: spec.tools.map(extendToolWithDescription),
-  skills: spec.skills?.map((skill) => ({
-    ...skill,
-    tools: skill.tools.map(extendToolWithDescription),
-  })),
 });
 
 const runAgentInner = (spec: AgentSpec): Promise<void> => {
