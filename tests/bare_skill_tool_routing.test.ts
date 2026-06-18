@@ -108,5 +108,5 @@ Deno.test("auto-routed skill tool name successfully resolves description", () =>
     { todos: ["a", "b"] },
     [todoSkill],
   );
-  assertEquals(desc, "Running todo/todo_write");
+  assertEquals(desc, undefined);
 });

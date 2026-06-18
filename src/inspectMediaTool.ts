@@ -63,7 +63,6 @@ export const inspectMediaUrlTool: Tool<
       "Optional MIME type, e.g. image/png or video/mp4",
     ),
   }),
-  describe: ({ url }) => `Inspecting media at ${url}`,
   handler: async ({ url, mimeType }) => {
     const media = await fetchMedia(url, mimeType).catch((error: unknown) =>
       error instanceof Error ? error.message : String(error)

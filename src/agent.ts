@@ -198,7 +198,6 @@ export const createReadScratchFileTool = (
   description:
     `Read a tool output that was spilled to the scratch pad. Returns up to ${maxScratchReadLines} lines per call. Use 'startLine' (1-indexed) to paginate, or 'grep' (regex) to filter lines.`,
   parameters: readScratchFileParameters,
-  describe: ({ id }) => `Reading scratch pad file "${id}"`,
   handler: async ({ id, startLine, numLines, grep }) => {
     const content = await scratchPad.get(id);
     if (content === undefined) {
@@ -251,7 +250,6 @@ type ToolBase<T extends ZodType> = {
   description: string;
   name: string;
   parameters: T;
-  describe?: (params: z.infer<T>) => string;
 };
 
 export type Tool<T extends ZodType> = ToolBase<T> & {
@@ -768,7 +766,7 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
       {
         command: skillCommand,
         params: normalizedArgs,
-        _description: `Running ${skillCommand}`,
+        spinnerText: `Running ${skillCommand}`,
       },
     ]
     : [undefined, normalizedArgs];
@@ -1297,7 +1295,6 @@ export const doNothingTool: Tool<
   description:
     "Call this tool when you have nothing to say and should not respond. Use this instead of writing an empty message, HTML comment, or any placeholder text.",
   parameters: z.object({ reason: z.string().optional() }),
-  describe: () => "Doing nothing",
   handler: () => Promise.resolve(""),
 };
 
@@ -1317,6 +1314,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
     toolName.startsWith(`${skillName}/`)
       ? toolName.slice(skillName.length + 1)
       : toolName;
+
   const skillMap = Object.fromEntries(skills.map((s) => [s.name, s]));
   const toolMap = Object.fromEntries(
     skills.flatMap((skill) =>
@@ -1336,50 +1334,10 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           "The command in format skillName/toolName",
         ),
         params: z.any().describe("The parameters for the tool"),
-        _description: z.string().optional().describe(
-          "A human-readable description of what this command/tool call does, to show to the user as a progress update.",
+        spinnerText: z.string().optional().describe(
+          "A short progress update or spinner message in active voice (e.g., 'Searching the web...', 'Deploying server...') representing what this action is actively doing. This message is shown to the user while the tool runs. You MUST always provide this description.",
         ),
       }),
-      // deno-lint-ignore no-explicit-any
-      describe: ({ command, params, _description, description }: any) => {
-        if (_description) return _description;
-        if (description) return description;
-        const separator = command.includes("/") ? "/" : ":";
-        const lastSep = command.lastIndexOf(separator);
-        const toolName = lastSep !== -1 ? command.slice(lastSep + 1) : command;
-        const skillName = lastSep !== -1 ? command.slice(0, lastSep) : "";
-        const fullToolName = lastSep !== -1
-          ? `${skillName}/${toolName}`
-          : command;
-        const targetTool = toolMap[fullToolName];
-        if (targetTool && targetTool.describe) {
-          try {
-            const desc = targetTool.describe(params);
-            if (desc) return desc;
-          } catch {
-            // fallback
-          }
-        }
-        if (params && typeof params === "object") {
-          const fallbackFields = [
-            "description",
-            "comment",
-            "reason",
-            "explanation",
-            "thought",
-          ];
-          for (const field of fallbackFields) {
-            if (
-              field in params &&
-              typeof params[field] === "string" &&
-              params[field]
-            ) {
-              return params[field];
-            }
-          }
-        }
-        return `Running ${command}`;
-      },
       handler: async ({ command, params }, toolCallId) => {
         const separator = command.includes("/") ? "/" : ":";
         const lastSep = command.lastIndexOf(separator);
@@ -1425,7 +1383,6 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
       parameters: z.object({
         skillName: z.string().describe("The name of the skill to learn about"),
       }),
-      describe: ({ skillName }) => `Learning skill "${skillName}"`,
       handler: ({ skillName }) => {
         const skill = skillMap[skillName];
         if (!skill) {
@@ -1459,8 +1416,6 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           "The name of the reference file to read (e.g., 'cbt-protocols.md')",
         ),
       }),
-      describe: ({ skillName, referenceName }) =>
-        `Reading reference "${referenceName}" from skill "${skillName}"`,
       handler: ({ skillName, referenceName }) => {
         const skill = skillMap[skillName];
         if (!skill) {
@@ -1486,136 +1441,25 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
 
 export const resolveToolDescription = (
   // deno-lint-ignore no-explicit-any
-  allTools: Tool<any>[],
-  name: string,
+  _allTools: Tool<any>[],
+  _name: string,
   // deno-lint-ignore no-explicit-any
   parameters: any,
-  skills: Skill[] = [],
+  _skills: Skill[] = [],
 ): string | undefined => {
-  let normalizedName = name;
-  let normalizedArgs = parameters;
-  if (
-    name.endsWith(`/${learnSkillToolName}`) ||
-    name.endsWith(`:${learnSkillToolName}`)
-  ) {
-    normalizedName = learnSkillToolName;
-    if (!parameters || (!parameters.skillName && !parameters.skill)) {
-      const separator = name.includes("/") ? "/" : ":";
-      const parts = name.split(separator);
-      normalizedArgs = { ...parameters, skillName: parts[0] };
-    }
-  }
-  if (
-    normalizedName === learnSkillToolName &&
-    normalizedArgs &&
-    !normalizedArgs.skillName &&
-    normalizedArgs.skill
-  ) {
-    const { skill, ...rest } = normalizedArgs;
-    normalizedArgs = { ...rest, skillName: skill };
-  }
-
-  const directMatch = allTools.find(({ name: n }) => n === normalizedName);
-  const slashSkillCall = !directMatch &&
-    (normalizedName.includes("/") || normalizedName.includes(":"));
-  const unambiguousBare = !directMatch && !slashSkillCall
-    ? resolveUnambiguousBareName(normalizedName, skills)
-    : undefined;
-  const isSkillCall = slashSkillCall || unambiguousBare !== undefined;
-  const skillCommand = unambiguousBare ?? normalizedName;
-
   if (parameters && typeof parameters === "object") {
-    if (
-      parameters.params && typeof parameters.params === "object" &&
-      (parameters.params._description || parameters.params.description)
-    ) {
-      return parameters.params._description || parameters.params.description;
+    if (typeof parameters.spinnerText === "string" && parameters.spinnerText) {
+      return parameters.spinnerText;
     }
     if (
-      parameters._description &&
-      parameters._description !== `Running ${skillCommand}`
+      parameters.params &&
+      typeof parameters.params === "object" &&
+      typeof parameters.params.spinnerText === "string" &&
+      parameters.params.spinnerText
     ) {
-      return parameters._description;
-    }
-    if (
-      parameters.description &&
-      parameters.description !== `Running ${skillCommand}`
-    ) {
-      return parameters.description;
+      return parameters.params.spinnerText;
     }
   }
-
-  const action = directMatch
-    ? directMatch
-    : isSkillCall
-    ? allTools.find(({ name: n }) => n === runCommandToolName)
-    : undefined;
-
-  const effectiveArgs = directMatch ? normalizedArgs : isSkillCall
-    ? {
-      command: skillCommand,
-      params: normalizedArgs,
-      _description: `Running ${skillCommand}`,
-    }
-    : normalizedArgs;
-
-  if (action && action.describe) {
-    try {
-      const desc = action.describe(effectiveArgs);
-      if (desc) return desc;
-    } catch {
-      // fallback
-    }
-  }
-
-  if (isSkillCall) {
-    const bareToolName = (skillName: string, tName: string) =>
-      tName.startsWith(`${skillName}/`)
-        ? tName.slice(skillName.length + 1)
-        : tName;
-
-    const separator = skillCommand.includes("/") ? "/" : ":";
-    const lastSep = skillCommand.lastIndexOf(separator);
-    const toolName = lastSep !== -1
-      ? skillCommand.slice(lastSep + 1)
-      : skillCommand;
-    const skillName = lastSep !== -1 ? skillCommand.slice(0, lastSep) : "";
-
-    const targetSkill = skills.find((s) => s.name === skillName);
-    const targetTool = targetSkill?.tools.find(
-      (t) =>
-        bareToolName(skillName, t.name) === bareToolName(skillName, toolName),
-    );
-
-    if (targetTool && targetTool.describe) {
-      try {
-        const desc = targetTool.describe(normalizedArgs);
-        if (desc) return desc;
-      } catch {
-        // fallback
-      }
-    }
-  }
-
-  if (parameters && typeof parameters === "object") {
-    const fallbackFields = [
-      "description",
-      "comment",
-      "reason",
-      "explanation",
-      "thought",
-    ];
-    for (const field of fallbackFields) {
-      if (
-        field in parameters &&
-        typeof parameters[field] === "string" &&
-        parameters[field]
-      ) {
-        return parameters[field];
-      }
-    }
-  }
-
   return undefined;
 };
 

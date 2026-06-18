@@ -1152,7 +1152,7 @@ Deno.test("formatSkillsPrompt appends compact tool names and descriptions under 
   );
 });
 
-Deno.test("resolveToolDescription resolves description from run_command nested params fallbacks", () => {
+Deno.test("resolveToolDescription resolves description from run_command spinnerText", () => {
   const dummySkillTool = tool({
     name: "dummy_tool",
     description: "A dummy tool",
@@ -1171,7 +1171,8 @@ Deno.test("resolveToolDescription resolves description from run_command nested p
     "run_command",
     {
       command: "dummy_skill/dummy_tool",
-      params: { comment: "Performing a background task" },
+      params: {},
+      spinnerText: "Performing a background task",
     },
     skills,
   );

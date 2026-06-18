@@ -830,7 +830,6 @@ Deno.test(
       name: "test_tool",
       description: "A test tool",
       parameters: z.object({ val: z.string() }),
-      describe: ({ val }: { val: string }) => `Testing with value: ${val}`,
       handler: () => Promise.resolve("Success"),
     };
 
@@ -850,7 +849,7 @@ Deno.test(
     assert(toolCall, "test_tool should be called");
     assertEquals(
       toolCall.type === "tool_call" ? toolCall.description : undefined,
-      "Testing with value: myValue",
+      undefined,
     );
   },
 );
