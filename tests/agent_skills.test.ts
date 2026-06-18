@@ -50,7 +50,10 @@ runForAllProviders(
       event.type === "tool_result" &&
       event.result === "8"
     );
-    assert(hasToolResult, "Should have result of 5 + 3 = 8 from run_command");
+    assert(
+      hasToolResult,
+      `Should have result of 5 + 3 = 8 from run_command. History: ${JSON.stringify(mockHistory, null, 2)}`
+    );
   },
 );
 
