@@ -52,7 +52,9 @@ runForAllProviders(
     );
     assert(
       hasToolResult,
-      `Should have result of 5 + 3 = 8 from run_command. History: ${JSON.stringify(mockHistory, null, 2)}`
+      `Should have result of 5 + 3 = 8 from run_command. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
     );
   },
 );
