@@ -167,7 +167,7 @@ const extendToolWithDescription = <T extends z.ZodTypeAny>(
     return {
       ...t,
       parameters: t.parameters.extend({
-        _description: z.string().describe(
+        _description: z.string().optional().describe(
           "A human-readable description of what this command/tool call does, to show to the user as a progress update.",
         ),
       }),
