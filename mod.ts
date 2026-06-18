@@ -1,4 +1,3 @@
-import { z } from "zod/v4";
 import {
   accessCallModel,
   accessCallModelWrapper,
@@ -10,7 +9,6 @@ import {
   injectStreamChunk,
   injectStreamThinkingChunk,
   runAbstractAgent,
-  type Tool,
 } from "./src/agent.ts";
 import { anthropicAgentCaller } from "./src/anthropicAgent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
