@@ -52,8 +52,12 @@ const emojiPattern =
 
 const maxEmojis = 100;
 
-export const isEmojiFlood = (text: string) =>
-  (text.match(emojiPattern)?.length ?? 0) > maxEmojis;
+export const isEmojiFlood = (text: string) => {
+  const emojiCount = text.match(emojiPattern)?.length ?? 0;
+  if (emojiCount <= maxEmojis) return false;
+  const nonWhitespaceCount = text.replace(/\s/g, "").length;
+  return emojiCount / (nonWhitespaceCount || 1) > 0.25;
+};
 
 export const isRepetitionFlood = (text: string) => {
   const matches = text.matchAll(/(.{1,15}?)\1{29,}/gs);

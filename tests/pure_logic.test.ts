@@ -524,6 +524,16 @@ Deno.test("isEmojiFlood returns false at exactly 100 emojis", () => {
   assertEquals(isEmojiFlood("😀".repeat(100)), false);
 });
 
+Deno.test("isEmojiFlood returns false for long text with scattered emojis", () => {
+  const normalTextWithManyEmojis = "party ".repeat(500) + "🎉".repeat(120);
+  assertEquals(isEmojiFlood(normalTextWithManyEmojis), false);
+});
+
+Deno.test("isEmojiFlood returns true for high density of emojis exceeding limit", () => {
+  const highDensityFlood = "party " + "🎉".repeat(120);
+  assertEquals(isEmojiFlood(highDensityFlood), true);
+});
+
 Deno.test(
   "emoji flood in model response causes retry and eventual throw",
   async () => {
