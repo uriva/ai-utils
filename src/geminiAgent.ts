@@ -30,6 +30,7 @@ import {
   type AgentSpec,
   createSkillTools,
   doNothingEventWithMetadata,
+  estimateAgentInputTokens,
   estimateTokens,
   estimateTokensLocal,
   formatSkillsPrompt,
@@ -199,7 +200,7 @@ const isRecoverableError = (error: Error) =>
   is403PermissionError(error) ||
   isTokenLimitExceeded(error);
 
-const dropOldestHalf = <T extends { type: string }>(events: T[]): T[] => {
+const _dropOldestHalf = <T extends { type: string }>(events: T[]): T[] => {
   if (events.length <= 2) return events;
   const half = Math.floor(events.length / 2);
   return events.slice(half);
@@ -1420,46 +1421,14 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
   try {
     const req = eventsToRequest(events);
     try {
-      const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
-      const { totalTokens } = await sdk.models.countTokens(
-        req as unknown as Parameters<typeof sdk.models.countTokens>[0],
-      );
-      if (totalTokens && totalTokens > 1040000) {
-        const truncated = dropOldestHalf(events);
-        if (truncated.length !== events.length) {
-          console.warn(
-            `Token limit exceeded via countTokens (${totalTokens} tokens, ${events.length} events). Dropping oldest half.`,
-          );
-          return callGeminiWithFixHistory(
-            rewriteHistory,
-            eventsToRequest,
-            disableStreaming,
-          )(truncated);
-        }
-      }
-    } catch (countError) {
-      console.warn(
-        "Failed calling Gemini countTokens, falling back to local estimation:",
-        countError,
-      );
-    }
-
-    try {
       return await callGemini(req, disableStreaming);
     } catch (error) {
       const err = normalizeError(error);
       if (isTokenLimitExceeded(err)) {
         const totalTokens = sum(await map(estimateTokens)(events));
-        console.warn(
-          `Token limit exceeded (estimated ${totalTokens} tokens, ${events.length} events). Dropping oldest half.`,
+        throw new Error(
+          `Token limit exceeded (estimated ${totalTokens} tokens, ${events.length} events). This should never happen due to history compaction.`,
         );
-        const truncated = dropOldestHalf(events);
-        if (truncated.length === events.length) throw err;
-        return callGeminiWithFixHistory(
-          rewriteHistory,
-          eventsToRequest,
-          disableStreaming,
-        )(truncated);
       }
       if (isFileNotActiveError(err)) {
         return stripAllNotActiveFiles(
@@ -1586,6 +1555,13 @@ const markTruncatedUtterances = (
 export const geminiAgentCaller =
   (spec: AgentSpec) =>
   async (events: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> => {
+    const totalTokens = await estimateAgentInputTokens(spec, events);
+    if (totalTokens > 1040000) {
+      throw new Error(
+        `Token budget exceeded! Estimated ${totalTokens} tokens, limit is 1040000. This should never happen due to history compaction.`,
+      );
+    }
+
     const box: { reason?: string } = {};
     const result = await finishReasonSink.inject((r: string) => {
       box.reason = r;
