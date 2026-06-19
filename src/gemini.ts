@@ -74,34 +74,59 @@ export const zodToGeminiParameters = (zodObj: ZodType): FunctionDeclaration => {
 
 // Walk the processed JSON schema to ensure Gemini/LLM providers support all of its features.
 // It does not support nested anyOf/oneOf/allOf/const.
+// deno-lint-ignore no-explicit-any
 export const validateSchema = (schema: any, path: string = "root"): void => {
   if (typeof schema !== "object" || schema === null) return;
 
   if ("anyOf" in schema || "any_of" in schema) {
-    throw new Error(`Unsupported schema construct 'anyOf' at ${path}. unions or anyOf are not supported.`);
+    throw new Error(
+      `Unsupported schema construct 'anyOf' at ${path}. unions or anyOf are not supported.`,
+    );
   }
   if ("oneOf" in schema || "one_of" in schema) {
-    throw new Error(`Unsupported schema construct 'oneOf' at ${path}. oneOf is not supported.`);
+    throw new Error(
+      `Unsupported schema construct 'oneOf' at ${path}. oneOf is not supported.`,
+    );
   }
   if ("allOf" in schema || "all_of" in schema) {
-    throw new Error(`Unsupported schema construct 'allOf' at ${path}. allOf is not supported.`);
+    throw new Error(
+      `Unsupported schema construct 'allOf' at ${path}. allOf is not supported.`,
+    );
   }
   if ("const" in schema) {
-    throw new Error(`Unsupported schema construct 'const' at ${path}. const is not supported (use enum instead).`);
+    throw new Error(
+      `Unsupported schema construct 'const' at ${path}. const is not supported (use enum instead).`,
+    );
   }
 
   // Check type if present
   if ("type" in schema) {
-    const supportedTypes = ["string", "number", "integer", "boolean", "object", "array", "null"];
+    const supportedTypes = [
+      "string",
+      "number",
+      "integer",
+      "boolean",
+      "object",
+      "array",
+      "null",
+    ];
     if (Array.isArray(schema.type)) {
       for (const t of schema.type) {
         if (!supportedTypes.includes(t)) {
-          throw new Error(`Unsupported type '${t}' in union type at ${path}. Supported types: ${supportedTypes.join(", ")}`);
+          throw new Error(
+            `Unsupported type '${t}' in union type at ${path}. Supported types: ${
+              supportedTypes.join(", ")
+            }`,
+          );
         }
       }
     } else if (typeof schema.type === "string") {
       if (!supportedTypes.includes(schema.type)) {
-        throw new Error(`Unsupported type '${schema.type}' at ${path}. Supported types: ${supportedTypes.join(", ")}`);
+        throw new Error(
+          `Unsupported type '${schema.type}' at ${path}. Supported types: ${
+            supportedTypes.join(", ")
+          }`,
+        );
       }
     }
   }
@@ -116,6 +141,7 @@ export const validateSchema = (schema: any, path: string = "root"): void => {
   // Recursively validate items
   if (schema.items) {
     if (Array.isArray(schema.items)) {
+      // deno-lint-ignore no-explicit-any
       schema.items.forEach((item: any, index: number) => {
         validateSchema(item, `${path}.items[${index}]`);
       });
@@ -125,12 +151,18 @@ export const validateSchema = (schema: any, path: string = "root"): void => {
   }
 
   // Recursively validate additionalProperties
-  if (schema.additionalProperties && typeof schema.additionalProperties === "object") {
+  if (
+    schema.additionalProperties &&
+    typeof schema.additionalProperties === "object"
+  ) {
     validateSchema(schema.additionalProperties, `${path}.additionalProperties`);
   }
 };
 
-export const validateZodSchema = (zodObj: ZodType, path: string = "root"): void => {
+export const validateZodSchema = (
+  zodObj: ZodType,
+  path: string = "root",
+): void => {
   const jsonSchema = removeAdditionalProperties(z.toJSONSchema(zodObj));
   validateSchema(jsonSchema, path);
 };

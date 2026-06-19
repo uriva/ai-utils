@@ -1,7 +1,7 @@
-import { assert, assertEquals, assertThrows, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { sleep } from "gamla";
 import { z } from "zod/v4";
-import { runAgent, validateZodSchema } from "../mod.ts";
+import { type AgentSpec, runAgent, validateZodSchema } from "../mod.ts";
 import { runForAllProviders } from "../test_helpers.ts";
 import {
   type DeferredTool,
@@ -872,7 +872,7 @@ Deno.test(
 
 Deno.test(
   "runAgent throws error before running agent if tools or skills have invalid schemas",
-  async () => {
+  () => {
     const badTool = {
       name: "bad_tool",
       description: "A tool with unsupported schema",
@@ -890,7 +890,7 @@ Deno.test(
     };
 
     assertThrows(
-      () => runAgent(spec as any),
+      () => runAgent(spec as unknown as AgentSpec),
       Error,
       "unions or anyOf",
     );

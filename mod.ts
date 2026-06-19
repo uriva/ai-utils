@@ -41,9 +41,9 @@ export {
   geminiGenText,
   injectGeminiModelVersions,
   injectGeminiToken,
-  zodToGeminiParameters,
   validateSchema,
   validateZodSchema,
+  zodToGeminiParameters,
 } from "./src/gemini.ts";
 export { genJson, genJsonFromConvo } from "./src/genJson.ts";
 export {
@@ -171,8 +171,12 @@ export const runAgent = (spec: AgentSpec): Promise<void> => {
     for (const tool of spec.tools) {
       try {
         validateZodSchema(tool.parameters, `tool:${tool.name}`);
-      } catch (e: any) {
-        throw new Error(`Tool validation failed for '${tool.name}': ${e.message}`);
+      } catch (e) {
+        throw new Error(
+          `Tool validation failed for '${tool.name}': ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
       }
     }
   }
@@ -181,9 +185,16 @@ export const runAgent = (spec: AgentSpec): Promise<void> => {
       if (skill.tools) {
         for (const tool of skill.tools) {
           try {
-            validateZodSchema(tool.parameters, `skill:${skill.name}/tool:${tool.name}`);
-          } catch (e: any) {
-            throw new Error(`Skill tool validation failed for '${skill.name}/${tool.name}': ${e.message}`);
+            validateZodSchema(
+              tool.parameters,
+              `skill:${skill.name}/tool:${tool.name}`,
+            );
+          } catch (e) {
+            throw new Error(
+              `Skill tool validation failed for '${skill.name}/${tool.name}': ${
+                e instanceof Error ? e.message : String(e)
+              }`,
+            );
           }
         }
       }
