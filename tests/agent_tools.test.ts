@@ -1,7 +1,7 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows, assertRejects } from "@std/assert";
 import { sleep } from "gamla";
 import { z } from "zod/v4";
-import { runAgent } from "../mod.ts";
+import { runAgent, validateZodSchema } from "../mod.ts";
 import { runForAllProviders } from "../test_helpers.ts";
 import {
   type DeferredTool,
@@ -850,6 +850,49 @@ Deno.test(
     assertEquals(
       toolCall.type === "tool_call" ? toolCall.description : undefined,
       undefined,
+    );
+  },
+);
+
+Deno.test(
+  "validateZodSchema throws exception for unsupported schema constructs",
+  () => {
+    // Union type schema (translates to anyOf) which Gemini cannot handle
+    const invalidSchema = z.object({
+      field: z.union([z.string(), z.number()]),
+    });
+
+    assertThrows(
+      () => validateZodSchema(invalidSchema),
+      Error,
+      "unions or anyOf",
+    );
+  },
+);
+
+Deno.test(
+  "runAgent throws error before running agent if tools or skills have invalid schemas",
+  async () => {
+    const badTool = {
+      name: "bad_tool",
+      description: "A tool with unsupported schema",
+      parameters: z.object({
+        field: z.union([z.string(), z.number()]),
+      }),
+      handler: () => Promise.resolve(""),
+    };
+
+    const spec = {
+      prompt: "Hello",
+      tools: [badTool],
+      rewriteHistory: async () => {},
+      compactHistory: async () => {},
+    };
+
+    assertThrows(
+      () => runAgent(spec as any),
+      Error,
+      "unions or anyOf",
     );
   },
 );

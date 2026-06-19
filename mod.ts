@@ -14,6 +14,7 @@ import { anthropicAgentCaller } from "./src/anthropicAgent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
 import { createConsultTool } from "./src/consultTool.ts";
 import { geminiAgentCaller, prepareGeminiHistory } from "./src/geminiAgent.ts";
+import { validateZodSchema } from "./src/gemini.ts";
 import { inspectMediaUrlTool } from "./src/inspectMediaTool.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
 export { consultToolName } from "./src/consultTool.ts";
@@ -41,6 +42,8 @@ export {
   injectGeminiModelVersions,
   injectGeminiToken,
   zodToGeminiParameters,
+  validateSchema,
+  validateZodSchema,
 } from "./src/gemini.ts";
 export { genJson, genJsonFromConvo } from "./src/genJson.ts";
 export {
@@ -163,6 +166,30 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
 };
 
 export const runAgent = (spec: AgentSpec): Promise<void> => {
+  // Validate all tools and skills before starting the agent run to catch unsupported schema constructs early
+  if (spec.tools) {
+    for (const tool of spec.tools) {
+      try {
+        validateZodSchema(tool.parameters, `tool:${tool.name}`);
+      } catch (e: any) {
+        throw new Error(`Tool validation failed for '${tool.name}': ${e.message}`);
+      }
+    }
+  }
+  if (spec.skills) {
+    for (const skill of spec.skills) {
+      if (skill.tools) {
+        for (const tool of skill.tools) {
+          try {
+            validateZodSchema(tool.parameters, `skill:${skill.name}/tool:${tool.name}`);
+          } catch (e: any) {
+            throw new Error(`Skill tool validation failed for '${skill.name}/${tool.name}': ${e.message}`);
+          }
+        }
+      }
+    }
+  }
+
   let runner = () => runAgentInner(spec);
   if (spec.onOutputEvent) {
     runner = injectOutputEvent(spec.onOutputEvent)(runner);

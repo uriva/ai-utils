@@ -72,6 +72,69 @@ export const zodToGeminiParameters = (zodObj: ZodType): FunctionDeclaration => {
   return jsonSchema as unknown as FunctionDeclaration;
 };
 
+// Walk the processed JSON schema to ensure Gemini/LLM providers support all of its features.
+// It does not support nested anyOf/oneOf/allOf/const.
+export const validateSchema = (schema: any, path: string = "root"): void => {
+  if (typeof schema !== "object" || schema === null) return;
+
+  if ("anyOf" in schema || "any_of" in schema) {
+    throw new Error(`Unsupported schema construct 'anyOf' at ${path}. unions or anyOf are not supported.`);
+  }
+  if ("oneOf" in schema || "one_of" in schema) {
+    throw new Error(`Unsupported schema construct 'oneOf' at ${path}. oneOf is not supported.`);
+  }
+  if ("allOf" in schema || "all_of" in schema) {
+    throw new Error(`Unsupported schema construct 'allOf' at ${path}. allOf is not supported.`);
+  }
+  if ("const" in schema) {
+    throw new Error(`Unsupported schema construct 'const' at ${path}. const is not supported (use enum instead).`);
+  }
+
+  // Check type if present
+  if ("type" in schema) {
+    const supportedTypes = ["string", "number", "integer", "boolean", "object", "array", "null"];
+    if (Array.isArray(schema.type)) {
+      for (const t of schema.type) {
+        if (!supportedTypes.includes(t)) {
+          throw new Error(`Unsupported type '${t}' in union type at ${path}. Supported types: ${supportedTypes.join(", ")}`);
+        }
+      }
+    } else if (typeof schema.type === "string") {
+      if (!supportedTypes.includes(schema.type)) {
+        throw new Error(`Unsupported type '${schema.type}' at ${path}. Supported types: ${supportedTypes.join(", ")}`);
+      }
+    }
+  }
+
+  // Recursively validate properties
+  if (schema.properties && typeof schema.properties === "object") {
+    for (const [key, prop] of Object.entries(schema.properties)) {
+      validateSchema(prop, `${path}.properties.${key}`);
+    }
+  }
+
+  // Recursively validate items
+  if (schema.items) {
+    if (Array.isArray(schema.items)) {
+      schema.items.forEach((item: any, index: number) => {
+        validateSchema(item, `${path}.items[${index}]`);
+      });
+    } else {
+      validateSchema(schema.items, `${path}.items`);
+    }
+  }
+
+  // Recursively validate additionalProperties
+  if (schema.additionalProperties && typeof schema.additionalProperties === "object") {
+    validateSchema(schema.additionalProperties, `${path}.additionalProperties`);
+  }
+};
+
+export const validateZodSchema = (zodObj: ZodType, path: string = "root"): void => {
+  const jsonSchema = removeAdditionalProperties(z.toJSONSchema(zodObj));
+  validateSchema(jsonSchema, path);
+};
+
 const tokenInjection: Injection<() => string> = context((): string => {
   throw new Error("no gemini token injected");
 });
