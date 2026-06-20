@@ -1335,7 +1335,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         ),
         params: z.any().describe("The parameters for the tool"),
         spinnerText: z.string().describe(
-          "A short progress update or spinner message in active voice (e.g., 'Searching the web...', 'Deploying server...') representing what this action is actively doing. This message is shown to the user while the tool runs.",
+          "A short progress update or spinner message in active voice (e.g., 'Searching the web...', 'Deploying server...') representing what this action is actively doing. This message is shown to the user while the tool runs. IMPORTANT: Do NOT include any emojis (such as hourglass ⏳, gears ⚙️, etc.) in this message.",
         ),
       }),
       handler: async ({ command, params }, toolCallId) => {
