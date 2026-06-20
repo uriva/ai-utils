@@ -12,6 +12,11 @@ import {
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
 import { isEmojiFlood, isRepetitionFlood } from "./utils.ts";
+import {
+  extractJsonThought,
+  hasJsonThought,
+  stripJsonThought,
+} from "./jsonThought.ts";
 export type MediaAttachment =
   | { kind: "inline"; mimeType: string; dataBase64: string; caption?: string }
   | { kind: "file"; mimeType: string; fileUri: string; caption?: string };
@@ -1064,9 +1069,9 @@ export const systemNotificationPattern: RegExp = new RegExp(
 );
 
 const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
-  output.map((event) => {
+  output.flatMap((event) => {
     if (event.type !== "own_utterance" && event.type !== "own_edit_message") {
-      return event;
+      return [event];
     }
     const text = stripAllInternalSentTimestamps(event.text);
 
@@ -1075,14 +1080,31 @@ const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
 
     const match = cleanedText.match(internalThoughtPattern);
     if (match) {
-      return { ...event, type: "own_thought" as const, text: match[1] };
+      return [{ ...event, type: "own_thought" as const, text: match[1] }];
+    }
+
+    if (hasJsonThought(cleanedText)) {
+      const thoughtText = extractJsonThought(cleanedText);
+      const remainingText = stripJsonThought(cleanedText);
+      const results: HistoryEvent[] = [];
+      if (thoughtText) {
+        results.push({
+          ...event,
+          type: "own_thought" as const,
+          text: thoughtText,
+        });
+      }
+      if (remainingText) {
+        results.push({ ...event, text: remainingText });
+      }
+      return results;
     }
 
     if (cleanedText !== text) {
-      return { ...event, text: cleanedText };
+      return [{ ...event, text: cleanedText }];
     }
 
-    return event;
+    return [event];
   });
 
 export const noResponseTag = "[no response]";

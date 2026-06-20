@@ -368,6 +368,20 @@ Deno.test("stripEmbeddedThoughtPatterns returns empty for thought-only text", ()
   assertEquals(stripEmbeddedThoughtPatterns(thoughtOnly), "");
 });
 
+Deno.test("stripEmbeddedThoughtPatterns removes JSON thoughts from mixed text", () => {
+  const mixed =
+    '{\n  "thought": "recommending extreme sports"\n}Great choice! Let us schedule it.';
+  assertEquals(
+    stripEmbeddedThoughtPatterns(mixed),
+    "Great choice! Let us schedule it.",
+  );
+});
+
+Deno.test("stripEmbeddedThoughtPatterns returns empty for empty JSON thought prefix with no content", () => {
+  const emptyJson = '{\n  "thought": ""\n}';
+  assertEquals(stripEmbeddedThoughtPatterns(emptyJson), "");
+});
+
 Deno.test("invalid Gemini tool calls rewrite to useful thoughts without internals", () => {
   const replacements: Record<string, HistoryEvent> = {};
   const filter = filterAndRewriteInvalidToolCalls((r) => {

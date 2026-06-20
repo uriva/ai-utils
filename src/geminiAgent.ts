@@ -69,6 +69,7 @@ import {
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
 import { inspectMediaUrlToolName } from "./inspectMediaTool.ts";
+import { extractJsonThought, stripJsonThought } from "./jsonThought.ts";
 
 const fetchUrl = (input: RequestInfo | URL): string =>
   typeof input === "string"
@@ -1619,13 +1620,16 @@ const embeddedThoughtPattern =
   /\[Internal thought, visible only to you: ([\s\S]*?)\]/g;
 
 export const stripEmbeddedThoughtPatterns = (text: string): string =>
-  text.replace(embeddedThoughtPattern, "").trim();
+  stripJsonThought(text.replace(embeddedThoughtPattern, "")).trim();
 
-const extractEmbeddedThoughts = (text: string): string =>
-  [...text.matchAll(embeddedThoughtPattern)]
+const extractEmbeddedThoughts = (text: string): string => {
+  const bracketThoughts = [...text.matchAll(embeddedThoughtPattern)]
     .map((m) => m[1])
     .join("\n")
     .trim();
+  const jsonThoughts = extractJsonThought(text);
+  return [bracketThoughts, jsonThoughts].filter(Boolean).join("\n").trim();
+};
 
 const storeGeminiMetadata = (eventId: string, metadata: GeminiMetadata) =>
   accessMetadataStore().set(eventId, metadata).catch((e) => {
