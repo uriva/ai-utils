@@ -32,6 +32,11 @@ const dashSent = `\\s?[—–-]\\s?sent\\s+${internalSentTimestampShape.source}`
 const suffixPattern = new RegExp(`${dashSent}$`);
 const prefixPattern = new RegExp(`^${dashSent}`);
 
+export const globalSentPattern = new RegExp(dashSent, "g");
+
+export const stripAllInternalSentTimestamps = (text: string): string =>
+  text.replace(globalSentPattern, "");
+
 const matchesSuffixOrPrefix = (text: string) =>
   suffixPattern.test(text) || prefixPattern.test(text);
 

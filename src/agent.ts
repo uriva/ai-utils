@@ -8,6 +8,7 @@ import { zodToTypingString } from "./toolTyping.ts";
 import { coerceArgs } from "./argCoercion.ts";
 import {
   hasInternalSentTimestampSuffix,
+  stripAllInternalSentTimestamps,
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
 import { isEmojiFlood, isRepetitionFlood } from "./utils.ts";
@@ -1056,22 +1057,32 @@ const internalThoughtPattern =
 
 export const systemNotificationPrefix = "[System notification:";
 
-const systemNotificationPattern = new RegExp(
+export const systemNotificationPattern: RegExp = new RegExp(
   systemNotificationPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
-    " [\\s\\S]*?\\]",
+    " [\\s\\S]*?\\]+",
+  "gi",
 );
 
 const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
   output.map((event) => {
-    if (event.type !== "own_utterance") return event;
-    const text = stripInternalSentTimestampSuffix(event.text);
-    if (systemNotificationPattern.test(text)) {
-      return { ...event, type: "own_thought" as const, text };
+    if (event.type !== "own_utterance" && event.type !== "own_edit_message") {
+      return event;
     }
-    const match = text.match(internalThoughtPattern);
-    return match
-      ? { ...event, type: "own_thought" as const, text: match[1] }
-      : event;
+    const text = stripAllInternalSentTimestamps(event.text);
+
+    // Clean any system notifications from the text to never allow the model to emit them
+    const cleanedText = text.replace(systemNotificationPattern, "").trim();
+
+    const match = cleanedText.match(internalThoughtPattern);
+    if (match) {
+      return { ...event, type: "own_thought" as const, text: match[1] };
+    }
+
+    if (cleanedText !== text) {
+      return { ...event, text: cleanedText };
+    }
+
+    return event;
   });
 
 export const noResponseTag = "[no response]";
@@ -1223,9 +1234,9 @@ export const sanitizeModelOutput = (
     sanitized,
   );
   const withoutNoResponse = reclassifyNoResponse(withoutFabrications);
-  const withoutEmpty = reclassifyEmptyUtterances(withoutNoResponse);
-  const reclassified = reclassifyLeakedThoughts(withoutEmpty);
-  const safe = splitOversizedUtterances(reclassified);
+  const reclassified = reclassifyLeakedThoughts(withoutNoResponse);
+  const withoutEmpty = reclassifyEmptyUtterances(reclassified);
+  const safe = splitOversizedUtterances(withoutEmpty);
   return { emit: safe, internal: safe };
 };
 

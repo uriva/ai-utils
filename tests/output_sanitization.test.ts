@@ -8,6 +8,7 @@ import {
   sanitizeModelOutput,
   stripFabricatedUserMessages,
   stripInternalSentTimestampSuffix,
+  systemNotificationPrefix,
 } from "../mod.ts";
 
 Deno.test("internal sent timestamp suffix matches the exact leaked example", () => {
@@ -148,23 +149,32 @@ Deno.test("sanitizeModelOutput reclassifies leaked thought without timestamp to 
   );
 });
 
-Deno.test("sanitizeModelOutput reclassifies embedded system notifications", () => {
+Deno.test("sanitizeModelOutput strips hallucinated system notifications entirely", () => {
   const result = sanitizeModelOutput(
     [participantUtteranceTurn({ name: "user", text: "hi" })],
     [
       ownUtteranceTurn(
-        '[System notification: internal plan] — sent May 20, 2026, 1:28 PM[System notification: [Removed tool call "run_command" due to missing thought signature.]]',
+        `${systemNotificationPrefix} internal plan] — sent May 20, 2026, 1:28 PM${systemNotificationPrefix} [Removed tool call "run_command" due to missing thought signature.]]`,
+      ),
+    ],
+  );
+  assertEquals(result.emit.length, 0); // Completely stripped and filtered out because it became empty
+});
+
+Deno.test("sanitizeModelOutput strips system notification from mixed text but preserves normal text", () => {
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [
+      ownUtteranceTurn(
+        `Here is the ticket info! ${systemNotificationPrefix} [Removed tool call "run_command" due to missing thought signature.]]`,
       ),
     ],
   );
   assertEquals(result.emit.length, 1);
   const event = result.emit[0];
-  assertEquals(event.type, "own_thought");
-  if (event.type !== "own_thought") throw new Error("unreachable");
-  assertEquals(
-    event.text.includes("Removed tool call"),
-    true,
-  );
+  assertEquals(event.type, "own_utterance");
+  if (event.type !== "own_utterance") throw new Error("unreachable");
+  assertEquals(event.text, "Here is the ticket info!");
 });
 
 Deno.test("sanitizeModelOutput does not reclassify normal utterances", () => {

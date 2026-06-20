@@ -49,6 +49,7 @@ import {
   ownUtteranceTurnWithMetadata,
   type ParticipantEditMessage,
   type ParticipantUtterance,
+  systemNotificationPrefix,
   type Tool,
   type ToolResult,
   toolUseTurnWithMetadata,
@@ -724,7 +725,7 @@ const historyEventToContent = (
       : e.modelMetadata
       ? wrapModelContent([{ text: " " }])
       : wrapUserContent([
-        { text: stampText(`[System notification: ${e.text}]`) },
+        { text: stampText(`${systemNotificationPrefix} ${e.text}]`) },
         ...attachmentsToPartsOrEmpty(e.attachments),
       ]);
   }

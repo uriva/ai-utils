@@ -24,6 +24,7 @@ import {
   noResponseTag,
   ownThoughtTurn,
   ownUtteranceTurn,
+  systemNotificationPrefix,
   type Tool,
   toolUseTurn,
 } from "./agent.ts";
@@ -255,7 +256,7 @@ async (e: KimiHistoryEvent): Promise<ChatCompletionMessageParam[]> => {
     const contentParts = await attachmentsToContentParts(e.attachments);
     const textPart: OpenAI.Chat.Completions.ChatCompletionContentPart = {
       type: "text",
-      text: `[System notification: ${e.text}]`,
+      text: `${systemNotificationPrefix} ${e.text}]`,
     };
     return [{
       role: "user",
@@ -608,7 +609,13 @@ const kimiOutputPartToHistoryEvents =
         return events;
       }
 
-      const notificationRegex = /^\[System notification: ([\s\S]*?)\]$/;
+      const escapedPrefix = systemNotificationPrefix.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&",
+      );
+      const notificationRegex = new RegExp(
+        "^" + escapedPrefix + " ([\\s\\S]*?)\\]$",
+      );
       const notificationMatch = stripped.match(notificationRegex);
 
       if (notificationMatch) {

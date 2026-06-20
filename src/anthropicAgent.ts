@@ -20,6 +20,7 @@ import {
   noResponseTag,
   ownThoughtTurn,
   ownUtteranceTurn,
+  systemNotificationPrefix,
   type Tool,
   toolUseTurn,
 } from "./agent.ts";
@@ -269,7 +270,7 @@ async (
     const contentBlocks = await attachmentsToContentBlocks(e.attachments);
     const textBlock: Anthropic.Messages.TextBlockParam = {
       type: "text",
-      text: `[System notification: ${e.text}]`,
+      text: `${systemNotificationPrefix} ${e.text}]`,
     };
     return [{
       role: "user",
@@ -779,7 +780,13 @@ const anthropicOutputPartToHistoryEvents =
         return events;
       }
 
-      const notificationRegex = /^\[System notification: ([\s\S]*?)\]$/;
+      const escapedPrefix = systemNotificationPrefix.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        "\\$&",
+      );
+      const notificationRegex = new RegExp(
+        "^" + escapedPrefix + " ([\\s\\S]*?)\\]$",
+      );
       const notificationMatch = stripped.match(notificationRegex);
 
       if (notificationMatch) {
