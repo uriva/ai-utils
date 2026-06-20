@@ -223,7 +223,7 @@ const structuredSummarySchema = z.object({
     "Proposals, suggestions, or options that were raised but the user moved on from without confirming or rejecting. Include the specific name of the abandoned item and why it was not pursued.",
   ),
   context: z.string().describe(
-    "Any other important context needed to continue the conversation coherently.",
+    "Any other important context needed to continue the conversation coherently. CRITICAL: Do NOT declare the dates/times of this historical segment as the 'current' simulated date, 'today', or 'now', as this summary will be read in the future where those dates are in the past. If you must describe dates, refer to them explicitly as the dates of the segment (e.g., 'The segment took place on May 5, 2026').",
   ),
   skillsToReLearn: z.string().describe(
     "List of active/used skills from the history that were learned (via the learn_skill tool) and are now compacted away, which the assistant must call learn_skill on immediately on the next turn to reload. If no skills were learned/active, write 'None'.",
@@ -297,7 +297,12 @@ Important rules for Pending Items vs Abandoned Items:
 - Never keep a specific proposal as pending just because the user did not explicitly say no to it.
 
 Important rule for Active Skills to Re-Learn:
-- Under skillsToReLearn, identify any skills that were actively learned or used in the history (look for learn_skill tool calls and results) and list them. If no skills were learned or used, write 'None'.`,
+- Under skillsToReLearn, identify any skills that were actively learned or used in the history (look for learn_skill tool calls and results) and list them. If no skills were learned or used, write 'None'.
+
+Critical Date and Time Grounding Rules:
+- NEVER refer to the timestamps, dates, or days of this conversation segment as "the current simulated date", "the current date", "today", or "now" under Decisions, Context, or any other section.
+- Because this summary is saved as a historical record and will be read in future conversation turns where this segment is in the past, absolute dates from the segment must always be described as past historical events (e.g., "The user inquired about events on Tuesday, May 5, 2026", instead of "Today is Tuesday, May 5, 2026").
+- The assistant runs in real-time in the future, so framing a historical date as "today" or "now" will severely confuse the agent's temporal grounding on its subsequent turns.`,
       structuredSummarySchema,
     )(eventsToPlainText(events)),
   );
