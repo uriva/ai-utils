@@ -11,6 +11,7 @@ import {
 import { z } from "zod/v4";
 import { accessTokenCounter, type HistoryEvent } from "./agent.ts";
 import { genJson } from "./genJson.ts";
+import { formatInternalSentTimestamp } from "./internalMessageMetadata.ts";
 
 export type HistorySegment = {
   events: HistoryEvent[];
@@ -300,3 +301,24 @@ Important rule for Active Skills to Re-Learn:
       structuredSummarySchema,
     )(eventsToPlainText(events)),
   );
+
+const formatSegmentRange = (start: number, end: number, timezone: string) => {
+  const startStr = formatInternalSentTimestamp(start, timezone);
+  const endStr = formatInternalSentTimestamp(end, timezone);
+  return `[This summary covers the period from ${startStr} to ${endStr}]`;
+};
+
+export const summarizeSegmentToHistoryEvent = (timezone: string) =>
+async (
+  segment: HistorySegment,
+): Promise<HistoryEvent & { type: "own_thought"; text: string }> => {
+  const summaryText = await summarizeEvents(segment.events);
+  const rangeHeader = formatSegmentRange(segment.start, segment.end, timezone);
+  return {
+    id: crypto.randomUUID(),
+    type: "own_thought",
+    text: `${rangeHeader}\n\n${summaryText}`,
+    timestamp: Math.round((segment.start + segment.end) / 2),
+    isOwn: true,
+  };
+};
