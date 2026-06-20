@@ -1334,8 +1334,8 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           "The command in format skillName/toolName",
         ),
         params: z.any().describe("The parameters for the tool"),
-        spinnerText: z.string().optional().describe(
-          "A short progress update or spinner message in active voice (e.g., 'Searching the web...', 'Deploying server...') representing what this action is actively doing. This message is shown to the user while the tool runs. You MUST always provide this description.",
+        spinnerText: z.string().describe(
+          "A short progress update or spinner message in active voice (e.g., 'Searching the web...', 'Deploying server...') representing what this action is actively doing. This message is shown to the user while the tool runs.",
         ),
       }),
       handler: async ({ command, params }, toolCallId) => {
