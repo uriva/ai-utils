@@ -1,4 +1,4 @@
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { z } from "zod/v4";
 import { runAgent } from "../mod.ts";
 import {
@@ -265,3 +265,90 @@ Deno.test("truncateToolOutput trims the middle of very large texts and places a 
   assert(truncated.startsWith("A".repeat(expectedKeepStart)));
   assert(truncated.endsWith("B".repeat(expectedKeepEnd)));
 });
+
+Deno.test(
+  "universal SCRATCH: resolution replaces prefix with full content before tool handler runs",
+  {
+    sanitizeResources: false,
+  },
+  async () => {
+    const store = new Map<string, string>();
+    const scratchPad = makeScratchPad(store);
+
+    const scratchId = "test-nested-scratch-id-123";
+    const testContent = "This is fully resolved content from the scratchpad!";
+    store.set(scratchId, testContent);
+
+    // deno-lint-ignore no-explicit-any
+    let capturedParams: any = null;
+
+    const testTool = {
+      name: "test_resolution",
+      description: "A test tool",
+      parameters: z.object({
+        nested: z.object({
+          content: z.string(),
+        }),
+      }),
+      // deno-lint-ignore no-explicit-any
+      handler: (params: any) => {
+        capturedParams = params;
+        return Promise.resolve("Success");
+      },
+    };
+
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Call test_resolution",
+      }),
+    ];
+
+    let callCount = 0;
+    await injectCallModel((events) => {
+      callCount += 1;
+      if (callCount > 1) {
+        return Promise.resolve([
+          ...events,
+          {
+            type: "own_utterance" as const,
+            isOwn: true as const,
+            text: "Done",
+            id: "done-msg",
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+      return Promise.resolve([
+        ...events,
+        {
+          type: "tool_call" as const,
+          isOwn: true as const,
+          name: "test_resolution",
+          parameters: {
+            nested: {
+              content: `SCRATCH:${scratchId}`,
+            },
+          },
+          id: "call-1",
+          timestamp: Date.now(),
+        },
+      ]);
+    })(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        maxIterations: 1,
+        tools: [testTool],
+        prompt: "Test assistant",
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+        toolOutputScratchPad: scratchPad,
+      });
+    })();
+
+    assertEquals(capturedParams, {
+      nested: {
+        content: testContent,
+      },
+    });
+  },
+);

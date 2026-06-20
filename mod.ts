@@ -6,6 +6,7 @@ import {
   createReadScratchFileTool,
   type HistoryEvent,
   injectOutputEvent,
+  injectScratchPad,
   injectStreamChunk,
   injectStreamThinkingChunk,
   runAbstractAgent,
@@ -202,6 +203,9 @@ export const runAgent = (spec: AgentSpec): Promise<void> => {
   }
 
   let runner = () => runAgentInner(spec);
+  if (spec.toolOutputScratchPad) {
+    runner = injectScratchPad(() => spec.toolOutputScratchPad)(runner);
+  }
   if (spec.onOutputEvent) {
     runner = injectOutputEvent(spec.onOutputEvent)(runner);
   }
