@@ -1187,11 +1187,32 @@ const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
     const text = stripAllInternalSentTimestamps(event.text);
 
     // Clean any system notifications from the text to never allow the model to emit them
-    const cleanedText = text.replace(systemNotificationPattern, "").trim();
+    let cleanedText = text.replace(systemNotificationPattern, "").trim();
+
+    // Strip raw tool calling tags and system context/instructions injections
+    const callTagPattern = /<call:[\s\S]*?>/gi;
+    const systemContextPattern =
+      /The following is critical context and instructions about the user:[\s\S]*?(\]|$)/gi;
+    const criticalInstructionsPattern =
+      /CRITICAL INSTRUCTIONS \(NEVER VIOLATE\):[\s\S]*?(\]|$)/gi;
+
+    cleanedText = cleanedText
+      .replace(callTagPattern, "")
+      .replace(systemContextPattern, "")
+      .replace(criticalInstructionsPattern, "")
+      .trim();
 
     const match = cleanedText.match(internalThoughtPattern);
     if (match) {
       return [{ ...event, type: "own_thought" as const, text: match[1] }];
+    }
+
+    const thoughtPrefixPattern = /^\[thought\]:\s*([\s\S]*?)$/i;
+    const rawThoughtMatch = cleanedText.match(thoughtPrefixPattern);
+    if (rawThoughtMatch) {
+      return [
+        { ...event, type: "own_thought" as const, text: rawThoughtMatch[1] },
+      ];
     }
 
     if (hasJsonThought(cleanedText)) {
