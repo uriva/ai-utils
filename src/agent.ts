@@ -747,6 +747,45 @@ const resolveUnambiguousBareName = (
   return matches.length === 1 ? matches[0] : undefined;
 };
 
+const resolveCarriageReturns = (text: string): string =>
+  text
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => {
+      if (!line.includes("\r")) return line;
+      const parts = line.split("\r");
+      return parts[parts.length - 1] || "";
+    })
+    .join("\n");
+
+const collapseRepeatedLines = (text: string): string => {
+  const lines = text.split("\n");
+  const collapsed: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const current = lines[i];
+    let count = 1;
+    while (i + count < lines.length && lines[i + count] === current) {
+      count++;
+    }
+    if (count > 1) {
+      if (current.trim() === "") {
+        collapsed.push("");
+      } else {
+        collapsed.push(`${current} (repeated ${count} times)`);
+      }
+    } else {
+      collapsed.push(current);
+    }
+    i += count;
+  }
+  return collapsed.join("\n");
+};
+
+const sanitizeToolOutput = (text: string): string => {
+  return collapseRepeatedLines(resolveCarriageReturns(text));
+};
+
 export const callToResult = (
   // deno-lint-ignore no-explicit-any
   actions: Tool<any>[],
@@ -852,7 +891,9 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
     );
   }
   const validated = parsed.result;
-  const rawText = typeof validated === "string" ? validated : validated.result;
+  const rawText = sanitizeToolOutput(
+    typeof validated === "string" ? validated : validated.result,
+  );
   const attachments = typeof validated === "string"
     ? undefined
     : validated.attachments;
