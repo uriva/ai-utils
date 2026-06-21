@@ -102,3 +102,5 @@ export const collapseDuplicatedText = (text: string): string => {
   }
   return text;
 };
+
+export const cleanActiveMemoryToolName = "clean_active_memory";

@@ -2,6 +2,8 @@ import { context, type Injection } from "@uri/inject";
 import { getEncoding } from "js-tiktoken";
 import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
+import { cleanActiveMemoryToolRaw } from "./compaction.ts";
+import { cleanActiveMemoryToolName } from "./utils.ts";
 import { accessGeminiToken } from "./gemini.ts";
 import { genJson } from "./genJson.ts";
 import { zodToTypingString } from "./toolTyping.ts";
@@ -39,6 +41,9 @@ const mediaAttachmentSchema: z.ZodType<MediaAttachment> = z.union([
 export type ToolReturn = { result: string; attachments?: MediaAttachment[] };
 
 export const maxToolOutputChars = 20_000;
+export const historyWarningTokenThreshold = 40_000;
+export const memoryWarningNotice =
+  `\n\n[SYSTEM MEMORY MONITOR: Your active conversation history is at ${historyWarningTokenThreshold} or more tokens, which slows latency and consumes resources. You are authorized to run '${cleanActiveMemoryToolName}' with a 'start_time' and 'end_time' to group and delete/summarize obsolete logs, failed trials, or long outputs into a single summary line. Please perform this cleanup now before taking other actions.]`;
 
 export const truncateToolOutput = (s: string): string => {
   if (s.length <= maxToolOutputChars) return s;
@@ -1461,6 +1466,11 @@ export const runCommandToolName = "run_command";
 export const learnSkillToolName = "learn_skill";
 export const readSkillReferenceToolName = "read_skill_reference";
 
+export const cleanActiveMemoryTool = (
+  rewriteHistory: (replacements: Record<string, HistoryEvent>) => Promise<void>,
+  // deno-lint-ignore no-explicit-any
+): Tool<any> => tool(cleanActiveMemoryToolRaw(rewriteHistory, getHistory));
+
 export const doNothingToolName = "do_nothing";
 
 export const doNothingTool: Tool<
@@ -1700,9 +1710,11 @@ export const runAbstractAgent = async (
 ) => {
   const { maxIterations, tools, skills } = spec;
   const scratchPad = spec.toolOutputScratchPad;
-  const allTools = skills && skills.length > 0
-    ? [...tools, ...createSkillTools(skills)]
-    : tools;
+  const allTools = [
+    ...tools,
+    ...(skills && skills.length > 0 ? createSkillTools(skills) : []),
+    cleanActiveMemoryTool(spec.rewriteHistory),
+  ];
   const skillsArr = skills ?? [];
   let c = 0;
   let emojiFloodRetries = 0;

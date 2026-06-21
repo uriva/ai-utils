@@ -12,6 +12,7 @@ import { z } from "zod/v4";
 import { accessTokenCounter, type HistoryEvent } from "./agent.ts";
 import { genJson } from "./genJson.ts";
 import { formatInternalSentTimestamp } from "./internalMessageMetadata.ts";
+import { cleanActiveMemoryToolName } from "./utils.ts";
 
 export type HistorySegment = {
   events: HistoryEvent[];
@@ -327,3 +328,91 @@ async (
     isOwn: true,
   };
 };
+
+export const cleanActiveMemoryToolRaw = (
+  rewriteHistory: (replacements: Record<string, HistoryEvent>) => Promise<void>,
+  getHistory: () => Promise<HistoryEvent[]>,
+) => ({
+  name: cleanActiveMemoryToolName,
+  description:
+    "Clean up your active conversation history by deleting or summarizing a specific time span. Excellent for compressing a series of failed trials or redundant logs into a single summary line.",
+  parameters: z.object({
+    start_time: z.string().describe(
+      "The exact timestamp of the first event in the span to clean, e.g. 'Jun 21, 2026, 1:10 AM' or '2026-06-21T01:10:00Z'.",
+    ),
+    end_time: z.string().describe(
+      "The exact timestamp of the last event in the span to clean, e.g. 'Jun 21, 2026, 1:15 AM' or '2026-06-21T01:15:00Z'.",
+    ),
+    summary: z.string().optional().describe(
+      "Optional. A short 1-line description of what transpired during that time span to replace the verbose logs. If omitted, the entire time span is permanently deleted.",
+    ),
+  }),
+  handler: async ({ start_time, end_time, summary }: {
+    start_time: string;
+    end_time: string;
+    summary?: string;
+  }) => {
+    const start = Date.parse(start_time);
+    const end = Date.parse(end_time);
+    if (Number.isNaN(start) || Number.isNaN(end)) {
+      return "Invalid date format provided for start_time or end_time.";
+    }
+    if (start > end) {
+      return "start_time cannot be greater than end_time.";
+    }
+
+    const history = await getHistory();
+    const match = history.filter(
+      (e) => e.timestamp >= start && e.timestamp <= end,
+    );
+    if (match.length === 0) {
+      return "No events found within the specified time range. Check your timestamps and try again.";
+    }
+
+    const hasUserUtterance = match.some(
+      (e) => e.type === "participant_utterance",
+    );
+    if (hasUserUtterance) {
+      return "Memory cleanup aborted: You cannot delete or summarize user messages (participant_utterance). Only select time spans containing tool results, tool calls, or thoughts.";
+    }
+
+    const replacements: Record<string, HistoryEvent> = {};
+    let resultMsg = "";
+    if (summary) {
+      const first = match[0];
+      replacements[first.id] = {
+        id: first.id,
+        type: "own_thought",
+        isOwn: true,
+        text:
+          `[SYSTEM SUMMARY of events from ${start_time} to ${end_time}]: ${summary}`,
+        timestamp: first.timestamp,
+      };
+      for (let j = 1; j < match.length; j++) {
+        const ev = match[j];
+        replacements[ev.id] = {
+          id: ev.id,
+          type: "do_nothing",
+          isOwn: true,
+          timestamp: ev.timestamp,
+        };
+      }
+      resultMsg =
+        `Successfully summarized ${match.length} events from ${start_time} to ${end_time} with summary: "${summary}"`;
+    } else {
+      for (const ev of match) {
+        replacements[ev.id] = {
+          id: ev.id,
+          type: "do_nothing",
+          isOwn: true,
+          timestamp: ev.timestamp,
+        };
+      }
+      resultMsg =
+        `Successfully deleted ${match.length} events from ${start_time} to ${end_time}.`;
+    }
+
+    await rewriteHistory(replacements);
+    return resultMsg;
+  },
+});
