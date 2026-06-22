@@ -182,3 +182,69 @@ Deno.test("clean_active_memory tool - blocks deleting user messages", async () =
     `expected blocked notice, got: ${res?.result}`,
   );
 });
+
+Deno.test(
+  "clean_active_memory tool - detects and alerts on deleted learn_skill events during cleanup",
+  async () => {
+    const mockHistory: HistoryEvent[] = [
+      {
+        id: "call-1",
+        type: "tool_call",
+        isOwn: true,
+        name: "learn_skill",
+        parameters: { skillName: "p2b-coder" },
+        timestamp: 1000,
+      },
+      {
+        id: "result-1",
+        type: "tool_result",
+        isOwn: true,
+        toolCallId: "call-1",
+        result: "Skill loaded successfully.",
+        timestamp: 2000,
+      },
+    ];
+
+    let capturedReplacements: Record<string, HistoryEvent> = {};
+    const mockRewriteHistory = (replacements: Record<string, HistoryEvent>) => {
+      capturedReplacements = replacements;
+      return Promise.resolve();
+    };
+    const mockGetHistory = () => Promise.resolve(mockHistory);
+
+    const cleanTool = {
+      ...cleanActiveMemoryToolRaw(mockRewriteHistory, mockGetHistory),
+    };
+
+    const resolver = callToResult([cleanTool]);
+    const res = await resolver({
+      name: cleanActiveMemoryToolName,
+      args: {
+        start_time: "1970-01-01T00:00:01.000Z", // timestamp 1000
+        end_time: "1970-01-01T00:00:02.000Z", // timestamp 2000
+      },
+      id: "call-cleanup",
+    });
+
+    assertEquals(res?.toolCallId, "call-cleanup");
+    assertEquals(
+      res?.result.includes("Successfully deleted 2 events"),
+      true,
+      "Should report successful deletion",
+    );
+    assertEquals(
+      res?.result.includes("permanently removed the following active skills"),
+      true,
+      "Should alert that skills are unlearned",
+    );
+    assertEquals(
+      res?.result.includes("p2b-coder"),
+      true,
+      "Should specify p2b-coder in the warning message",
+    );
+
+    // Verify both events were mapped to do_nothing
+    assertEquals(capturedReplacements["call-1"]?.type, "do_nothing");
+    assertEquals(capturedReplacements["result-1"]?.type, "do_nothing");
+  },
+);

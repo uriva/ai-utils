@@ -377,6 +377,17 @@ export const cleanActiveMemoryToolRaw = (
     }
 
     const replacements: Record<string, HistoryEvent> = {};
+    const removedSkillNames: string[] = [];
+    for (const e of match) {
+      if (e.type === "tool_call" && e.name === "learn_skill") {
+        // deno-lint-ignore no-explicit-any
+        const skillName = (e.parameters as any)?.skillName;
+        if (skillName) {
+          removedSkillNames.push(skillName);
+        }
+      }
+    }
+
     let resultMsg = "";
     if (summary) {
       const first = match[0];
@@ -410,6 +421,14 @@ export const cleanActiveMemoryToolRaw = (
       }
       resultMsg =
         `Successfully deleted ${match.length} events from ${start_time} to ${end_time}.`;
+    }
+
+    if (removedSkillNames.length > 0) {
+      const uniqueNames = [...new Set(removedSkillNames)];
+      resultMsg +=
+        `\n\n⚠️ NOTE: This memory cleanup has permanently removed the following active skills from your system prompt: ${
+          uniqueNames.join(", ")
+        }. If you still need to use any of these skills, you must call "learn_skill" on them again to reload their tools and instructions.`;
     }
 
     await rewriteHistory(replacements);
