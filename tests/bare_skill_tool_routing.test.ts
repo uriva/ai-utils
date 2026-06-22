@@ -89,7 +89,7 @@ Deno.test("prefixed or malformed learn_skill calls are normalized and routed cor
     id: "call-4",
   });
   if (!out1) throw new Error("expected a result");
-  assertEquals(out1.result.includes("todo skill"), true);
+  assertEquals(out1.result.includes("learned successfully"), true);
 
   const out2 = await callToResult(skillTools, [todoSkill])({
     name: "learn_skill",
@@ -97,7 +97,7 @@ Deno.test("prefixed or malformed learn_skill calls are normalized and routed cor
     id: "call-5",
   });
   if (!out2) throw new Error("expected a result");
-  assertEquals(out2.result.includes("todo skill"), true);
+  assertEquals(out2.result.includes("learned successfully"), true);
 });
 
 Deno.test("auto-routed skill tool name successfully resolves description", () => {

@@ -1613,8 +1613,8 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
             specForTurn,
             await getHistory(),
           );
-          if (currentTokens > 100000) {
-            return `SYSTEM BUDGET EXCEEDED: Your current context size is ${currentTokens} tokens, which exceeds the strict budget of 100,000 tokens. To protect against cost overruns, learning of new skills is temporarily blocked. You must immediately call either "unlearn_skill" to deactivate an active/learned skill, or use the "clean_active_memory" tool to compress or delete verbose/obsolete parts of your conversation history. If the skills are too large or should be divided into smaller subskills, please report this to the system admins so they can optimize them.`;
+          if (currentTokens > 150000) {
+            return `SYSTEM BUDGET EXCEEDED: Your current context size is ${currentTokens} tokens, which exceeds the strict budget of 150,000 tokens. To protect against cost overruns, learning of new skills is temporarily blocked. You must immediately call either "unlearn_skill" to deactivate an active/learned skill, or use the "clean_active_memory" tool to compress or delete verbose/obsolete parts of your conversation history. If the skills are too large or should be divided into smaller subskills, please report this to the system admins so they can optimize them.`;
           }
         }
 
@@ -1638,20 +1638,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           );
         }
 
-        return JSON.stringify(
-          {
-            name: skill.name,
-            description: skill.description,
-            instructions: skill.instructions,
-            tools: skill.tools.map((tool) => ({
-              name: tool.name,
-              description: tool.description,
-              parameters: zodToTypingString(tool.parameters),
-            })),
-          },
-          null,
-          2,
-        );
+        return `Skill "${skill.name}" learned successfully. Its tools and instructions are now active and available in your system prompt and tools.`;
       },
     }),
     tool({
