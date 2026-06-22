@@ -1627,15 +1627,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
               "none";
             return `Reference "${referenceName}" not found in skill "${skillName}". Available references: ${refList}`;
           }
-          return JSON.stringify(
-            {
-              skillName,
-              referenceName: ref.name,
-              content: ref.content,
-            },
-            null,
-            2,
-          );
+          return `Reference "${ref.name}" from skill "${skill.name}" learned successfully. Its content is now active and available in your system prompt under active references.`;
         }
 
         return `Skill "${skill.name}" learned successfully. Its tools and instructions are now active and available in your system prompt and tools.`;
