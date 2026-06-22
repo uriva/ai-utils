@@ -504,6 +504,13 @@ const getHistory = historyInjection.access;
 export const injectAccessHistory = historyInjection.inject;
 export const accessHistory = historyInjection.access;
 
+const specInjection: Injection<() => AgentSpec | null> = context(
+  (): AgentSpec | null => null,
+);
+
+export const injectAgentSpec = specInjection.inject;
+const getAgentSpec = specInjection.access;
+
 export type MetadataStore = {
   get: (eventId: string) => Promise<unknown | null>;
   set: (eventId: string, metadata: unknown) => Promise<void>;
@@ -1485,6 +1492,7 @@ async (output: HistoryEvent[]): Promise<boolean> => {
 
 export const runCommandToolName = "run_command";
 export const learnSkillToolName = "learn_skill";
+export const unlearnSkillToolName = "unlearn_skill";
 export const readSkillReferenceToolName = "read_skill_reference";
 
 export const cleanActiveMemoryTool = (
@@ -1585,18 +1593,51 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
     tool({
       name: learnSkillToolName,
       description:
-        "Get detailed information about a skill including its instructions and available tools",
+        "Get detailed information about a skill including its instructions and available tools. Supports loading only a specific reference file/subsection of a skill to keep context budget low.",
       parameters: z.object({
         skillName: z.string().describe("The name of the skill to learn about"),
+        referenceName: z.string().optional().describe(
+          "Optional specific reference file or subsection of the skill to load (e.g., 'cbt-protocols.md') to keep context usage minimal.",
+        ),
       }),
-      handler: ({ skillName }) => {
+      handler: async ({ skillName, referenceName }) => {
         const skill = skillMap[skillName];
         if (!skill) {
-          return Promise.resolve(
-            `Skill "${skillName}" not found. Available skills: ${skillNames}`,
+          return `Skill "${skillName}" not found. Available skills: ${skillNames}`;
+        }
+
+        const spec = getAgentSpec();
+        if (spec) {
+          const currentTokens = await estimateAgentInputTokens(
+            spec,
+            await getHistory(),
+          );
+          if (currentTokens > 100000) {
+            return `SYSTEM BUDGET EXCEEDED: Your current context size is ${currentTokens} tokens, which exceeds the strict budget of 100,000 tokens. To protect against cost overruns, learning of new skills is temporarily blocked. You must immediately call either "unlearn_skill" to deactivate an active/learned skill, or use the "clean_active_memory" tool to compress or delete verbose/obsolete parts of your conversation history. If the skills are too large or should be divided into smaller subskills, please report this to the system admins so they can optimize them.`;
+          }
+        }
+
+        if (referenceName) {
+          const ref = skill.references?.find(
+            (r) => r.name.toLowerCase() === referenceName.toLowerCase(),
+          );
+          if (!ref) {
+            const refList = skill.references?.map((r) => r.name).join(", ") ||
+              "none";
+            return `Reference "${referenceName}" not found in skill "${skillName}". Available references: ${refList}`;
+          }
+          return JSON.stringify(
+            {
+              skillName,
+              referenceName: ref.name,
+              content: ref.content,
+            },
+            null,
+            2,
           );
         }
-        return Promise.resolve(JSON.stringify(
+
+        return JSON.stringify(
           {
             name: skill.name,
             description: skill.description,
@@ -1609,7 +1650,20 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           },
           null,
           2,
-        ));
+        );
+      },
+    }),
+    tool({
+      name: unlearnSkillToolName,
+      description:
+        "Deactivate a currently active/learned skill to reclaim context token budget",
+      parameters: z.object({
+        skillName: z.string().describe("The name of the skill to deactivate"),
+      }),
+      handler: ({ skillName }) => {
+        return Promise.resolve(
+          `Successfully deactivated/unlearned the skill "${skillName}". Its tools have been removed from your active context.`,
+        );
       },
     }),
     tool({
@@ -1725,160 +1779,161 @@ const stripTruncatedFlag = (events: HistoryEvent[]): HistoryEvent[] =>
       : e
   );
 
-export const runAbstractAgent = async (
+export const runAbstractAgent = (
   spec: AgentSpec,
   callModel: (history: HistoryEvent[]) => Promise<HistoryEvent[]>,
-) => {
-  const { maxIterations, tools, skills } = spec;
-  const scratchPad = spec.toolOutputScratchPad;
-  const allTools = [
-    ...tools,
-    ...(skills && skills.length > 0 ? createSkillTools(skills) : []),
-    cleanActiveMemoryTool(spec.rewriteHistory),
-  ];
-  const skillsArr = skills ?? [];
-  let c = 0;
-  let emojiFloodRetries = 0;
-  let repetitionFloodRetries = 0;
-  let truncationRetries = 0;
-  let ephemeralHistory: HistoryEvent[] = [];
-  let stopAdviceCount = 0;
-  while (true) {
-    if (await shouldAbort()) return;
-    c++;
-    if (c > 200) {
-      throw new Error("Agent turn limit safety threshold (200) exceeded.");
-    }
-    const history = await getHistory();
-    let effectiveHistory = [...history, ...ephemeralHistory];
-    let normalizedHistory = normalizeHistoryForModel(effectiveHistory);
+): Promise<void> =>
+  injectAgentSpec(() => spec)(async () => {
+    const { maxIterations, tools, skills } = spec;
+    const scratchPad = spec.toolOutputScratchPad;
+    const allTools = [
+      ...tools,
+      ...(skills && skills.length > 0 ? createSkillTools(skills) : []),
+      cleanActiveMemoryTool(spec.rewriteHistory),
+    ];
+    const skillsArr = skills ?? [];
+    let c = 0;
+    let emojiFloodRetries = 0;
+    let repetitionFloodRetries = 0;
+    let truncationRetries = 0;
+    let ephemeralHistory: HistoryEvent[] = [];
+    let stopAdviceCount = 0;
+    while (true) {
+      if (await shouldAbort()) return;
+      c++;
+      if (c > 200) {
+        throw new Error("Agent turn limit safety threshold (200) exceeded.");
+      }
+      const history = await getHistory();
+      let effectiveHistory = [...history, ...ephemeralHistory];
+      let normalizedHistory = normalizeHistoryForModel(effectiveHistory);
 
-    const shouldCheckProgress =
-      (c > 0 && maxIterations > 0 && c % maxIterations === 0) ||
-      (stopAdviceCount > 0);
+      const shouldCheckProgress =
+        (c > 0 && maxIterations > 0 && c % maxIterations === 0) ||
+        (stopAdviceCount > 0);
 
-    if (shouldCheckProgress) {
-      console.log(
-        `[agent-progress-check] c=${c} stopAdviceCount=${stopAdviceCount} - running progress check with the bigger model`,
-      );
-      const checkResult = await checkProgress(spec, normalizedHistory);
-      if (!checkResult.shouldContinue) {
-        stopAdviceCount++;
-        if (stopAdviceCount >= 2) {
+      if (shouldCheckProgress) {
+        console.log(
+          `[agent-progress-check] c=${c} stopAdviceCount=${stopAdviceCount} - running progress check with the bigger model`,
+        );
+        const checkResult = await checkProgress(spec, normalizedHistory);
+        if (!checkResult.shouldContinue) {
+          stopAdviceCount++;
+          if (stopAdviceCount >= 2) {
+            console.log(
+              `[agent-progress-check] stop requested multiple times (${stopAdviceCount}). Escalating to forced user-facing utterance. c=${c}`,
+            );
+            const stopUtterance =
+              "I'm sorry, I have been working on this for some time but am unable to make progress. I will stop here and ask for your feedback on how to proceed.";
+            const utteranceEvent = ownUtteranceTurn(stopUtterance);
+            await outputEvent(utteranceEvent);
+            return;
+          }
+          const stopThought = checkResult.thoughtInjection ||
+            "I'm working on this for some time and not making progress. I should instead stop and ask the user for feedback.";
+          const thoughtEvent = ownThoughtTurn(stopThought);
+          await outputEvent(thoughtEvent);
+          ephemeralHistory = [...ephemeralHistory, thoughtEvent];
+          effectiveHistory = [...history, ...ephemeralHistory];
+          normalizedHistory = normalizeHistoryForModel(effectiveHistory);
           console.log(
-            `[agent-progress-check] stop requested multiple times (${stopAdviceCount}). Escalating to forced user-facing utterance. c=${c}`,
+            `[agent-progress-check] soft stop requested. thought injected. c=${c}`,
           );
-          const stopUtterance =
-            "I'm sorry, I have been working on this for some time but am unable to make progress. I will stop here and ask for your feedback on how to proceed.";
-          const utteranceEvent = ownUtteranceTurn(stopUtterance);
-          await outputEvent(utteranceEvent);
-          return;
+        } else {
+          console.log(
+            `[agent-progress-check] judged to be good to continue. c=${c}`,
+          );
+          stopAdviceCount = 0;
         }
-        const stopThought = checkResult.thoughtInjection ||
-          "I'm working on this for some time and not making progress. I should instead stop and ask the user for feedback.";
-        const thoughtEvent = ownThoughtTurn(stopThought);
-        await outputEvent(thoughtEvent);
-        ephemeralHistory = [...ephemeralHistory, thoughtEvent];
-        effectiveHistory = [...history, ...ephemeralHistory];
-        normalizedHistory = normalizeHistoryForModel(effectiveHistory);
-        console.log(
-          `[agent-progress-check] soft stop requested. thought injected. c=${c}`,
+      }
+      console.log(
+        `[agent-iter] iter=${c} histLen=${history.length} ephLen=${ephemeralHistory.length} normLen=${normalizedHistory.length}`,
+      );
+      await reportHistoryForDebug(normalizedHistory);
+      scheduleHistoryCompaction(spec, normalizedHistory);
+      const rawModelResponse = await timeit(reportTimeElapsedMs, callModel)(
+        normalizedHistory,
+      );
+      if (hasEmojiFlood(rawModelResponse)) {
+        emojiFloodRetries++;
+        console.warn(
+          `[emoji-flood] detected emoji flood in model response (attempt ${emojiFloodRetries}/${maxEmojiFloodRetries})`,
         );
+        if (emojiFloodRetries >= maxEmojiFloodRetries) {
+          throw new Error("model keeps producing emoji flood responses");
+        }
+        continue;
+      }
+      if (hasRepetitionFlood(rawModelResponse)) {
+        repetitionFloodRetries++;
+        console.warn(
+          `[repetition-flood] detected repetition flood in model response (attempt ${repetitionFloodRetries}/${maxRepetitionFloodRetries})`,
+        );
+        if (repetitionFloodRetries >= maxRepetitionFloodRetries) {
+          throw new Error("model keeps producing repetition flood responses");
+        }
+        continue;
+      }
+      const truncated = findTruncatedUtterance(rawModelResponse);
+      if (truncated && truncationRetries < maxTruncationRetries) {
+        truncationRetries++;
+        console.warn(
+          `[max-tokens] model response truncated (attempt ${truncationRetries}/${maxTruncationRetries}); retrying with correctional thought`,
+        );
+        ephemeralHistory = [
+          ...ephemeralHistory,
+          ownThoughtTurn(truncationCorrectionText(truncated.text)),
+        ];
+        continue;
+      }
+      const modelResponse = stripTruncatedFlag(rawModelResponse);
+      const { emit, internal } = sanitizeModelOutput(
+        normalizedHistory,
+        modelResponse,
+      );
+
+      const emitWithDescriptions = emit.map((event) => {
+        if (event.type !== "tool_call") return event;
+        const desc = resolveToolDescription(
+          allTools,
+          event.name,
+          event.parameters,
+          skillsArr,
+        );
+        return desc ? { ...event, description: desc } : event;
+      });
+
+      // Process what needs to be emitted
+      if (emitWithDescriptions.length > 0) {
+        await each(outputEvent)(emitWithDescriptions);
+        const hadDeferred = await handleFunctionCalls(
+          allTools,
+          undefined,
+          skillsArr,
+          scratchPad,
+        )(emitWithDescriptions);
+        if (hadDeferred) return;
+
+        // We actually yielded things to the outside world, reset ephemeral history
+        ephemeralHistory = [];
+
+        const updatedHistory = await getHistory();
+        if (
+          !(emitWithDescriptions.some((ev: HistoryEvent) =>
+            ev.type === "tool_call"
+          )) &&
+          nonempty(updatedHistory) &&
+          last(updatedHistory).isOwn &&
+          !emitWithDescriptions.every((ev: HistoryEvent) =>
+            ev.type === "own_thought"
+          )
+        ) return;
       } else {
-        console.log(
-          `[agent-progress-check] judged to be good to continue. c=${c}`,
-        );
-        stopAdviceCount = 0;
+        // Nothing was emitted to the outside world, accumulate the internal state (e.g., thoughts)
+        ephemeralHistory = [...ephemeralHistory, ...internal];
       }
     }
-    console.log(
-      `[agent-iter] iter=${c} histLen=${history.length} ephLen=${ephemeralHistory.length} normLen=${normalizedHistory.length}`,
-    );
-    await reportHistoryForDebug(normalizedHistory);
-    scheduleHistoryCompaction(spec, normalizedHistory);
-    const rawModelResponse = await timeit(reportTimeElapsedMs, callModel)(
-      normalizedHistory,
-    );
-    if (hasEmojiFlood(rawModelResponse)) {
-      emojiFloodRetries++;
-      console.warn(
-        `[emoji-flood] detected emoji flood in model response (attempt ${emojiFloodRetries}/${maxEmojiFloodRetries})`,
-      );
-      if (emojiFloodRetries >= maxEmojiFloodRetries) {
-        throw new Error("model keeps producing emoji flood responses");
-      }
-      continue;
-    }
-    if (hasRepetitionFlood(rawModelResponse)) {
-      repetitionFloodRetries++;
-      console.warn(
-        `[repetition-flood] detected repetition flood in model response (attempt ${repetitionFloodRetries}/${maxRepetitionFloodRetries})`,
-      );
-      if (repetitionFloodRetries >= maxRepetitionFloodRetries) {
-        throw new Error("model keeps producing repetition flood responses");
-      }
-      continue;
-    }
-    const truncated = findTruncatedUtterance(rawModelResponse);
-    if (truncated && truncationRetries < maxTruncationRetries) {
-      truncationRetries++;
-      console.warn(
-        `[max-tokens] model response truncated (attempt ${truncationRetries}/${maxTruncationRetries}); retrying with correctional thought`,
-      );
-      ephemeralHistory = [
-        ...ephemeralHistory,
-        ownThoughtTurn(truncationCorrectionText(truncated.text)),
-      ];
-      continue;
-    }
-    const modelResponse = stripTruncatedFlag(rawModelResponse);
-    const { emit, internal } = sanitizeModelOutput(
-      normalizedHistory,
-      modelResponse,
-    );
-
-    const emitWithDescriptions = emit.map((event) => {
-      if (event.type !== "tool_call") return event;
-      const desc = resolveToolDescription(
-        allTools,
-        event.name,
-        event.parameters,
-        skillsArr,
-      );
-      return desc ? { ...event, description: desc } : event;
-    });
-
-    // Process what needs to be emitted
-    if (emitWithDescriptions.length > 0) {
-      await each(outputEvent)(emitWithDescriptions);
-      const hadDeferred = await handleFunctionCalls(
-        allTools,
-        undefined,
-        skillsArr,
-        scratchPad,
-      )(emitWithDescriptions);
-      if (hadDeferred) return;
-
-      // We actually yielded things to the outside world, reset ephemeral history
-      ephemeralHistory = [];
-
-      const updatedHistory = await getHistory();
-      if (
-        !(emitWithDescriptions.some((ev: HistoryEvent) =>
-          ev.type === "tool_call"
-        )) &&
-        nonempty(updatedHistory) &&
-        last(updatedHistory).isOwn &&
-        !emitWithDescriptions.every((ev: HistoryEvent) =>
-          ev.type === "own_thought"
-        )
-      ) return;
-    } else {
-      // Nothing was emitted to the outside world, accumulate the internal state (e.g., thoughts)
-      ephemeralHistory = [...ephemeralHistory, ...internal];
-    }
-  }
-};
+  })();
 
 const scheduleHistoryCompaction = (
   spec: AgentSpec,
