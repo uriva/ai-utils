@@ -2125,3 +2125,67 @@ ${historyToPlainTextLocal(normalizedHistory)}`;
     return { shouldContinue: true };
   }
 };
+
+export const sanitizeHistorySkillsForModel = (
+  events: HistoryEvent[],
+): HistoryEvent[] => {
+  const callIds = new Set<string>();
+  const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
+  for (const e of sorted) {
+    if (e.type === "tool_call" && e.name === "learn_skill") {
+      callIds.add(e.id);
+    }
+  }
+  return events.map((e) => {
+    if (e.type === "tool_result" && e.toolCallId && callIds.has(e.toolCallId)) {
+      return { ...e, result: "Skill loaded successfully." };
+    }
+    return e;
+  });
+};
+
+export const getSpecForTurn = (
+  spec: AgentSpec,
+  history: HistoryEvent[],
+): AgentSpec => {
+  const activeSkillNames = new Set<string>();
+  const sortedHistory = [...history].sort((a, b) => a.timestamp - b.timestamp);
+  for (const e of sortedHistory) {
+    if (e.type === "tool_call" && e.name === "learn_skill") {
+      // deno-lint-ignore no-explicit-any
+      const skillName = (e.parameters as any)?.skillName;
+      if (skillName) activeSkillNames.add(skillName);
+    } else if (e.type === "tool_call" && e.name === "unlearn_skill") {
+      // deno-lint-ignore no-explicit-any
+      const skillName = (e.parameters as any)?.skillName;
+      if (skillName) activeSkillNames.delete(skillName);
+    }
+  }
+
+  const allPossibleSkills = spec.skills ?? [];
+  const activeSkills = allPossibleSkills.filter((s) =>
+    activeSkillNames.has(s.name)
+  );
+  const unactiveSkills = allPossibleSkills.filter((s) =>
+    !activeSkillNames.has(s.name)
+  );
+
+  const sortedActiveSkills = [...activeSkills].sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
+  const sortedUnactiveSkills = [...unactiveSkills].sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
+
+  const unactiveSkillsPrompt = sortedUnactiveSkills.length > 0
+    ? `\n\nAvailable skills (load with learn_skill):\n${
+      formatSkillsPrompt(sortedUnactiveSkills)
+    }`
+    : "";
+
+  return {
+    ...spec,
+    skills: sortedActiveSkills,
+    prompt: spec.prompt + unactiveSkillsPrompt,
+  };
+};

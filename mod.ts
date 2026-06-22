@@ -4,12 +4,14 @@ import {
   type AgentSpec,
   type CallModel,
   createReadScratchFileTool,
+  getSpecForTurn,
   type HistoryEvent,
   injectOutputEvent,
   injectScratchPad,
   injectStreamChunk,
   injectStreamThinkingChunk,
   runAbstractAgent,
+  sanitizeHistorySkillsForModel,
 } from "./src/agent.ts";
 import { anthropicAgentCaller } from "./src/anthropicAgent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
@@ -116,7 +118,8 @@ const resolveCallModel = (spec: AgentSpec): CallModel => {
     inner: base,
   });
   const prepare = prepareHistory(spec);
-  return async (events) => wrapped(await prepare(events));
+  return async (events) =>
+    wrapped(await prepare(sanitizeHistorySkillsForModel(events)));
 };
 
 const builtinTools = [inspectMediaUrlTool];
@@ -162,9 +165,15 @@ const addBuiltinTools = (spec: AgentSpec): AgentSpec => {
 
 const runAgentInner = (spec: AgentSpec): Promise<void> => {
   const specWithBuiltins = addBuiltinTools(spec);
+
+  const dynamicCallModel = async (history: HistoryEvent[]) => {
+    const specForTurn = getSpecForTurn(specWithBuiltins, history);
+    return await resolveCallModel(specForTurn)(history);
+  };
+
   return spec.transport?.kind === "audio"
     ? runAudioTransportAgent(specWithBuiltins)
-    : runAbstractAgent(specWithBuiltins, resolveCallModel(specWithBuiltins));
+    : runAbstractAgent(specWithBuiltins, dynamicCallModel);
 };
 
 export const runAgent = (spec: AgentSpec): Promise<void> => {
