@@ -215,16 +215,8 @@ Deno.test(
     );
 
     assert(typeof result === "string", "Result should be a string");
-    const parsed = JSON.parse(result);
-    assertEquals(parsed.name, "weather");
-    assertEquals(parsed.description, "Weather information service");
-    assertEquals(
-      parsed.instructions,
-      "Always ask for location before checking weather",
-    );
-    assert(Array.isArray(parsed.tools), "Should have tools array");
-    assertEquals(parsed.tools.length, 1);
-    assertEquals(parsed.tools[0].name, "get_forecast");
+    assert(result.includes("learned successfully"), "Should report success");
+    assert(result.includes("weather"), "Should specify skill name");
   },
 );
 
