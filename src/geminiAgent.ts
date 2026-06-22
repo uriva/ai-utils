@@ -1578,6 +1578,7 @@ const geminiAgentCallerInner = ({
   prompt,
   tools,
   skills,
+  allSkills,
   rewriteHistory,
   timezoneIANA,
   maxOutputTokens,
@@ -1605,7 +1606,9 @@ const geminiAgentCallerInner = ({
           : `${enhancePrompt(prompt)}${noResponseInstruction}`,
         [
           ...tools,
-          ...(skills && skills.length > 0 ? createSkillTools(skills) : []),
+          ...((allSkills ?? skills ?? []).length > 0
+            ? createSkillTools(allSkills ?? skills ?? [])
+            : []),
         ],
         timezoneIANA,
         maxOutputTokens,

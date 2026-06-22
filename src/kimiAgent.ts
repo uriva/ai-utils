@@ -648,6 +648,7 @@ export const kimiAgentCaller = ({
   prompt,
   tools,
   skills,
+  allSkills,
   rewriteHistory,
   timezoneIANA,
   maxOutputTokens,
@@ -668,7 +669,13 @@ async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
 
   const kimiOutput = await callKimiWithFixHistory(
     rewriteHistory,
-    buildReq(enhancedPrompt, tools, skills, timezoneIANA, maxOutputTokens),
+    buildReq(
+      enhancedPrompt,
+      tools,
+      allSkills ?? skills,
+      timezoneIANA,
+      maxOutputTokens,
+    ),
     disableStreaming,
   )(events);
 

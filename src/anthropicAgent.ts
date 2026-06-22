@@ -823,6 +823,7 @@ export const anthropicAgentCaller = ({
   prompt,
   tools,
   skills,
+  allSkills,
   rewriteHistory,
   timezoneIANA,
   maxOutputTokens,
@@ -844,7 +845,7 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicHistoryEvent[]> => {
     buildReq(
       enhancedPrompt,
       tools,
-      skills,
+      allSkills ?? skills,
       timezoneIANA,
       maxOutputTokens,
       lightModel,

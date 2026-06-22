@@ -2,6 +2,8 @@ import { assert, assertEquals } from "@std/assert";
 import { z } from "zod/v4";
 import { runAgent } from "../mod.ts";
 import {
+  type AgentSpec,
+  getSpecForTurn,
   type HistoryEvent,
   injectCallModel,
   learnSkillToolName,
@@ -433,6 +435,148 @@ runForAllProviders(
     assert(
       hasRegularResult || hasSkillResult,
       "Should be able to use both regular tools and skill tools",
+    );
+  },
+);
+
+Deno.test(
+  "skills: learning a skill dynamically adds it to the system prompt and tools on the next iteration of the same run",
+  () => {
+    const calendarSkill = {
+      name: "calendar",
+      description: "Calendar operations",
+      instructions: "ALWAYS_PRESENT_CALENDAR_INSTRUCTIONS",
+      tools: [{
+        name: "list_events",
+        description: "List events",
+        parameters: z.object({}),
+        handler: () => Promise.resolve("events"),
+      }],
+    };
+
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "please learn the calendar skill",
+    })];
+
+    const spec = {
+      tools: [],
+      skills: [calendarSkill],
+      prompt: "Help the user.",
+    } as unknown as AgentSpec;
+
+    // Turn 1 (before learn_skill is called)
+    const specTurn1 = getSpecForTurn(spec, mockHistory);
+    assertEquals(specTurn1.skills!.length, 0);
+    assert(!specTurn1.prompt.includes("ALWAYS_PRESENT_CALENDAR_INSTRUCTIONS"));
+
+    // Simulate learn_skill tool call and result
+    const learnCall: HistoryEvent = {
+      id: "call-1",
+      type: "tool_call",
+      isOwn: true,
+      name: learnSkillToolName,
+      parameters: { skillName: "calendar" },
+      timestamp: Date.now(),
+    };
+    const learnResult: HistoryEvent = {
+      id: "result-1",
+      type: "tool_result",
+      isOwn: true,
+      toolCallId: "call-1",
+      result: "Skill learned successfully.",
+      timestamp: Date.now(),
+    };
+
+    const updatedHistory = [...mockHistory, learnCall, learnResult];
+
+    // Turn 2 (after learn_skill is called)
+    const specTurn2 = getSpecForTurn(spec, updatedHistory);
+    assertEquals(specTurn2.skills!.length, 1);
+    assertEquals(specTurn2.skills![0].name, "calendar");
+  },
+);
+
+import { createSkillTools } from "../src/agent.ts";
+
+Deno.test(
+  "skills: learning a reference behaves exactly like learning a skill, returning the reference content",
+  async () => {
+    const documentationSkill = {
+      name: "documentation",
+      description: "Read reference files",
+      instructions: "Read the reference files to learn guidelines",
+      tools: [],
+      references: [
+        {
+          name: "cbt-protocols.md",
+          content: "ALWAYS_PRESENT_CBT_CONTENT",
+        },
+      ],
+    };
+
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "please learn reference cbt-protocols.md from documentation",
+    })];
+
+    const spec = {
+      tools: [],
+      skills: [documentationSkill],
+      prompt: "Help the user.",
+    } as unknown as AgentSpec;
+
+    // Turn 1: Verify not active
+    const specTurn1 = getSpecForTurn(spec, mockHistory);
+    assertEquals(specTurn1.skills!.length, 0);
+
+    // Verify learning reference returns the reference content
+    const skillTools = createSkillTools([documentationSkill]);
+    const learnRefTool = skillTools.find((t) => t.name === "learn_skill");
+    assert(learnRefTool, "should expose learn_skill tool");
+
+    const resultStr = await learnRefTool.handler({
+      skillName: "documentation",
+      referenceName: "cbt-protocols.md",
+    }, "call-id-1");
+
+    assert(typeof resultStr === "string");
+    const parsed = JSON.parse(resultStr);
+    assertEquals(parsed.skillName, "documentation");
+    assertEquals(parsed.referenceName, "cbt-protocols.md");
+    assertEquals(parsed.content, "ALWAYS_PRESENT_CBT_CONTENT");
+
+    // Turn 2: Simulate that learning a reference activates the skill exactly like learning a skill itself
+    const learnCall: HistoryEvent = {
+      id: "call-1",
+      type: "tool_call",
+      isOwn: true,
+      name: learnSkillToolName,
+      parameters: {
+        skillName: "documentation",
+        referenceName: "cbt-protocols.md",
+      },
+      timestamp: Date.now(),
+    };
+    const learnResult: HistoryEvent = {
+      id: "result-1",
+      type: "tool_result",
+      isOwn: true,
+      toolCallId: "call-1",
+      result: resultStr,
+      timestamp: Date.now(),
+    };
+
+    const updatedHistory = [...mockHistory, learnCall, learnResult];
+    const specTurn2 = getSpecForTurn(spec, updatedHistory);
+
+    // Verify the skill itself is NOT fully active (keeping context usage minimal)
+    assertEquals(specTurn2.skills!.length, 0);
+
+    // Verify that the reference's specific content is dynamically loaded into the prompt
+    assert(
+      specTurn2.prompt.includes("ALWAYS_PRESENT_CBT_CONTENT"),
+      "System prompt should be updated with the learned reference content",
     );
   },
 );

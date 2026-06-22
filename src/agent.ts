@@ -1715,6 +1715,7 @@ export type AgentSpec = {
   // deno-lint-ignore no-explicit-any
   tools: Tool<any>[];
   skills?: Skill[];
+  allSkills?: Skill[];
   prompt: string;
   onOutputEvent?: (event: HistoryEvent) => Promise<void>;
   onStreamChunk?: (chunk: string) => Promise<void> | void;
@@ -2137,25 +2138,44 @@ export const getSpecForTurn = (
   history: HistoryEvent[],
 ): AgentSpec => {
   const activeSkillNames = new Set<string>();
+  const activeReferences = new Set<string>(); // "skillName/referenceName"
   const sortedHistory = [...history].sort((a, b) => a.timestamp - b.timestamp);
   for (const e of sortedHistory) {
     if (e.type === "tool_call" && e.name === "learn_skill") {
       // deno-lint-ignore no-explicit-any
       const skillName = (e.parameters as any)?.skillName;
-      if (skillName) activeSkillNames.add(skillName);
+      // deno-lint-ignore no-explicit-any
+      const referenceName = (e.parameters as any)?.referenceName;
+      if (skillName) {
+        const normSkill = skillName.toLowerCase();
+        if (referenceName) {
+          activeReferences.add(`${normSkill}/${referenceName.toLowerCase()}`);
+        } else {
+          activeSkillNames.add(normSkill);
+        }
+      }
     } else if (e.type === "tool_call" && e.name === "unlearn_skill") {
       // deno-lint-ignore no-explicit-any
       const skillName = (e.parameters as any)?.skillName;
-      if (skillName) activeSkillNames.delete(skillName);
+      if (skillName) {
+        const normSkill = skillName.toLowerCase();
+        activeSkillNames.delete(normSkill);
+        // Also remove any references learned under this skill
+        for (const refKey of activeReferences) {
+          if (refKey.startsWith(`${normSkill}/`)) {
+            activeReferences.delete(refKey);
+          }
+        }
+      }
     }
   }
 
   const allPossibleSkills = spec.skills ?? [];
   const activeSkills = allPossibleSkills.filter((s) =>
-    activeSkillNames.has(s.name)
+    activeSkillNames.has(s.name.toLowerCase())
   );
   const unactiveSkills = allPossibleSkills.filter((s) =>
-    !activeSkillNames.has(s.name)
+    !activeSkillNames.has(s.name.toLowerCase())
   );
 
   const sortedActiveSkills = [...activeSkills].sort((a, b) =>
@@ -2171,9 +2191,29 @@ export const getSpecForTurn = (
     }`
     : "";
 
+  const refsList: string[] = [];
+  for (const refStr of activeReferences) {
+    const [skillName, refName] = refStr.split("/");
+    const skill = allPossibleSkills.find(
+      (s) => s.name.toLowerCase() === skillName,
+    );
+    const ref = skill?.references?.find(
+      (r) => r.name.toLowerCase() === refName,
+    );
+    if (ref && skill) {
+      refsList.push(
+        `### Reference: ${skill.name}/${ref.name}\n\n${ref.content}`,
+      );
+    }
+  }
+  const activeReferencesPrompt = refsList.length > 0
+    ? `\n\nActive references:\n${refsList.join("\n\n")}`
+    : "";
+
   return {
     ...spec,
     skills: sortedActiveSkills,
-    prompt: spec.prompt + unactiveSkillsPrompt,
+    allSkills: allPossibleSkills,
+    prompt: spec.prompt + unactiveSkillsPrompt + activeReferencesPrompt,
   };
 };
