@@ -117,17 +117,18 @@ runForAllProviders(
 
     const learnSkillResult = mockHistory.find((event) =>
       event.type === "tool_result" &&
-      event.result.includes("weather")
+      event.result.includes("learned successfully")
     );
 
     if (learnSkillResult && learnSkillResult.type === "tool_result") {
-      const parsedResult = JSON.parse(learnSkillResult.result);
-      assertEquals(parsedResult.name, "weather");
-      assertEquals(
-        parsedResult.instructions,
-        "Always ask for location before checking weather",
+      assert(
+        learnSkillResult.result.includes("weather"),
+        "Should specify skill name",
       );
-      assert(parsedResult.tools.length > 0, "Should include tools");
+      assert(
+        learnSkillResult.result.includes("learned successfully"),
+        "Should report success",
+      );
     }
   },
 );
@@ -541,10 +542,14 @@ Deno.test(
     }, "call-id-1");
 
     assert(typeof resultStr === "string");
-    const parsed = JSON.parse(resultStr);
-    assertEquals(parsed.skillName, "documentation");
-    assertEquals(parsed.referenceName, "cbt-protocols.md");
-    assertEquals(parsed.content, "ALWAYS_PRESENT_CBT_CONTENT");
+    assert(
+      resultStr.includes("learned successfully"),
+      "Should return a lightweight confirmation message instead of JSON",
+    );
+    assert(
+      resultStr.includes("cbt-protocols.md"),
+      "Should reference the learned reference name",
+    );
 
     // Turn 2: Simulate that learning a reference activates the skill exactly like learning a skill itself
     const learnCall: HistoryEvent = {
