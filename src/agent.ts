@@ -1608,8 +1608,9 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
 
         const spec = getAgentSpec();
         if (spec) {
+          const specForTurn = getSpecForTurn(spec, await getHistory());
           const currentTokens = await estimateAgentInputTokens(
-            spec,
+            specForTurn,
             await getHistory(),
           );
           if (currentTokens > 100000) {
