@@ -2122,11 +2122,11 @@ export const getSpecForTurn = (
         const normSkill = skillName.toLowerCase();
         activeSkillNames.delete(normSkill);
         // Also remove any references learned under this skill
-        for (const refKey of activeReferences) {
+        [...activeReferences].forEach((refKey) => {
           if (refKey.startsWith(`${normSkill}/`)) {
             activeReferences.delete(refKey);
           }
-        }
+        });
       }
     }
   }

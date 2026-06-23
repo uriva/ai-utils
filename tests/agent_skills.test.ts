@@ -599,3 +599,88 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "skills: unlearning a skill automatically deactivates and removes all of its active references from the system prompt",
+  () => {
+    const documentationSkill = {
+      name: "documentation",
+      description: "Read reference files",
+      instructions: "Read the reference files to learn guidelines",
+      tools: [],
+      references: [
+        {
+          name: "cbt-protocols.md",
+          content: "ALWAYS_PRESENT_CBT_CONTENT",
+        },
+      ],
+    };
+
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "please learn reference cbt-protocols.md",
+      }),
+      {
+        id: "call-1",
+        type: "tool_call",
+        isOwn: true,
+        name: learnSkillToolName,
+        parameters: {
+          skillName: "documentation",
+          referenceName: "cbt-protocols.md",
+        },
+        timestamp: 1000,
+      },
+      {
+        id: "result-1",
+        type: "tool_result",
+        isOwn: true,
+        toolCallId: "call-1",
+        result: "Reference loaded successfully.",
+        timestamp: 2000,
+      },
+    ];
+
+    const spec = {
+      tools: [],
+      skills: [documentationSkill],
+      prompt: "Help the user.",
+    } as unknown as AgentSpec;
+
+    // Turn 2 (with reference active)
+    const specTurn2 = getSpecForTurn(spec, mockHistory);
+    assert(
+      specTurn2.prompt.includes("ALWAYS_PRESENT_CBT_CONTENT"),
+      "Reference content should be active inside the system prompt",
+    );
+
+    // Turn 3: Simulate unlearning the entire skill
+    const unlearnCall: HistoryEvent = {
+      id: "call-3",
+      type: "tool_call",
+      isOwn: true,
+      name: "unlearn_skill",
+      parameters: { skillName: "documentation" },
+      timestamp: 3000,
+    };
+    const unlearnResult: HistoryEvent = {
+      id: "result-3",
+      type: "tool_result",
+      isOwn: true,
+      toolCallId: "call-3",
+      result: "Skill deactivated successfully.",
+      timestamp: 4000,
+    };
+
+    const finalHistory = [...mockHistory, unlearnCall, unlearnResult];
+    const specTurn3 = getSpecForTurn(spec, finalHistory);
+
+    // Verify both the skill and ALL of its associated references have been successfully deactivated/removed
+    assertEquals(specTurn3.skills!.length, 0);
+    assert(
+      !specTurn3.prompt.includes("ALWAYS_PRESENT_CBT_CONTENT"),
+      "Reference content should be completely removed from the system prompt after unlearning the skill",
+    );
+  },
+);
