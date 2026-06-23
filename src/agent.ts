@@ -1334,9 +1334,12 @@ export const stripFabricatedUserMessages = (
     );
     const lines = text.split("\n");
     const clean = lines.filter((line) => !pattern.test(line)).join("\n").trim();
-    return clean.length > 0
-      ? { ...event, text: clean }
-      : { ...event, type: "own_thought" as const, text };
+    return clean.length > 0 ? { ...event, text: clean } : {
+      ...event,
+      type: "own_thought" as const,
+      text:
+        `[SYSTEM NOTICE]: Your previous action was completely blocked because it attempted to fabricate/simulate a user message in your own reply (e.g., trying to write "User: ..."). You must NEVER simulate or invent user messages. Please focus strictly on executing the actual tools and actions requested by the user, and do not simulate any user approval.`,
+    };
   });
 };
 
