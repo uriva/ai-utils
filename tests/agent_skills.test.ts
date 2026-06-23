@@ -453,6 +453,12 @@ Deno.test(
         parameters: z.object({}),
         handler: () => Promise.resolve("events"),
       }],
+      references: [
+        {
+          name: "setup-guide.md",
+          content: "...",
+        },
+      ],
     };
 
     const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
@@ -495,6 +501,14 @@ Deno.test(
     const specTurn2 = getSpecForTurn(spec, updatedHistory);
     assertEquals(specTurn2.skills!.length, 1);
     assertEquals(specTurn2.skills![0].name, "calendar");
+    assert(
+      specTurn2.prompt.includes("ALWAYS_PRESENT_CALENDAR_INSTRUCTIONS"),
+      "System prompt should be updated with skill instructions",
+    );
+    assert(
+      specTurn2.prompt.includes("setup-guide.md"),
+      "System prompt should list available reference files under the active skill",
+    );
   },
 );
 

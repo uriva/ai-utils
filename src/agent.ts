@@ -2202,10 +2202,25 @@ export const getSpecForTurn = (
     ? `\n\nActive references:\n${refsList.join("\n\n")}`
     : "";
 
+  const formatActiveSkillsPrompt = (skills: Skill[]): string => {
+    if (skills.length === 0) return "";
+    const list = skills.map((skill) => {
+      const refsPart = skill.references && skill.references.length > 0
+        ? `\n  Available reference files (load with learn_skill):\n${
+          skill.references.map((r) => `    - ${r.name}`).join("\n")
+        }`
+        : "";
+      return `### Active Skill: ${skill.name}\nInstructions:\n${skill.instructions}${refsPart}`;
+    });
+    return `\n\nActive skills instructions:\n${list.join("\n\n")}`;
+  };
+  const activeSkillsPrompt = formatActiveSkillsPrompt(sortedActiveSkills);
+
   return {
     ...spec,
     skills: sortedActiveSkills,
     allSkills: allPossibleSkills,
-    prompt: spec.prompt + unactiveSkillsPrompt + activeReferencesPrompt,
+    prompt: spec.prompt + unactiveSkillsPrompt + activeReferencesPrompt +
+      activeSkillsPrompt,
   };
 };
