@@ -97,3 +97,37 @@ Deno.test("sanitizeModelOutput strips system context injections from output", ()
   if (event.type !== "own_utterance") throw new Error("unreachable");
   assertEquals(event.text, "Here is the safe part of the message");
 });
+
+Deno.test("global tool output sanitization - does not collapse scene search result lines", async () => {
+  const sceneSearchTool = {
+    name: "find_by_scene_description",
+    description: "test",
+    parameters: z.object({}),
+    handler: () => {
+      return Promise.resolve(
+        [
+          `result: {"title":"Inception","year":2010} time: 01:23:45 score: 0.812`,
+          `result: {"title":"Inception","year":2010} time: 01:45:12 score: 0.791`,
+          `result: {"title":"The Dark Knight","year":2008} time: 01:05:20 score: 0.785`,
+        ].join("\n"),
+      );
+    },
+  };
+
+  const resolver = callToResult([sceneSearchTool]);
+  const res = await resolver({
+    name: "find_by_scene_description",
+    args: {},
+    id: "call-2",
+  });
+
+  assertEquals(res?.toolCallId, "call-2");
+  assertEquals(
+    res?.result,
+    [
+      `result: {"title":"Inception","year":2010} time: 01:23:45 score: 0.812`,
+      `result: {"title":"Inception","year":2010} time: 01:45:12 score: 0.791`,
+      `result: {"title":"The Dark Knight","year":2008} time: 01:05:20 score: 0.785`,
+    ].join("\n"),
+  );
+});

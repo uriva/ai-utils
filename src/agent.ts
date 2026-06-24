@@ -809,6 +809,16 @@ const longestCommonPrefix = (s1: string, s2: string): string => {
   return s1.slice(0, i);
 };
 
+const isStructuredLine = (line: string): boolean => {
+  const trimmed = line.trim();
+  return (
+    (trimmed.includes("{") && trimmed.includes("}")) ||
+    (trimmed.includes("[") &&
+      trimmed.includes("]") &&
+      (trimmed.includes('"') || trimmed.includes(":")))
+  );
+};
+
 const collapseSimilarPrefixLines = (text: string): string => {
   const lines = text.split("\n");
   const collapsed: string[] = [];
@@ -817,6 +827,12 @@ const collapseSimilarPrefixLines = (text: string): string => {
   while (i < lines.length) {
     const current = lines[i];
     if (i + 1 >= lines.length) {
+      collapsed.push(current);
+      i++;
+      continue;
+    }
+
+    if (isStructuredLine(current)) {
       collapsed.push(current);
       i++;
       continue;
