@@ -193,7 +193,8 @@ const isTokenLimitExceeded = (error: Error) =>
 
 const isImageProcessingOrInternalError = (error: Error) =>
   error.message.includes("Unable to process input image") ||
-  error.message.includes("Internal error encountered");
+  error.message.includes("Internal error encountered") ||
+  error.message.includes("Request contains an invalid argument");
 
 const isRecoverableError = (error: Error) =>
   isFileNotActiveError(error) ||
