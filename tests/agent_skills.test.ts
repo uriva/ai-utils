@@ -684,3 +684,74 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "skills: calling a skill tool auto-loads/learns that skill for subsequent turns",
+  () => {
+    const calendarSkill = {
+      name: "calendar",
+      description: "Calendar operations",
+      instructions: "CALENDAR_INSTRUCTIONS_MARKER",
+      tools: [{
+        name: "list_events",
+        description: "List events",
+        parameters: z.object({}),
+        handler: () => Promise.resolve("events"),
+      }],
+    };
+
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "list events" }),
+      {
+        id: "call-1",
+        type: "tool_call",
+        isOwn: true,
+        name: "run_command",
+        parameters: {
+          command: "calendar/list_events",
+          params: {},
+        },
+        timestamp: 1000,
+      },
+    ];
+
+    const spec = {
+      tools: [],
+      skills: [calendarSkill],
+      prompt: "Help the user.",
+    } as unknown as AgentSpec;
+
+    // The skill should be inactive initially (on Turn 1, i.e. with empty history)
+    const specTurn1 = getSpecForTurn(spec, []);
+    assert(
+      !specTurn1.prompt.includes("CALENDAR_INSTRUCTIONS_MARKER"),
+      "Skill instructions should not be loaded on Turn 1 before tool call",
+    );
+
+    // After calling the skill tool via run_command, the skill should be active on Turn 2
+    const specTurn2 = getSpecForTurn(spec, mockHistory);
+    assert(
+      specTurn2.prompt.includes("CALENDAR_INSTRUCTIONS_MARKER"),
+      "Skill instructions should be auto-loaded/active on Turn 2 after run_command call",
+    );
+
+    // Also verify for direct slash tool calls
+    const mockHistoryDirect: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "list events" }),
+      {
+        id: "call-2",
+        type: "tool_call",
+        isOwn: true,
+        name: "calendar/list_events",
+        parameters: {},
+        timestamp: 1000,
+      },
+    ];
+
+    const specTurn2Direct = getSpecForTurn(spec, mockHistoryDirect);
+    assert(
+      specTurn2Direct.prompt.includes("CALENDAR_INSTRUCTIONS_MARKER"),
+      "Skill instructions should be auto-loaded/active on Turn 2 after direct slash-routed call",
+    );
+  },
+);

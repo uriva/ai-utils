@@ -2147,6 +2147,16 @@ export const getSpecForTurn = (
           }
         });
       }
+    } else if (e.type === "tool_call" && e.name === "run_command") {
+      // deno-lint-ignore no-explicit-any
+      const command = (e.parameters as any)?.command;
+      if (typeof command === "string" && command.includes("/")) {
+        const skillName = command.split("/")[0].toLowerCase();
+        activeSkillNames.add(skillName);
+      }
+    } else if (e.type === "tool_call" && e.name.includes("/")) {
+      const skillName = e.name.split("/")[0].toLowerCase();
+      activeSkillNames.add(skillName);
     }
   }
 
