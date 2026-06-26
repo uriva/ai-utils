@@ -166,7 +166,10 @@ const historyEventToMessage = (
 async (e: KimiHistoryEvent): Promise<ChatCompletionMessageParam[]> => {
   const getRefText = (onMessage: MessageId): string => {
     const msg = eventById(onMessage);
-    return typeof msg === "object" && "text" in msg ? msg.text : "";
+    return typeof msg === "object" && "text" in msg &&
+        typeof msg.text === "string"
+      ? msg.text
+      : "";
   };
 
   const stampText = (text: string) =>
@@ -682,7 +685,9 @@ async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
   const responseId = generateId();
 
   if (didNothing(kimiOutput)) {
-    return [doNothingEventWithMetadata({ type: "kimi", responseId })];
+    const text = kimiOutput.find((p) => p.reasoningContent)?.reasoningContent ||
+      kimiOutput.find((p) => p.type === "text")?.text;
+    return [doNothingEventWithMetadata({ type: "kimi", responseId }, text)];
   }
 
   return kimiOutput.flatMap(kimiOutputPartToHistoryEvents(responseId));

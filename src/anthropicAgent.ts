@@ -184,7 +184,10 @@ async (
 ): Promise<Anthropic.Messages.MessageParam[]> => {
   const getRefText = (onMessage: MessageId): string => {
     const msg = eventById(onMessage);
-    return typeof msg === "object" && "text" in msg ? msg.text : "";
+    return typeof msg === "object" && "text" in msg &&
+        typeof msg.text === "string"
+      ? msg.text
+      : "";
   };
 
   const stampText = (text: string) =>
@@ -856,7 +859,10 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicHistoryEvent[]> => {
   const responseId = generateId();
 
   if (didNothing(anthropicOutput)) {
-    return [doNothingEventWithMetadata({ type: "anthropic", responseId })];
+    const text = anthropicOutput.find((p) => p.type === "text")?.text;
+    return [
+      doNothingEventWithMetadata({ type: "anthropic", responseId }, text),
+    ];
   }
 
   return anthropicOutput.flatMap(

@@ -626,7 +626,10 @@ const referencedMessageText =
   (eventById: (id: string) => GeminiHistoryEvent | undefined) =>
   (onMessage: MessageId): string => {
     const msg = eventById(onMessage);
-    return typeof msg === "object" && "text" in msg ? msg.text : "";
+    return typeof msg === "object" && "text" in msg &&
+        typeof msg.text === "string"
+      ? msg.text
+      : "";
   };
 
 const isInspectMediaToolResult = (
@@ -1764,9 +1767,13 @@ const doNothingResultEvents = (
   responseId: string,
   geminiOutput: GeminiOutput,
 ): GeminiHistoryEvent[] => {
+  const thoughtPart = geminiOutput.find((p) => p.type === "text" && p.thought);
   const textPart = geminiOutput.find((p) =>
     p.type === "text" && p.thoughtSignature
   );
+  const text =
+    (thoughtPart && "text" in thoughtPart ? thoughtPart.text : undefined) ||
+    (textPart && "text" in textPart ? textPart.text : undefined);
   return [doNothingEventWithMetadata(
     textPart?.thoughtSignature
       ? {
@@ -1775,6 +1782,7 @@ const doNothingResultEvents = (
         thoughtSignature: textPart.thoughtSignature,
       }
       : undefined,
+    text,
   )];
 };
 

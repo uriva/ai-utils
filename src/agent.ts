@@ -409,6 +409,7 @@ export type OwnThought<ModelMetadata> = {
 
 export type DoNothing<ModelMetadata> = {
   type: "do_nothing";
+  text?: string;
   modelMetadata?: ModelMetadata;
 } & SharedFields;
 
@@ -1155,16 +1156,18 @@ export const ownEditMessageTurnWithMetadata = <Metadata>(
   modelMetadata,
 } as HistoryEventWithMetadata<Metadata>);
 
-export const doNothingEvent = (): HistoryEvent => ({
+export const doNothingEvent = (text?: string): HistoryEvent => ({
   type: "do_nothing",
+  text,
   isOwn: true,
   ...sharedFields(),
 });
 
 export const doNothingEventWithMetadata = <Metadata>(
   modelMetadata?: Metadata,
+  text?: string,
 ): HistoryEventWithMetadata<Metadata> => ({
-  ...doNothingEvent(),
+  ...doNothingEvent(text),
   modelMetadata,
 } as HistoryEventWithMetadata<Metadata>);
 
@@ -1486,7 +1489,10 @@ async (output: HistoryEvent[]): Promise<boolean> => {
   await each(async (t: ToolUse<Record<string, unknown>>) => {
     if (t.name === doNothingToolName) {
       hadDeferred = true;
-      await outputEvent(doNothingEvent());
+      const reason = typeof t.parameters?.reason === "string"
+        ? t.parameters.reason
+        : undefined;
+      await outputEvent(doNothingEvent(reason));
       return;
     }
     const fc: FunctionCall = { name: t.name, args: t.parameters, id: t.id };
