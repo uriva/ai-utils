@@ -24,6 +24,7 @@ import {
   filterOrphanedToolResults,
   geminiMalformedFunctionCallError,
   geminiOutputToHistoryEvents,
+  isSafetyBlockReason,
   rejectMalformedFunctionCall,
   stripEmbeddedThoughtPatterns,
 } from "../src/geminiAgent.ts";
@@ -1251,4 +1252,16 @@ Deno.test({
 
   assertEquals(englishTokens < hebrewTokens, true);
   assertEquals(hebrewTokens > 50, true);
+});
+
+Deno.test("isSafetyBlockReason logic classification", () => {
+  assertEquals(isSafetyBlockReason("SAFETY"), true);
+  assertEquals(isSafetyBlockReason("safety"), true);
+  assertEquals(isSafetyBlockReason("RECITATION"), true);
+  assertEquals(isSafetyBlockReason("BLOCKLIST"), true);
+  assertEquals(isSafetyBlockReason("PROHIBITED_CONTENT"), true);
+  assertEquals(isSafetyBlockReason("SPII"), true);
+  assertEquals(isSafetyBlockReason("STOP"), false);
+  assertEquals(isSafetyBlockReason("MAX_TOKENS"), false);
+  assertEquals(isSafetyBlockReason(undefined), false);
 });

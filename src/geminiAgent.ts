@@ -1558,6 +1558,18 @@ const markTruncatedUtterances = (
 ): GeminiHistoryEvent[] =>
   events.map((e) => e.type === "own_utterance" ? { ...e, truncated: true } : e);
 
+export const isSafetyBlockReason = (reason: string | undefined): boolean => {
+  if (!reason) return false;
+  const upper = reason.toUpperCase();
+  return (
+    upper === "SAFETY" ||
+    upper === "RECITATION" ||
+    upper === "BLOCKLIST" ||
+    upper === "PROHIBITED_CONTENT" ||
+    upper === "SPII"
+  );
+};
+
 export const geminiAgentCaller =
   (spec: AgentSpec) =>
   async (events: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> => {
@@ -1572,6 +1584,18 @@ export const geminiAgentCaller =
     const result = await finishReasonSink.inject((r: string) => {
       box.reason = r;
     })(() => geminiAgentCallerInner(spec)(events))();
+    if (isSafetyBlockReason(box.reason)) {
+      const responseId = generateId();
+      return [
+        ownUtteranceTurnWithMetadata(
+          "Due to safety guardrails your agent has refused to answer. Please use /reset or modify your request.",
+          {
+            type: "gemini",
+            responseId,
+          },
+        ) as GeminiHistoryEvent,
+      ];
+    }
     return box.reason === geminiMaxTokensReason
       ? markTruncatedUtterances(result)
       : result;
