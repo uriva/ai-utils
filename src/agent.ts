@@ -3,6 +3,7 @@ import { getEncoding } from "js-tiktoken";
 import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
 import { cleanActiveMemoryToolRaw } from "./compaction.ts";
+import { runToolResultCompaction } from "./continuousCompaction.ts";
 import { cleanActiveMemoryToolName } from "./utils.ts";
 import { accessGeminiToken } from "./gemini.ts";
 import { genJson } from "./genJson.ts";
@@ -1902,7 +1903,18 @@ export const runAbstractAgent = (
           !emitWithDescriptions.every((ev: HistoryEvent) =>
             ev.type === "own_thought"
           )
-        ) return;
+        ) {
+          if (scratchPad && spec.rewriteHistory) {
+            runToolResultCompaction(
+              updatedHistory,
+              { setScratch: (id, content) => scratchPad.set(id, content) },
+              spec.rewriteHistory,
+            ).catch((e) =>
+              console.error("[compaction] Tool result compaction failed", e)
+            );
+          }
+          return;
+        }
       } else {
         // Nothing was emitted to the outside world, accumulate the internal state (e.g., thoughts)
         ephemeralHistory = [...ephemeralHistory, ...internal];

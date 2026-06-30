@@ -41,6 +41,11 @@ export {
 } from "./src/compaction.ts";
 export { injectCacher } from "./src/cacher.ts";
 export {
+  type CompactionOptions,
+  getSpillThreshold,
+  runToolResultCompaction,
+} from "./src/continuousCompaction.ts";
+export {
   countTextTokens,
   geminiGenText,
   injectGeminiModelVersions,
