@@ -511,7 +511,7 @@ Deno.test({
 
       const agentTask = runAgent({
         prompt:
-          "You are a math assistant. When asked to add numbers, use the secret_skill to add them. You must use the tool.",
+          "You are a secret assistant. When asked to get the secret word, you MUST use the secret_skill/get_secret tool. Do not chat or reply until you have called the tool to retrieve the secret word.",
         tools: [],
         skills: [exampleSkill],
         maxIterations: 3,
