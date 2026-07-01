@@ -123,8 +123,17 @@ const resolveCallModel = (spec: AgentSpec): CallModel => {
     inner: base,
   });
   const prepare = prepareHistory(spec);
-  return async (events) =>
+  const runner: CallModel = async (events) =>
     wrapped(await prepare(sanitizeHistorySkillsForModel(events)));
+
+  if (spec.isConsult) {
+    return injectStreamChunk((_chunk: string) => {})(
+      injectStreamThinkingChunk((_chunk: string) => {})(
+        runner,
+      ),
+    );
+  }
+  return runner;
 };
 
 const builtinTools = [inspectMediaUrlTool];

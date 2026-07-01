@@ -85,7 +85,7 @@ Deno.test("prefixed or malformed learn_skill calls are normalized and routed cor
   const skillTools = createSkillTools([todoSkill]);
   const out1 = await callToResult(skillTools, [todoSkill])({
     name: "todo/learn_skill",
-    args: {},
+    args: { spinnerText: "Learning todo skill" },
     id: "call-4",
   });
   if (!out1) throw new Error("expected a result");
@@ -93,7 +93,7 @@ Deno.test("prefixed or malformed learn_skill calls are normalized and routed cor
 
   const out2 = await callToResult(skillTools, [todoSkill])({
     name: "learn_skill",
-    args: { skill: "todo" },
+    args: { skill: "todo", spinnerText: "Learning todo skill" },
     id: "call-5",
   });
   if (!out2) throw new Error("expected a result");

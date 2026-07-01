@@ -18,12 +18,20 @@ runForAllProviders(
           "I have a tricky architectural question. Use the consult tool to ask the stronger model whether I should pick monolith or microservices for a 3-engineer startup, then summarize its advice in one sentence.",
       }),
     ];
+    let streamedContent = "";
+    let streamedThinking = "";
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 6,
       tools: [],
       prompt:
         "You are a junior assistant. When uncertain about hard reasoning, call the consult tool.",
       lightModel: true,
+      onStreamChunk: (chunk) => {
+        streamedContent += chunk;
+      },
+      onStreamThinkingChunk: (chunk) => {
+        streamedThinking += chunk;
+      },
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -44,6 +52,10 @@ runForAllProviders(
       `expected consult tool to return a non-empty result. history: ${
         JSON.stringify(mockHistory, null, 2)
       }`,
+    );
+    assert(
+      !streamedContent.toLowerCase().includes("advice:"),
+      `expected strong model's raw advice (starting with "Advice:") NOT to leak into onStreamChunk. got: ${streamedContent}`,
     );
   },
 );
