@@ -831,6 +831,7 @@ export const anthropicAgentCaller = ({
   timezoneIANA,
   maxOutputTokens,
   disableStreaming,
+  isConsult,
 }: AgentSpec) =>
 async (events: AnthropicHistoryEvent[]): Promise<AnthropicHistoryEvent[]> => {
   const enhancedPrompt = [
@@ -840,7 +841,9 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicHistoryEvent[]> => {
         `Available skills:\n${formatSkillsPrompt(skills)}`,
       ]
       : []),
-    `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,
+    ...(isConsult ? [] : [
+      `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,
+    ]),
   ].join("\n\n");
 
   const anthropicOutput = await callAnthropicWithFixHistory(

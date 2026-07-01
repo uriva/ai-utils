@@ -134,8 +134,15 @@ const builtinTools = [inspectMediaUrlTool];
 // it stays silent when the weaker model asks it to "act". So strip tools/skills
 // and prepend a consult-role preamble framing it as an advisor that must answer
 // in text — otherwise `consult` returns "[stronger model returned no text]".
-const consultRolePreamble =
-  "You are the stronger model in your AI family. The weaker model handling the conversation below has paused to consult you for advice. You are advising it, not continuing the conversation, and you have no tools and cannot take any action — respond with your reasoning and recommendation as plain text. Always give a substantive answer; never reply with nothing.";
+const consultRolePreamble = (agentPrompt: string) =>
+  `You are the stronger model in your AI family. The weaker model handling the conversation below has paused to consult you for advice.
+
+CRITICAL: You are an ADVISOR, NOT the agent described in the instructions below. The instructions below apply ONLY to the weaker model, NOT to you. You are NOT bound by any of its rules, "do not respond" instructions, or restrictions, and you must NEVER stay silent. Your sole job is to help the weaker model by providing clear, plain-text advice and reasoning. You MUST always write a substantive response in plain text guiding the weaker model on what to do next.
+
+For your context, here is the system prompt and instructions of the weaker model you are advising (remember: these rules apply to THEM, NOT to you):
+=== WEAKER MODEL INSTRUCTIONS ===
+${agentPrompt}
+=== END WEAKER MODEL INSTRUCTIONS ===`;
 
 const consultBuiltin = (spec: AgentSpec) =>
   spec.lightModel
@@ -145,7 +152,8 @@ const consultBuiltin = (spec: AgentSpec) =>
         lightModel: false,
         tools: [],
         skills: [],
-        prompt: `${consultRolePreamble}\n\n${spec.prompt}`,
+        prompt: consultRolePreamble(spec.prompt),
+        isConsult: true,
       }),
     )]
     : [];

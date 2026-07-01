@@ -450,6 +450,10 @@ const rawCallGemini = async (
     let chunkCount = 0;
     for await (const chunk of responseStream) {
       chunkCount++;
+      console.log(
+        `[gemini-step] chunk #${chunkCount}:`,
+        JSON.stringify(chunk, null, 2),
+      );
       if (chunkCount === 1) console.log("[gemini-step] stream-first-chunk");
       if (chunk.usageMetadata) {
         finalUsageMetadata = chunk.usageMetadata;
@@ -1611,6 +1615,7 @@ const geminiAgentCallerInner = ({
   timezoneIANA,
   maxOutputTokens,
   disableStreaming,
+  isConsult,
 }: AgentSpec) =>
 (
   events: GeminiHistoryEvent[],
@@ -1626,12 +1631,10 @@ const geminiAgentCallerInner = ({
       buildReq(
         lightModel,
         skills && skills.length > 0
-          ? `${
-            enhancePrompt(prompt)
-          }${noResponseInstruction}\n\nAvailable skills:\n${
-            formatSkillsPrompt(skills)
-          }`
-          : `${enhancePrompt(prompt)}${noResponseInstruction}`,
+          ? `${enhancePrompt(prompt)}${
+            isConsult ? "" : noResponseInstruction
+          }\n\nAvailable skills:\n${formatSkillsPrompt(skills)}`
+          : `${enhancePrompt(prompt)}${isConsult ? "" : noResponseInstruction}`,
         [
           ...tools,
           ...((allSkills ?? skills ?? []).length > 0

@@ -143,3 +143,45 @@ runForAllProviders(
     );
   },
 );
+
+runForAllProviders(
+  "consult does not return empty when the agent prompt contains irrelevant message instructions",
+  async (runAgentWithProvider) => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "is it sunny over there today?",
+      }),
+    ];
+    await agentDeps(mockHistory)(runAgentWithProvider)({
+      maxIterations: 6,
+      tools: [],
+      prompt:
+        "You are a soccer bot. Respond ONLY to registrations. If a message is not related to registration, do not respond at all. When the user sends an irrelevant message, you MUST use the consult tool to ask the stronger model for advice on what to do. Be extra gentle.",
+      lightModel: true,
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+    const consultCallId = mockHistory.find(
+      (e): e is Extract<HistoryEvent, { type: "tool_call" }> =>
+        e.type === "tool_call" && e.name === consultToolName,
+    )?.id;
+    assert(
+      consultCallId,
+      `expected agent to call ${consultToolName}. history: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+    const consultReply = mockHistory.find(
+      (e): e is Extract<HistoryEvent, { type: "tool_result" }> =>
+        e.type === "tool_result" && e.toolCallId === consultCallId,
+    );
+    assert(
+      consultReply && consultReply.result.length > 0 &&
+        !consultReply.result.startsWith("[stronger model returned no text]"),
+      `expected ${consultToolName} to return non-empty strong-model text; the strong model must not return no-text. history: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+  },
+);

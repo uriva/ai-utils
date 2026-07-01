@@ -1624,8 +1624,13 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         referenceName: z.string().optional().describe(
           "Optional specific reference file or subsection of the skill to load (e.g., 'cbt-protocols.md') to keep context usage minimal.",
         ),
+        spinnerText: z.string().describe(
+          "A short progress update or spinner message in active voice (e.g., 'Learning the web search skill...', 'Loading calendar protocols...') representing what this action is actively doing.",
+        ),
       }),
-      handler: async ({ skillName, referenceName }) => {
+      handler: async (
+        { skillName, referenceName, spinnerText: _spinnerText },
+      ) => {
         const skill = skillMap[skillName];
         if (!skill) {
           return `Skill "${skillName}" not found. Available skills: ${skillNames}`;
@@ -1664,8 +1669,11 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         "Deactivate a currently active/learned skill to reclaim context token budget",
       parameters: z.object({
         skillName: z.string().describe("The name of the skill to deactivate"),
+        spinnerText: z.string().describe(
+          "A short progress update or spinner message in active voice (e.g., 'Deactivating search skill...') representing what this action is actively doing.",
+        ),
       }),
-      handler: ({ skillName }) => {
+      handler: ({ skillName, spinnerText: _spinnerText }) => {
         return Promise.resolve(
           `Successfully deactivated/unlearned the skill "${skillName}". Its tools have been removed from your active context.`,
         );
@@ -1723,6 +1731,7 @@ export type AgentSpec = {
     participantName: string;
   };
   toolOutputScratchPad?: ToolOutputScratchPad;
+  isConsult?: boolean;
 };
 
 const hasEmojiFlood = (events: HistoryEvent[]) =>
