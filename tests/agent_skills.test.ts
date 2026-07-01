@@ -755,3 +755,62 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "skills: active skill prompt includes full tool names, descriptions, and exact parameter schemas",
+  () => {
+    const calendarSkill = {
+      name: "calendar",
+      description: "Calendar operations",
+      instructions: "CALENDAR_INSTRUCTIONS_MARKER",
+      tools: [{
+        name: "add_event",
+        description: "Add a calendar event",
+        parameters: z.object({
+          title: z.string().describe("The event title"),
+          date: z.string().describe("The event date"),
+        }),
+        handler: () => Promise.resolve("event added"),
+      }],
+    };
+
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "add event" }),
+      {
+        id: "call-1",
+        type: "tool_call",
+        isOwn: true,
+        name: "run_command",
+        parameters: {
+          command: "calendar/add_event",
+          params: { title: "Meeting", date: "2026-07-01" },
+        },
+        timestamp: 1000,
+      },
+    ];
+
+    const spec = {
+      tools: [],
+      skills: [calendarSkill],
+      prompt: "Help the user.",
+    } as unknown as AgentSpec;
+
+    const specTurn2 = getSpecForTurn(spec, mockHistory);
+    assert(
+      specTurn2.prompt.includes("calendar/add_event"),
+      "Active skill prompt should include full tool names in skillName/toolName format",
+    );
+    assert(
+      specTurn2.prompt.includes("Add a calendar event"),
+      "Active skill prompt should include tool descriptions",
+    );
+    assert(
+      specTurn2.prompt.includes("title: string"),
+      "Active skill prompt should include typed parameters inside prompt",
+    );
+    assert(
+      specTurn2.prompt.includes("The event title"),
+      "Active skill prompt should include parameter description comments",
+    );
+  },
+);

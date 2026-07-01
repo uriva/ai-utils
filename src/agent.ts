@@ -2226,7 +2226,15 @@ export const getSpecForTurn = (
           skill.references.map((r) => `    - ${r.name}`).join("\n")
         }`
         : "";
-      return `### Active Skill: ${skill.name}\nInstructions:\n${skill.instructions}${refsPart}`;
+      const toolsPart = skill.tools.length > 0
+        ? `\n  Tools:\n${
+          skill.tools.map((t) => {
+            const typing = zodToTypingString(t.parameters);
+            return `    - ${skill.name}/${t.name}(params: ${typing}): ${t.description}`;
+          }).join("\n")
+        }`
+        : "";
+      return `### Active Skill: ${skill.name}\nInstructions:\n${skill.instructions}${toolsPart}${refsPart}`;
     });
     return `\n\nActive skills instructions:\n${list.join("\n\n")}`;
   };
