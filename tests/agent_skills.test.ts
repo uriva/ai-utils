@@ -814,3 +814,88 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "skills: learning a skill with an invalid/guessed referenceName falls back to learning the main skill",
+  async () => {
+    const coderSkill = {
+      name: "p2b-coder",
+      description: "Coder/integrator skill",
+      instructions: "ALWAYS_PRESENT_CODER_INSTRUCTIONS",
+      tools: [],
+      references: [
+        {
+          name: "planning-and-design.md",
+          content: "planning content",
+        },
+      ],
+    };
+
+    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "please build me a dashboard",
+    })];
+
+    const spec = {
+      tools: [],
+      skills: [coderSkill],
+      prompt: "Help the user.",
+    } as unknown as AgentSpec;
+
+    const skillTools = createSkillTools([coderSkill]);
+    const learnRefTool = skillTools.find((t) => t.name === "learn_skill");
+    assert(learnRefTool, "should expose learn_skill tool");
+
+    const resultStr = await learnRefTool.handler({
+      skillName: "p2b-coder",
+      referenceName: "README.md",
+      spinnerText: "Learning skill...",
+    }, "call-id-1");
+
+    assert(typeof resultStr === "string");
+
+    // Asserting the fallback error/confirmation message is returned
+    assert(
+      resultStr.includes("not found") &&
+        resultStr.includes("need to learn the skill first"),
+      `Should inform the model that the reference was not found and it needs to learn the skill first. Got: "${resultStr}"`,
+    );
+    assert(
+      resultStr.includes("p2b-coder") &&
+        resultStr.includes("learned successfully"),
+      `Should inform the model that the main skill p2b-coder was successfully learned. Got: "${resultStr}"`,
+    );
+
+    // Simulate the past tool call and result in history
+    const learnCall: HistoryEvent = {
+      id: "call-1",
+      type: "tool_call",
+      isOwn: true,
+      name: learnSkillToolName,
+      parameters: {
+        skillName: "p2b-coder",
+        referenceName: "README.md",
+      },
+      timestamp: Date.now(),
+    };
+    const learnResult: HistoryEvent = {
+      id: "result-1",
+      type: "tool_result",
+      isOwn: true,
+      toolCallId: "call-1",
+      result: resultStr,
+      timestamp: Date.now(),
+    };
+
+    const updatedHistory = [...mockHistory, learnCall, learnResult];
+    const specTurn2 = getSpecForTurn(spec, updatedHistory);
+
+    // Verify the skill itself is now FULLY active under activeSkills (because of the fallback)
+    assertEquals(specTurn2.skills!.length, 1);
+    assertEquals(specTurn2.skills![0].name, "p2b-coder");
+    assert(
+      specTurn2.prompt.includes("ALWAYS_PRESENT_CODER_INSTRUCTIONS"),
+      "System prompt should be updated with skill instructions",
+    );
+  },
+);

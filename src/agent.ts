@@ -1655,7 +1655,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           if (!ref) {
             const refList = skill.references?.map((r) => r.name).join(", ") ||
               "none";
-            return `Reference "${referenceName}" not found in skill "${skillName}". Available references: ${refList}`;
+            return `Reference file "${referenceName}" not found in skill "${skillName}", you need to learn the skill first. Learning the main skill "${skillName}" now...\n\nSkill "${skill.name}" learned successfully. Its tools and instructions are now active and available in your system prompt and tools. Available reference files in this skill: ${refList}`;
           }
           return `Reference "${ref.name}" from skill "${skill.name}" learned successfully. Its content is now active and available in your system prompt under active references.`;
         }
@@ -2155,7 +2155,21 @@ export const getSpecForTurn = (
       const referenceName = (e.parameters as any)?.referenceName;
       if (skillName) {
         const normSkill = skillName.toLowerCase();
+        let isValidReference = false;
         if (referenceName) {
+          const matchingSkill = spec.skills?.find(
+            (s) => s.name.toLowerCase() === normSkill,
+          );
+          if (matchingSkill) {
+            const hasRef = matchingSkill.references?.some(
+              (r) => r.name.toLowerCase() === referenceName.toLowerCase(),
+            );
+            if (hasRef) {
+              isValidReference = true;
+            }
+          }
+        }
+        if (referenceName && isValidReference) {
           activeReferences.add(`${normSkill}/${referenceName.toLowerCase()}`);
         } else {
           activeSkillNames.add(normSkill);
