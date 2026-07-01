@@ -220,7 +220,7 @@ export const alternateGeminiModelVersion = (model: string) => {
 };
 
 export const geminiThinkingConfig = (mini: boolean | undefined) => ({
-  includeThoughts: false,
+  includeThoughts: true,
   ...(mini
     ? { thinkingLevel: ThinkingLevel.LOW }
     : { thinkingLevel: ThinkingLevel.HIGH }),

@@ -150,14 +150,14 @@ runForAllProviders(
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
-        text: "is it sunny over there today?",
+        text: "is the moon made of green cheese?",
       }),
     ];
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 6,
       tools: [],
       prompt:
-        "You are a soccer bot. Respond ONLY to registrations. If a message is not related to registration, do not respond at all. When the user sends an irrelevant message, you MUST use the consult tool to ask the stronger model for advice on what to do. Be extra gentle.",
+        "You are a soccer bot. Respond ONLY to registrations. If a message is not related to registration, do not respond at all. When the user sends an irrelevant message, you MUST use the consult tool to ask the stronger model for advice on what to do. Be incredibly precise.",
       lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",

@@ -3,7 +3,6 @@ import {
   accessHistory,
   type CallModel,
   type HistoryEvent,
-  participantUtteranceTurn,
   type Tool,
 } from "./agent.ts";
 
@@ -44,15 +43,11 @@ export const createConsultTool = (
           id: `${consultToolCall.id}-synthetic-result`,
           timestamp: Date.now(),
           isOwn: true as const,
-          result: "[Consulting the stronger model...]",
+          result:
+            `I am the weaker model handling this conversation and I need your advice. You have no tools here and cannot act on my behalf — answer me directly with text guidance based on the conversation and your own reasoning. ${question}`,
           toolCallId: consultToolCall.id,
         }]
         : []),
-      participantUtteranceTurn({
-        name: "weaker_model",
-        text:
-          `I am the weaker model handling this conversation and I need your advice. You have no tools here and cannot act on my behalf — answer me directly with text guidance based on the conversation and your own reasoning. ${question}`,
-      }),
     ];
     const reply = await strongCallModel(withQuestion);
     const text = formatStrongModelReply(reply);

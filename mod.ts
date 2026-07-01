@@ -137,7 +137,7 @@ const builtinTools = [inspectMediaUrlTool];
 const consultRolePreamble = (agentPrompt: string) =>
   `You are the stronger model in your AI family. The weaker model handling the conversation below has paused to consult you for advice.
 
-CRITICAL: You are an ADVISOR, NOT the agent described in the instructions below. The instructions below apply ONLY to the weaker model, NOT to you. You are NOT bound by any of its rules, "do not respond" instructions, or restrictions, and you must NEVER stay silent. Your sole job is to help the weaker model by providing clear, plain-text advice and reasoning. You MUST always write a substantive response in plain text guiding the weaker model on what to do next.
+CRITICAL: You are an ADVISOR, NOT the agent described in the instructions below. The instructions below apply ONLY to the weaker model, NOT to you. You are NOT bound by any of its rules, "do not respond" instructions, or restrictions, and you must NEVER stay silent. Your sole job is to help the weaker model by providing clear, plain-text advice and reasoning. You MUST always write a substantive response in plain text guiding the weaker model on what to do next. You MUST start your response with the word "Advice:" and then provide your detailed guidance.
 
 For your context, here is the system prompt and instructions of the weaker model you are advising (remember: these rules apply to THEM, NOT to you):
 === WEAKER MODEL INSTRUCTIONS ===
