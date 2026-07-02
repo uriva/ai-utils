@@ -19,6 +19,7 @@ import {
   runCommandToolName,
   sanitizeModelOutput,
   type Skill,
+  systemNotificationPrefix,
   toolUseTurn,
 } from "../src/agent.ts";
 import {
@@ -1312,6 +1313,57 @@ Deno.test("normalizeHistoryForModel: pending deferred call nudges a reply when a
   assert(
     text.includes("respond to the user"),
     `expected nudge to respond to the user, got: ${text}`,
+  );
+});
+
+// The functionResponse placeholder alone is low-authority (tool-output data), so
+// a light model ignores it. normalizeHistoryForModel must ALSO append a
+// high-authority system-notification nudge (an own_thought with no metadata,
+// which renders as a `[System notification: ...]` part) that outranks the
+// `[no response]` license and must be the LAST event so it targets the latest
+// turn.
+Deno.test("normalizeHistoryForModel: appends a system-notification nudge as the last event when a user is waiting on a pending deferred call", () => {
+  const call = toolUseTurn({ name: "timeout-wakeup", args: { ms: 5000 } });
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({ name: "user", text: "please wait" }),
+    call,
+    participantUtteranceTurn({ name: "user", text: "what is 2 + 2?" }),
+  ];
+  const normalized = normalizeHistoryForModel(history);
+  const last = normalized[normalized.length - 1];
+  assertEquals(
+    last.type,
+    "own_thought",
+    "the nudge must be an own_thought so it renders as a system notification",
+  );
+  assert(
+    "text" in last &&
+      typeof last.text === "string" &&
+      last.text.includes("Respond to the user's latest message"),
+    `expected the system-notification nudge text, got: ${JSON.stringify(last)}`,
+  );
+  assert(
+    !("modelMetadata" in last) ||
+      (last as { modelMetadata?: unknown }).modelMetadata === undefined,
+    "the nudge must NOT carry modelMetadata, else it renders as model content " +
+      `instead of a ${systemNotificationPrefix} part`,
+  );
+});
+
+Deno.test("normalizeHistoryForModel: does NOT append a system-notification nudge while genuinely waiting (no later user message)", () => {
+  const call = toolUseTurn({ name: "timeout-wakeup", args: { ms: 5000 } });
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({ name: "user", text: "please wait" }),
+    call,
+  ];
+  const normalized = normalizeHistoryForModel(history);
+  assert(
+    !normalized.some((e) =>
+      e.type === "own_thought" &&
+      "text" in e &&
+      e.text.includes("Respond to the user's latest message")
+    ),
+    "must not inject the nudge when the user is not waiting on a reply",
   );
 });
 

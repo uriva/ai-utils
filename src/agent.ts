@@ -1504,11 +1504,29 @@ const laterUnansweredUserMessage = (
     e.type === "participant_utterance" || e.type === "participant_edit_message"
   );
 
+// A pending deferred tool_result is rendered as a provider `functionResponse`
+// (i.e. tool-output *data*), so a light model treats the "respond to the user
+// now" plea embedded in its text as inert data and stays silent — it obeys the
+// higher-authority system prompt, which still licenses `[no response]`. To win
+// that authority conflict we ALSO emit the nudge through the system-notification
+// channel (see `invisibleToolUseInstruction`: notifications prefixed with
+// `systemNotificationPrefix` are "highly authoritative instructions from the
+// platform/admin ... You must follow them immediately"). We append it at the end
+// of the normalized history — after the user's latest message — so it is the last
+// thing the model sees and clearly targets the current turn.
+const pendingDeferredUserWaitingNotification =
+  "A background task you started earlier is still pending, but the user has " +
+  "sent a new message since then. Respond to the user's latest message now. " +
+  "Do NOT stay silent and do NOT reply with a no-response placeholder just " +
+  "because the background task has not finished — its result will be delivered " +
+  "separately when it completes.";
+
 export const normalizeHistoryForModel = (
   history: HistoryEvent[],
 ): HistoryEvent[] => {
   const groupedResults = toolResultsByCallId(history);
   const consumedResultIds = new Set<string>();
+  let hasPendingDeferredWithUserWaiting = false;
 
   const interleaved = history.reduce<HistoryEvent[]>((acc, event, index) => {
     if (event.type === "tool_result") return acc;
@@ -1519,12 +1537,14 @@ export const normalizeHistoryForModel = (
     if (nonempty(matchedResults)) {
       return [...acc, event, ...matchedResults];
     }
+    const userWaiting = laterUnansweredUserMessage(history, index);
+    if (userWaiting) hasPendingDeferredWithUserWaiting = true;
     const syntheticResult: ToolResult = {
       type: "tool_result",
       isOwn: true,
       id: `${event.id}-synthetic-result`,
       timestamp: event.timestamp,
-      result: laterUnansweredUserMessage(history, index)
+      result: userWaiting
         ? pendingToolResultTextWithUserWaiting
         : pendingToolResultText,
       toolCallId: event.id,
@@ -1539,7 +1559,15 @@ export const normalizeHistoryForModel = (
     return !hasToolCall(history, event.toolCallId);
   });
 
-  return [...interleaved, ...orphanedResults];
+  // High-authority nudge, delivered via the system-notification channel so it
+  // outranks the `[no response]` license the model would otherwise fall back to.
+  // An `own_thought` WITHOUT `modelMetadata` renders as a
+  // `[System notification: ...]` user-role part (see historyEventToContent).
+  const userWaitingNotification = hasPendingDeferredWithUserWaiting
+    ? [ownThoughtTurn(pendingDeferredUserWaitingNotification)]
+    : [];
+
+  return [...interleaved, ...orphanedResults, ...userWaitingNotification];
 };
 
 export const handleFunctionCalls = (
