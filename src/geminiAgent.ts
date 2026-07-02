@@ -33,6 +33,7 @@ import {
   estimateAgentInputTokens,
   estimateTokens,
   estimateTokensLocal,
+  externalEventPrefix,
   formatSkillsPrompt,
   generateId,
   getStreamChunk,
@@ -734,6 +735,12 @@ const historyEventToContent = (
         { text: stampText(`${systemNotificationPrefix} ${e.text}]`) },
         ...attachmentsToPartsOrEmpty(e.attachments),
       ]);
+  }
+  if (e.type === "external_event") {
+    return wrapUserContent([
+      { text: stampText(`${externalEventPrefix} ${e.text}]`) },
+      ...attachmentsToPartsOrEmpty(e.attachments),
+    ]);
   }
   if (e.type === "own_reaction") {
     return wrapModelContent([{

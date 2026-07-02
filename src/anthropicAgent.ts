@@ -9,6 +9,7 @@ import {
   createSkillTools,
   doNothingEventWithMetadata,
   estimateTokens,
+  externalEventPrefix,
   formatSkillsPrompt,
   generateId,
   getStreamChunk,
@@ -274,6 +275,20 @@ async (
     const textBlock: Anthropic.Messages.TextBlockParam = {
       type: "text",
       text: `${systemNotificationPrefix} ${e.text}]`,
+    };
+    return [{
+      role: "user",
+      content: contentBlocks && contentBlocks.length > 0
+        ? [textBlock, ...contentBlocks]
+        : [textBlock],
+    }];
+  }
+
+  if (e.type === "external_event") {
+    const contentBlocks = await attachmentsToContentBlocks(e.attachments);
+    const textBlock: Anthropic.Messages.TextBlockParam = {
+      type: "text",
+      text: stampText(`${externalEventPrefix} ${e.text}]`),
     };
     return [{
       role: "user",

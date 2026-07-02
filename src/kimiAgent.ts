@@ -13,6 +13,7 @@ import {
   createSkillTools,
   doNothingEventWithMetadata,
   estimateTokens,
+  externalEventPrefix,
   formatSkillsPrompt,
   generateId,
   getStreamChunk,
@@ -260,6 +261,20 @@ async (e: KimiHistoryEvent): Promise<ChatCompletionMessageParam[]> => {
     const textPart: OpenAI.Chat.Completions.ChatCompletionContentPart = {
       type: "text",
       text: `${systemNotificationPrefix} ${e.text}]`,
+    };
+    return [{
+      role: "user",
+      content: contentParts && contentParts.length > 0
+        ? [textPart, ...contentParts]
+        : [textPart],
+    }];
+  }
+
+  if (e.type === "external_event") {
+    const contentParts = await attachmentsToContentParts(e.attachments);
+    const textPart: OpenAI.Chat.Completions.ChatCompletionContentPart = {
+      type: "text",
+      text: stampText(`${externalEventPrefix} ${e.text}]`),
     };
     return [{
       role: "user",

@@ -117,6 +117,8 @@ export const eventToPlainText = (e: HistoryEvent): string =>
     ? `TOOL CALL ${e.name} ${JSON.stringify(e.parameters)}`
     : e.type === "tool_result"
     ? `TOOL RESULT ${JSON.stringify(e.result)}`
+    : e.type === "external_event"
+    ? `EXTERNAL EVENT ${e.text}`
     : JSON.stringify(e);
 
 const estimateSegmentTokens = async (
