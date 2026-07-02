@@ -687,11 +687,12 @@ const historyEventToContent = (
     if (e.attachments && !empty(e.attachments)) {
       parts.push(...attachmentsToParts(e.attachments));
     }
+    // When the utterance has no real content we emit a `" "` placeholder. A
+    // thoughtSignature must travel with the exact text Gemini signed, so it must
+    // NOT be attached to this synthesized placeholder (Gemini can reject a
+    // signature on content it never produced).
     return wrapModelContent(
-      !empty(parts) ? parts : [{
-        ...optionalThoughtSignature(e.modelMetadata?.thoughtSignature),
-        text: " ",
-      }],
+      !empty(parts) ? parts : [{ text: " " }],
     );
   }
   if (e.type === "tool_call") {
@@ -750,24 +751,41 @@ const historyEventToContent = (
     }]);
   }
   if (e.type === "do_nothing") {
-    return wrapModelContent([{
-      text: " ",
-      ...optionalThoughtSignature(e.modelMetadata?.thoughtSignature),
-    }]);
+    // `do_nothing` renders as a synthesized `" "` placeholder. Do not attach a
+    // thoughtSignature to it — the signature belongs to the exact text Gemini
+    // produced, not to this placeholder, and Gemini can reject the mismatch.
+    return wrapModelContent([{ text: " " }]);
   }
   throw new Error(
     `Unknown history event type: ${JSON.stringify(e, null, 2)}`,
   );
 };
 
+// A thoughtSignature is only valid on the exact part Gemini returned it on.
+// Round-tripping means every part must carry back precisely its own signature —
+// no more. The previous implementation smeared one part's signature onto ALL
+// parts in the combined content, which attaches signatures to synthesized
+// placeholder text parts (e.g. the " " emitted for a signature-less thought or
+// do_nothing) and to plain utterances that never had one. Gemini rejects a
+// signature on such a part with 400 INVALID_ARGUMENT.
+//
+// The only legitimate repair is for a functionCall part that lost its own
+// signature during grouping: it may inherit a sibling's signature, since a
+// functionCall always requires one. Everything else keeps exactly its own.
+const isFunctionCallPart = (part: Part): boolean =>
+  "functionCall" in part && !!part.functionCall;
+
 const combineContent = (contents: Content[]): Content => {
   const parts = contents.flatMap((c) => c.parts ?? []);
-  const signature = parts.find((p) => p.thoughtSignature)?.thoughtSignature;
+  const siblingSignature = parts.find((p) => p.thoughtSignature)
+    ?.thoughtSignature;
+  const repair = (part: Part): Part =>
+    isFunctionCallPart(part) && !part.thoughtSignature && siblingSignature
+      ? { ...part, thoughtSignature: siblingSignature }
+      : part;
   return {
     role: contents.some((c) => c.role === "model") ? "model" : "user",
-    parts: signature
-      ? parts.map((p) => ({ ...p, thoughtSignature: signature }))
-      : parts,
+    parts: parts.map(repair),
   };
 };
 
