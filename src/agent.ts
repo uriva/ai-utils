@@ -1438,13 +1438,36 @@ const toolResultsByCallId = (
     return acc.set(event.toolCallId, [...existing, event]);
   }, new Map<string, ToolResult[]>());
 
+const pendingToolResultText =
+  "[Tool result pending - still processing in the background]";
+
+// When a deferred tool call is still pending but the user has since sent a new
+// message, the plain "still processing" placeholder makes the model believe its
+// only job is to keep waiting, so it stays silent (`do_nothing`) and ignores the
+// user — permanently, on every subsequent turn. Tell the model explicitly that a
+// pending background task does not excuse ignoring the user.
+const pendingToolResultTextWithUserWaiting =
+  "[Tool result pending - still processing in the background. " +
+  "Note: the user has sent a new message since this tool was called. " +
+  "Do not stay silent waiting for this result — respond to the user's latest " +
+  "message now. The background task will deliver its result separately when " +
+  "it completes.]";
+
+const laterUnansweredUserMessage = (
+  history: HistoryEvent[],
+  toolCallIndex: number,
+): boolean =>
+  history.slice(toolCallIndex + 1).some((e) =>
+    e.type === "participant_utterance" || e.type === "participant_edit_message"
+  );
+
 export const normalizeHistoryForModel = (
   history: HistoryEvent[],
 ): HistoryEvent[] => {
   const groupedResults = toolResultsByCallId(history);
   const consumedResultIds = new Set<string>();
 
-  const interleaved = history.reduce<HistoryEvent[]>((acc, event) => {
+  const interleaved = history.reduce<HistoryEvent[]>((acc, event, index) => {
     if (event.type === "tool_result") return acc;
     if (event.type !== "tool_call") return [...acc, event];
     const matchedResults = (groupedResults.get(event.id) ?? [])
@@ -1458,7 +1481,9 @@ export const normalizeHistoryForModel = (
       isOwn: true,
       id: `${event.id}-synthetic-result`,
       timestamp: event.timestamp,
-      result: "[Tool result pending - still processing in the background]",
+      result: laterUnansweredUserMessage(history, index)
+        ? pendingToolResultTextWithUserWaiting
+        : pendingToolResultText,
       toolCallId: event.id,
     };
     return [...acc, event, syntheticResult];

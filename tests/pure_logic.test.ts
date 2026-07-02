@@ -11,12 +11,15 @@ import {
   injectOutputEvent,
   learnSkillToolName,
   maxUtteranceChars,
+  normalizeHistoryForModel,
   ownUtteranceTurn,
+  participantUtteranceTurn,
   resolveToolDescription,
   runAbstractAgent,
   runCommandToolName,
   sanitizeModelOutput,
   type Skill,
+  toolUseTurn,
 } from "../src/agent.ts";
 import {
   buildReq,
@@ -1264,4 +1267,83 @@ Deno.test("isSafetyBlockReason logic classification", () => {
   assertEquals(isSafetyBlockReason("STOP"), false);
   assertEquals(isSafetyBlockReason("MAX_TOKENS"), false);
   assertEquals(isSafetyBlockReason(undefined), false);
+});
+
+const syntheticResultFor = (
+  history: HistoryEvent[],
+  toolCallId: string,
+): string => {
+  const normalized = normalizeHistoryForModel(history);
+  const result = normalized.find((e) =>
+    e.type === "tool_result" && "toolCallId" in e && e.toolCallId === toolCallId
+  );
+  assert(result && "result" in result, "expected a synthetic tool_result");
+  return result.result;
+};
+
+Deno.test("normalizeHistoryForModel: pending deferred call keeps waiting placeholder while genuinely waiting", () => {
+  const call = toolUseTurn({ name: "timeout-wakeup", args: { ms: 5000 } });
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({ name: "user", text: "please wait" }),
+    call,
+  ];
+  const text = syntheticResultFor(history, call.id);
+  assert(
+    text.includes("still processing"),
+    `expected still-processing placeholder, got: ${text}`,
+  );
+  assert(
+    !text.includes("respond to the user"),
+    "must not nudge to respond when no later user message",
+  );
+});
+
+Deno.test("normalizeHistoryForModel: pending deferred call nudges a reply when a later user message is unanswered", () => {
+  const call = toolUseTurn({ name: "timeout-wakeup", args: { ms: 5000 } });
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({ name: "user", text: "please wait" }),
+    call,
+    participantUtteranceTurn({
+      name: "user",
+      text: "actually, are you there?",
+    }),
+  ];
+  const text = syntheticResultFor(history, call.id);
+  assert(
+    text.includes("respond to the user"),
+    `expected nudge to respond to the user, got: ${text}`,
+  );
+});
+
+Deno.test("normalizeHistoryForModel: a real result for a late-resolving deferred call still matches (non-destructive)", () => {
+  const call = toolUseTurn({ name: "timeout-wakeup", args: { ms: 5000 } });
+  const realResult: HistoryEvent = {
+    type: "tool_result",
+    isOwn: true,
+    id: "real-result",
+    timestamp: Date.now(),
+    result: "TIMEOUT WAKEUP (5 seconds elapsed)",
+    toolCallId: call.id,
+  };
+  // Simulates the deferred tool resolving on a later turn, after the user spoke.
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({ name: "user", text: "please wait" }),
+    call,
+    participantUtteranceTurn({ name: "user", text: "are you there?" }),
+    ownUtteranceTurn("Yes, still waiting on the task."),
+    realResult,
+  ];
+  const normalized = normalizeHistoryForModel(history);
+  const results = normalized.filter((e) =>
+    e.type === "tool_result" && "toolCallId" in e && e.toolCallId === call.id
+  );
+  assertEquals(
+    results.length,
+    1,
+    "the real result must be used, not synthesized",
+  );
+  assert(
+    "result" in results[0] && results[0].result.includes("TIMEOUT WAKEUP"),
+    "the real deferred result must survive normalization",
+  );
 });

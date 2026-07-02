@@ -418,6 +418,84 @@ runForAllProviders(
   },
 );
 
+// Production incident: a bot called the deferred `timeout-wakeup` tool to wait on
+// a background job, but its real tool_result was never recorded (an async
+// callback re-ran the agent instead). `normalizeHistoryForModel` synthesizes a
+// "[Tool result pending - still processing in the background]" placeholder for
+// such an unanswered tool_call — which is correct while genuinely waiting, but
+// made the model believe its only job was to keep waiting. So when the user then
+// sent direct messages ("?", "plz continue"), the model stayed silent
+// (`do_nothing`) every single turn and the conversation was permanently wedged.
+// The pending placeholder must not gag the model when the user is waiting on a
+// reply. The fix must stay non-destructive: the real tool_call is preserved so a
+// late-resolving deferred result still matches by toolCallId.
+runForAllProviders(
+  "stays responsive when a deferred tool_call is still pending and the user sends a new message",
+  async (runAgent) => {
+    const deferredTool: DeferredTool<z.ZodObject<{ ms: z.ZodNumber }>> = {
+      name: "timeout-wakeup",
+      description: "Set a timeout to wake up later",
+      parameters: z.object({ ms: z.number().describe("Milliseconds to wait") }),
+      handler: () => Promise.resolve(),
+    };
+    // Phase 1: let the agent genuinely emit a signed deferred tool_call. This is
+    // a real model turn, so the resulting tool_call carries a valid provider
+    // thoughtSignature (which is exactly why existing filters do not strip it).
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text:
+          "Call the timeout-wakeup tool with ms=5000 to wait. Do not say anything else.",
+      }),
+    ];
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 3,
+      tools: [deferredTool],
+      prompt:
+        "You are an assistant. When asked to wait, call the timeout-wakeup tool.",
+      lightModel: true,
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+    assert(
+      mockHistory.some((e) =>
+        e.type === "tool_call" && e.name === "timeout-wakeup"
+      ),
+      `Phase 1 should have produced a timeout-wakeup tool_call. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+    assert(
+      !mockHistory.some((e) => e.type === "tool_result"),
+      "Deferred tool must leave no real tool_result (that is what makes it pending)",
+    );
+    // Phase 2: WITHOUT ever appending a tool_result for that call, a direct user
+    // message arrives. The agent must answer it, not silently do_nothing.
+    mockHistory.push(participantUtteranceTurn({
+      name: "user",
+      text:
+        "Actually never mind the wait — what is 2 + 2? Answer with the number.",
+    }));
+    const beforeLen = mockHistory.length;
+    await agentDeps(mockHistory)(runAgent)({
+      maxIterations: 3,
+      tools: [deferredTool],
+      prompt:
+        "You are a helpful assistant. Always answer the user's latest question.",
+      lightModel: true,
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+    const newEvents = mockHistory.slice(beforeLen);
+    assert(
+      newEvents.some((e) => e.type === "own_utterance" && e.text.includes("4")),
+      `Agent went unresponsive with a dangling tool_call. New events: ${
+        JSON.stringify(newEvents, null, 2)
+      }`,
+    );
+  },
+);
+
 runForAllProviders(
   "zod .default() on a tool param is honored when the model omits it",
   async (runAgent) => {
