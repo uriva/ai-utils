@@ -7,6 +7,7 @@ import {
   estimateAgentInputTokens,
   formatSkillsPrompt,
   type HistoryEvent,
+  historyHasPendingDeferredUserWaitingNudge,
   injectAccessHistory,
   injectOutputEvent,
   learnSkillToolName,
@@ -1347,6 +1348,27 @@ Deno.test("normalizeHistoryForModel: appends a system-notification nudge as the 
       (last as { modelMetadata?: unknown }).modelMetadata === undefined,
     "the nudge must NOT carry modelMetadata, else it renders as model content " +
       `instead of a ${systemNotificationPrefix} part`,
+  );
+});
+
+Deno.test("historyHasPendingDeferredUserWaitingNudge: detects the injected nudge so providers can drop the [no response] license", () => {
+  const call = toolUseTurn({ name: "timeout-wakeup", args: { ms: 5000 } });
+  const waiting = normalizeHistoryForModel([
+    participantUtteranceTurn({ name: "user", text: "please wait" }),
+    call,
+    participantUtteranceTurn({ name: "user", text: "what is 2 + 2?" }),
+  ]);
+  assert(
+    historyHasPendingDeferredUserWaitingNudge(waiting),
+    "must detect the nudge when the user is waiting on a pending deferred call",
+  );
+  const notWaiting = normalizeHistoryForModel([
+    participantUtteranceTurn({ name: "user", text: "please wait" }),
+    call,
+  ]);
+  assert(
+    !historyHasPendingDeferredUserWaitingNudge(notWaiting),
+    "must not detect a nudge when the user is not waiting",
   );
 });
 

@@ -1570,6 +1570,20 @@ export const normalizeHistoryForModel = (
   return [...interleaved, ...orphanedResults, ...userWaitingNotification];
 };
 
+// True when the (already-normalized) history contains the system-notification
+// nudge injected by `normalizeHistoryForModel` for a pending deferred tool_call
+// that the user is waiting on. Providers use this to suppress the `[no response]`
+// silence license for that turn: a light model will otherwise emit the
+// no-response tag it was taught in the system prompt even when a higher-authority
+// notification tells it to reply. Removing the competing license is what actually
+// forces a reply.
+export const historyHasPendingDeferredUserWaitingNudge = (
+  history: HistoryEvent[],
+): boolean =>
+  history.some((e) =>
+    e.type === "own_thought" && e.text === pendingDeferredUserWaitingNotification
+  );
+
 export const handleFunctionCalls = (
   // deno-lint-ignore no-explicit-any
   tools: Tool<any>[],

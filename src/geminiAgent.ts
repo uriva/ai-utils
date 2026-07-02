@@ -37,10 +37,11 @@ import {
   formatSkillsPrompt,
   generateId,
   getStreamChunk,
-  getStreamThinkingChunk,
-  type HistoryEvent,
-  type HistoryEventWithMetadata,
-  invisibleToolUseInstruction,
+   getStreamThinkingChunk,
+   type HistoryEvent,
+   type HistoryEventWithMetadata,
+   historyHasPendingDeferredUserWaitingNudge,
+   invisibleToolUseInstruction,
   type MediaAttachment,
   type MessageId,
   noResponseTag,
@@ -1640,8 +1641,17 @@ const geminiAgentCallerInner = ({
 }: AgentSpec) =>
 (
   events: GeminiHistoryEvent[],
-): Promise<GeminiHistoryEvent[]> =>
-  pipe(
+): Promise<GeminiHistoryEvent[]> => {
+  // Suppress the `[no response]` silence license when a pending deferred
+  // tool_call has the user waiting on a reply. Otherwise the light model emits
+  // the no-response tag it was taught here even though a higher-authority system
+  // notification (injected by normalizeHistoryForModel) tells it to answer. The
+  // notification alone is not enough — the competing license must be removed too.
+  const silenceLicense = isConsult ||
+      historyHasPendingDeferredUserWaitingNudge(events)
+    ? ""
+    : noResponseInstruction;
+  return pipe(
     filterAndRewriteInvalidToolCalls(rewriteHistory),
     filterOrphanedToolResults,
     filterDoNothing,
@@ -1652,10 +1662,10 @@ const geminiAgentCallerInner = ({
       buildReq(
         lightModel,
         skills && skills.length > 0
-          ? `${enhancePrompt(prompt)}${
-            isConsult ? "" : noResponseInstruction
-          }\n\nAvailable skills:\n${formatSkillsPrompt(skills)}`
-          : `${enhancePrompt(prompt)}${isConsult ? "" : noResponseInstruction}`,
+          ? `${enhancePrompt(prompt)}${silenceLicense}\n\nAvailable skills:\n${
+            formatSkillsPrompt(skills)
+          }`
+          : `${enhancePrompt(prompt)}${silenceLicense}`,
         [
           ...tools,
           ...((allSkills ?? skills ?? []).length > 0
@@ -1670,6 +1680,7 @@ const geminiAgentCallerInner = ({
     (geminiOutput: GeminiOutput): GeminiHistoryEvent[] =>
       geminiOutputToHistoryEvents(geminiOutput),
   )(events);
+};
 
 const embeddedThoughtPattern =
   /\[Internal thought, visible only to you: ([\s\S]*?)\]/g;
