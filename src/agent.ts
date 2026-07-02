@@ -1484,18 +1484,6 @@ const toolResultsByCallId = (
 const pendingToolResultText =
   "[Tool result pending - still processing in the background]";
 
-// When a deferred tool call is still pending but the user has since sent a new
-// message, the plain "still processing" placeholder makes the model believe its
-// only job is to keep waiting, so it stays silent (`do_nothing`) and ignores the
-// user — permanently, on every subsequent turn. Tell the model explicitly that a
-// pending background task does not excuse ignoring the user.
-const pendingToolResultTextWithUserWaiting =
-  "[Tool result pending - still processing in the background. " +
-  "Note: the user has sent a new message since this tool was called. " +
-  "Do not stay silent waiting for this result — respond to the user's latest " +
-  "message now. The background task will deliver its result separately when " +
-  "it completes.]";
-
 const laterUnansweredUserMessage = (
   history: HistoryEvent[],
   toolCallIndex: number,
@@ -1504,22 +1492,33 @@ const laterUnansweredUserMessage = (
     e.type === "participant_utterance" || e.type === "participant_edit_message"
   );
 
-// A pending deferred tool_result is rendered as a provider `functionResponse`
-// (i.e. tool-output *data*), so a light model treats the "respond to the user
-// now" plea embedded in its text as inert data and stays silent — it obeys the
-// higher-authority system prompt, which still licenses `[no response]`. To win
-// that authority conflict we ALSO emit the nudge through the system-notification
-// channel (see `invisibleToolUseInstruction`: notifications prefixed with
-// `systemNotificationPrefix` are "highly authoritative instructions from the
-// platform/admin ... You must follow them immediately"). We append it at the end
-// of the normalized history — after the user's latest message — so it is the last
-// thing the model sees and clearly targets the current turn.
+// System-notification nudge appended at the very end of the normalized history
+// (after the user's latest message) so it is the last thing the model sees and
+// clearly targets the current turn. An `own_thought` WITHOUT `modelMetadata`
+// renders as a `[System notification: ...]` user-role part, which
+// `invisibleToolUseInstruction` marks as a highly authoritative platform
+// instruction the model must follow immediately.
 const pendingDeferredUserWaitingNotification =
   "A background task you started earlier is still pending, but the user has " +
   "sent a new message since then. Respond to the user's latest message now. " +
   "Do NOT stay silent and do NOT reply with a no-response placeholder just " +
   "because the background task has not finished — its result will be delivered " +
   "separately when it completes.";
+
+// Model-role acknowledgement that REPLACES the dangling deferred tool_call +
+// its synthetic pending `functionResponse` in the model VIEW when the user is
+// waiting on a reply. The pending `functionResponse` ("still processing in the
+// background") is tool-output *data* that, after Gemini merges consecutive
+// same-role turns, leads the final user turn and structurally dominates a light
+// model's decision — so it just keeps waiting (do_nothing) no matter how the
+// placeholder text or system prompt is worded. Emitting a plain model-role
+// utterance instead removes that dominant data part while keeping the turn
+// well-formed (no bare/unanswered functionCall -> no Gemini 400). This is a
+// NON-DESTRUCTIVE view transform: the real tool_call stays in persisted history,
+// so a late-resolving deferred result still matches by toolCallId.
+const pendingDeferredAcknowledgement =
+  "(I started a background task earlier; it is still running and will report " +
+  "back separately. I'll answer the user's latest message in the meantime.)";
 
 export const normalizeHistoryForModel = (
   history: HistoryEvent[],
@@ -1537,16 +1536,19 @@ export const normalizeHistoryForModel = (
     if (nonempty(matchedResults)) {
       return [...acc, event, ...matchedResults];
     }
-    const userWaiting = laterUnansweredUserMessage(history, index);
-    if (userWaiting) hasPendingDeferredWithUserWaiting = true;
+    if (laterUnansweredUserMessage(history, index)) {
+      // Drop the tool_call + its (would-be) pending functionResponse from the
+      // view; substitute a model-role utterance so the model sees a clean
+      // "user asked a question" as the final turn. See comment above.
+      hasPendingDeferredWithUserWaiting = true;
+      return [...acc, ownUtteranceTurn(pendingDeferredAcknowledgement)];
+    }
     const syntheticResult: ToolResult = {
       type: "tool_result",
       isOwn: true,
       id: `${event.id}-synthetic-result`,
       timestamp: event.timestamp,
-      result: userWaiting
-        ? pendingToolResultTextWithUserWaiting
-        : pendingToolResultText,
+      result: pendingToolResultText,
       toolCallId: event.id,
     };
     return [...acc, event, syntheticResult];
@@ -1560,9 +1562,7 @@ export const normalizeHistoryForModel = (
   });
 
   // High-authority nudge, delivered via the system-notification channel so it
-  // outranks the `[no response]` license the model would otherwise fall back to.
-  // An `own_thought` WITHOUT `modelMetadata` renders as a
-  // `[System notification: ...]` user-role part (see historyEventToContent).
+  // reinforces the substitution above and outranks any `[no response]` license.
   const userWaitingNotification = hasPendingDeferredWithUserWaiting
     ? [ownThoughtTurn(pendingDeferredUserWaitingNotification)]
     : [];

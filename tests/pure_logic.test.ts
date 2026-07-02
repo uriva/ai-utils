@@ -1300,7 +1300,11 @@ Deno.test("normalizeHistoryForModel: pending deferred call keeps waiting placeho
   );
 });
 
-Deno.test("normalizeHistoryForModel: pending deferred call nudges a reply when a later user message is unanswered", () => {
+// When the user is waiting on a pending deferred call, the tool_call + its
+// synthetic pending functionResponse are REMOVED from the model view (they
+// dominate a light model into "keep waiting"). They are replaced by a model-role
+// utterance so the model sees a clean "user asked a question" as the final turn.
+Deno.test("normalizeHistoryForModel: replaces a pending deferred call with a model utterance (drops the functionResponse) when a later user message is unanswered", () => {
   const call = toolUseTurn({ name: "timeout-wakeup", args: { ms: 5000 } });
   const history: HistoryEvent[] = [
     participantUtteranceTurn({ name: "user", text: "please wait" }),
@@ -1310,19 +1314,30 @@ Deno.test("normalizeHistoryForModel: pending deferred call nudges a reply when a
       text: "actually, are you there?",
     }),
   ];
-  const text = syntheticResultFor(history, call.id);
+  const normalized = normalizeHistoryForModel(history);
   assert(
-    text.includes("respond to the user"),
-    `expected nudge to respond to the user, got: ${text}`,
+    !normalized.some((e) => e.type === "tool_call" && e.id === call.id),
+    "the dangling tool_call must be dropped from the model view",
+  );
+  assert(
+    !normalized.some((e) =>
+      e.type === "tool_result" && "toolCallId" in e && e.toolCallId === call.id
+    ),
+    "no synthetic pending functionResponse must be emitted for the dropped call",
+  );
+  assert(
+    normalized.some((e) =>
+      e.type === "own_utterance" &&
+      e.text.includes("background task")
+    ),
+    "a model-role utterance must stand in for the dropped tool_call",
   );
 });
 
-// The functionResponse placeholder alone is low-authority (tool-output data), so
-// a light model ignores it. normalizeHistoryForModel must ALSO append a
-// high-authority system-notification nudge (an own_thought with no metadata,
-// which renders as a `[System notification: ...]` part) that outranks the
-// `[no response]` license and must be the LAST event so it targets the latest
-// turn.
+// normalizeHistoryForModel must ALSO append a high-authority system-notification
+// nudge (an own_thought with no metadata, which renders as a
+// `[System notification: ...]` part) as the LAST event so it targets the latest
+// turn and reinforces the substitution above.
 Deno.test("normalizeHistoryForModel: appends a system-notification nudge as the last event when a user is waiting on a pending deferred call", () => {
   const call = toolUseTurn({ name: "timeout-wakeup", args: { ms: 5000 } });
   const history: HistoryEvent[] = [
