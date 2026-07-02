@@ -1581,7 +1581,8 @@ export const historyHasPendingDeferredUserWaitingNudge = (
   history: HistoryEvent[],
 ): boolean =>
   history.some((e) =>
-    e.type === "own_thought" && e.text === pendingDeferredUserWaitingNotification
+    e.type === "own_thought" &&
+    e.text === pendingDeferredUserWaitingNotification
   );
 
 export const handleFunctionCalls = (
