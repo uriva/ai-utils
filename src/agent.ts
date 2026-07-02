@@ -560,11 +560,15 @@ export const accessCallModel = callModelInjection.access;
 
 // Wraps the resolved CallModel. Used e.g. by test_helpers to add rmmbr
 // caching around whatever provider caller runAgent picks. The wrapper gets
-// the provider name so it can key caches per-provider.
+// the provider name so it can key caches per-provider, and the resolved system
+// prompt so caches can include it in their key — the system prompt carries the
+// full skill/instruction text, and two runs with identical history but a
+// changed prompt (e.g. an edited skill) must NOT collide in the cache.
 export type Provider = "google" | "moonshot" | "anthropic" | undefined;
 
 export type CallModelWrapper = (args: {
   provider: Provider;
+  systemPrompt: string;
   inner: CallModel;
 }) => CallModel;
 
@@ -1234,6 +1238,12 @@ export const systemNotificationPattern: RegExp = new RegExp(
   "gi",
 );
 
+export const externalEventPattern: RegExp = new RegExp(
+  externalEventPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+    " [\\s\\S]*?\\]+",
+  "gi",
+);
+
 const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
   output.flatMap((event) => {
     if (event.type !== "own_utterance" && event.type !== "own_edit_message") {
@@ -1241,8 +1251,13 @@ const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
     }
     const text = stripAllInternalSentTimestamps(event.text);
 
-    // Clean any system notifications from the text to never allow the model to emit them
-    let cleanedText = text.replace(systemNotificationPattern, "").trim();
+    // Clean any system notifications and external-event markers from the text to
+    // never allow the model to fabricate them (they must only ever be injected by
+    // the platform, never emitted by the model).
+    let cleanedText = text
+      .replace(systemNotificationPattern, "")
+      .replace(externalEventPattern, "")
+      .trim();
 
     // Strip raw tool calling tags and system context/instructions injections
     const callTagPattern = /<call:[\s\S]*?>/gi;

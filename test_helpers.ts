@@ -75,10 +75,19 @@ const rmmbrCacheWithKey = <Args extends unknown[], R>(
 const eventsCacheKey = (events: HistoryEvent[]) =>
   events.map(({ id: _id, timestamp: _ts, ...rest }) => rest);
 
-const cachingCallModelWrapper: CallModelWrapper = ({ provider, inner }) => {
+const cachingCallModelWrapper: CallModelWrapper = (
+  { provider, systemPrompt, inner },
+) => {
   const cached = rmmbrCacheWithKey(
     `callModel-${provider ?? "google"}-v6`,
-    (events: HistoryEvent[]) => eventsCacheKey(events),
+    // Include the system prompt in the key: it carries the full skill/
+    // instruction text, so an edited skill must invalidate the cache even when
+    // the history events are byte-identical. Without this, skill changes are
+    // invisible to cached test runs.
+    (events: HistoryEvent[]) => ({
+      systemPrompt,
+      events: eventsCacheKey(events),
+    }),
     (events: HistoryEvent[]) => inner(events),
   );
   return (events) => cached(events);

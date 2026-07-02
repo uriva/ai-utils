@@ -120,6 +120,7 @@ const resolveCallModel = (spec: AgentSpec): CallModel => {
   };
   const wrapped = accessCallModelWrapper({
     provider: spec.provider,
+    systemPrompt: spec.prompt,
     inner: base,
   });
   const prepare = prepareHistory(spec);
