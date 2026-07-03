@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import { runAgent } from "../mod.ts";
 import {
   type AgentSpec,
+  createSkillTools,
   getSpecForTurn,
   type HistoryEvent,
   injectCallModel,
@@ -386,6 +387,50 @@ Deno.test(
   },
 );
 
+// Provider-agnostic: guards against the observed failure mode (find-scene)
+// where the model called learn_skill with a free-form `referenceName` that was
+// really the skill name or a tool/command name. That whole class of bug is now
+// impossible by construction: learn_skill has no referenceName parameter, and
+// references are ordinary fixed-name tools invoked via run_command.
+Deno.test(
+  "learn_skill has no referenceName parameter; references are tools called via run_command",
+  async () => {
+    const documentationSkill = {
+      name: "documentation",
+      description: "Read reference files",
+      instructions: "Read the reference files to learn guidelines",
+      tools: [],
+      references: [
+        { name: "cbt-protocols.md", content: "ALWAYS_PRESENT_CBT_CONTENT" },
+      ],
+    };
+
+    const skillTools = createSkillTools([documentationSkill]);
+
+    const learnTool = skillTools.find((t) => t.name === learnSkillToolName);
+    assert(learnTool, "should expose learn_skill tool");
+    const learnShape = learnTool.parameters.shape;
+    assert(
+      !("referenceName" in learnShape),
+      "learn_skill must not expose a referenceName parameter",
+    );
+
+    // The reference is reachable via run_command using its .md-stripped name.
+    const runCommand = skillTools.find((t) => t.name === runCommandToolName);
+    assert(runCommand, "should expose run_command tool");
+    const refResult = await runCommand.handler({
+      command: "documentation/cbt-protocols",
+      params: {},
+      spinnerText: "Loading CBT protocols...",
+    }, "call-id-1");
+    assert(typeof refResult === "string");
+    assert(
+      refResult.includes("ALWAYS_PRESENT_CBT_CONTENT"),
+      `run_command on the reference tool should return its content. Got: "${refResult}"`,
+    );
+  },
+);
+
 runForAllProviders(
   "skills: works alongside regular tools",
   async (runAgentWithProvider) => {
@@ -506,21 +551,23 @@ Deno.test(
       "System prompt should be updated with skill instructions",
     );
     assert(
-      specTurn2.prompt.includes("setup-guide.md"),
-      "System prompt should list available reference files under the active skill",
+      specTurn2.prompt.includes("calendar/setup-guide"),
+      "System prompt should list reference documents as callable tools under the active skill",
+    );
+    assert(
+      !specTurn2.prompt.includes("setup-guide.md"),
+      "Reference tool names should have the .md suffix stripped",
     );
   },
 );
 
-import { createSkillTools } from "../src/agent.ts";
-
 Deno.test(
-  "skills: learning a reference behaves exactly like learning a skill, returning the reference content",
+  "skills: a reference is a run_command tool that returns its content and activates its skill",
   async () => {
     const documentationSkill = {
       name: "documentation",
       description: "Read reference files",
-      instructions: "Read the reference files to learn guidelines",
+      instructions: "ALWAYS_PRESENT_DOC_INSTRUCTIONS",
       tools: [],
       references: [
         {
@@ -530,83 +577,56 @@ Deno.test(
       ],
     };
 
-    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
-      name: "user",
-      text: "please learn reference cbt-protocols.md from documentation",
-    })];
-
     const spec = {
       tools: [],
       skills: [documentationSkill],
       prompt: "Help the user.",
     } as unknown as AgentSpec;
 
-    // Turn 1: Verify not active
-    const specTurn1 = getSpecForTurn(spec, mockHistory);
-    assertEquals(specTurn1.skills!.length, 0);
-
-    // Verify learning reference returns the reference content
+    // Calling the reference tool returns its content (it lands in history like
+    // any other tool_result, so no separate "active references" prompt needed).
     const skillTools = createSkillTools([documentationSkill]);
-    const learnRefTool = skillTools.find((t) => t.name === "learn_skill");
-    assert(learnRefTool, "should expose learn_skill tool");
-
-    const resultStr = await learnRefTool.handler({
-      skillName: "documentation",
-      referenceName: "cbt-protocols.md",
+    const runCommand = skillTools.find((t) => t.name === runCommandToolName);
+    assert(runCommand, "should expose run_command tool");
+    const resultStr = await runCommand.handler({
+      command: "documentation/cbt-protocols",
+      params: {},
+      spinnerText: "Loading CBT protocols...",
     }, "call-id-1");
-
     assert(typeof resultStr === "string");
     assert(
-      resultStr.includes("learned successfully"),
-      "Should return a lightweight confirmation message instead of JSON",
-    );
-    assert(
-      resultStr.includes("cbt-protocols.md"),
-      "Should reference the learned reference name",
+      resultStr.includes("ALWAYS_PRESENT_CBT_CONTENT"),
+      `Reference tool should return its content. Got: "${resultStr}"`,
     );
 
-    // Turn 2: Simulate that learning a reference activates the skill exactly like learning a skill itself
-    const learnCall: HistoryEvent = {
-      id: "call-1",
-      type: "tool_call",
-      isOwn: true,
-      name: learnSkillToolName,
-      parameters: {
-        skillName: "documentation",
-        referenceName: "cbt-protocols.md",
+    // Calling a skill tool (including a reference tool) auto-activates the skill.
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "read cbt protocols" }),
+      {
+        id: "call-1",
+        type: "tool_call",
+        isOwn: true,
+        name: runCommandToolName,
+        parameters: { command: "documentation/cbt-protocols", params: {} },
+        timestamp: Date.now(),
       },
-      timestamp: Date.now(),
-    };
-    const learnResult: HistoryEvent = {
-      id: "result-1",
-      type: "tool_result",
-      isOwn: true,
-      toolCallId: "call-1",
-      result: resultStr,
-      timestamp: Date.now(),
-    };
-
-    const updatedHistory = [...mockHistory, learnCall, learnResult];
-    const specTurn2 = getSpecForTurn(spec, updatedHistory);
-
-    // Verify the skill itself is NOT fully active (keeping context usage minimal)
-    assertEquals(specTurn2.skills!.length, 0);
-
-    // Verify that the reference's specific content is dynamically loaded into the prompt
+    ];
+    const specTurn2 = getSpecForTurn(spec, mockHistory);
+    assertEquals(specTurn2.skills!.length, 1);
     assert(
-      specTurn2.prompt.includes("ALWAYS_PRESENT_CBT_CONTENT"),
-      "System prompt should be updated with the learned reference content",
+      specTurn2.prompt.includes("ALWAYS_PRESENT_DOC_INSTRUCTIONS"),
+      "Calling a reference tool should activate its skill on the next turn",
     );
   },
 );
 
 Deno.test(
-  "skills: unlearning a skill automatically deactivates and removes all of its active references from the system prompt",
+  "skills: unlearning a skill deactivates it and stops advertising its reference tools",
   () => {
     const documentationSkill = {
       name: "documentation",
       description: "Read reference files",
-      instructions: "Read the reference files to learn guidelines",
+      instructions: "ALWAYS_PRESENT_DOC_INSTRUCTIONS",
       tools: [],
       references: [
         {
@@ -619,17 +639,14 @@ Deno.test(
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
-        text: "please learn reference cbt-protocols.md",
+        text: "learn the documentation skill",
       }),
       {
         id: "call-1",
         type: "tool_call",
         isOwn: true,
         name: learnSkillToolName,
-        parameters: {
-          skillName: "documentation",
-          referenceName: "cbt-protocols.md",
-        },
+        parameters: { skillName: "documentation" },
         timestamp: 1000,
       },
       {
@@ -637,7 +654,7 @@ Deno.test(
         type: "tool_result",
         isOwn: true,
         toolCallId: "call-1",
-        result: "Reference loaded successfully.",
+        result: "Skill learned successfully.",
         timestamp: 2000,
       },
     ];
@@ -648,11 +665,16 @@ Deno.test(
       prompt: "Help the user.",
     } as unknown as AgentSpec;
 
-    // Turn 2 (with reference active)
+    // Turn 2 (skill active): instructions and reference tool are advertised.
     const specTurn2 = getSpecForTurn(spec, mockHistory);
+    assertEquals(specTurn2.skills!.length, 1);
     assert(
-      specTurn2.prompt.includes("ALWAYS_PRESENT_CBT_CONTENT"),
-      "Reference content should be active inside the system prompt",
+      specTurn2.prompt.includes("ALWAYS_PRESENT_DOC_INSTRUCTIONS"),
+      "Skill instructions should be active inside the system prompt",
+    );
+    assert(
+      specTurn2.prompt.includes("documentation/cbt-protocols"),
+      "Reference tool should be advertised while the skill is active",
     );
 
     // Turn 3: Simulate unlearning the entire skill
@@ -676,11 +698,14 @@ Deno.test(
     const finalHistory = [...mockHistory, unlearnCall, unlearnResult];
     const specTurn3 = getSpecForTurn(spec, finalHistory);
 
-    // Verify both the skill and ALL of its associated references have been successfully deactivated/removed
     assertEquals(specTurn3.skills!.length, 0);
     assert(
-      !specTurn3.prompt.includes("ALWAYS_PRESENT_CBT_CONTENT"),
-      "Reference content should be completely removed from the system prompt after unlearning the skill",
+      !specTurn3.prompt.includes("ALWAYS_PRESENT_DOC_INSTRUCTIONS"),
+      "Skill instructions should be removed after unlearning",
+    );
+    assert(
+      !specTurn3.prompt.includes("documentation/cbt-protocols"),
+      "Reference tool should no longer be advertised after unlearning",
     );
   },
 );
@@ -816,7 +841,7 @@ Deno.test(
 );
 
 Deno.test(
-  "skills: learning a skill with an invalid/guessed referenceName falls back to learning the main skill",
+  "skills: run_command on a guessed reference name lists the real reference tools to self-correct",
   async () => {
     const coderSkill = {
       name: "p2b-coder",
@@ -831,71 +856,35 @@ Deno.test(
       ],
     };
 
-    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
-      name: "user",
-      text: "please build me a dashboard",
-    })];
-
-    const spec = {
-      tools: [],
-      skills: [coderSkill],
-      prompt: "Help the user.",
-    } as unknown as AgentSpec;
-
     const skillTools = createSkillTools([coderSkill]);
-    const learnRefTool = skillTools.find((t) => t.name === "learn_skill");
-    assert(learnRefTool, "should expose learn_skill tool");
+    const runCommand = skillTools.find((t) => t.name === runCommandToolName);
+    assert(runCommand, "should expose run_command tool");
 
-    const resultStr = await learnRefTool.handler({
-      skillName: "p2b-coder",
-      referenceName: "README.md",
-      spinnerText: "Learning skill...",
+    // The model guesses a reference name that does not exist.
+    const resultStr = await runCommand.handler({
+      command: "p2b-coder/README",
+      params: {},
+      spinnerText: "Loading readme...",
     }, "call-id-1");
 
     assert(typeof resultStr === "string");
-
-    // Asserting the fallback error/confirmation message is returned
     assert(
-      resultStr.includes("not found") &&
-        resultStr.includes("need to learn the skill first"),
-      `Should inform the model that the reference was not found and it needs to learn the skill first. Got: "${resultStr}"`,
+      resultStr.includes("not found"),
+      `Should tell the model the tool was not found. Got: "${resultStr}"`,
     );
+    // The error must surface the real, .md-stripped reference tool so the model
+    // can retry with the correct name.
     assert(
-      resultStr.includes("p2b-coder") &&
-        resultStr.includes("learned successfully"),
-      `Should inform the model that the main skill p2b-coder was successfully learned. Got: "${resultStr}"`,
+      resultStr.includes("planning-and-design"),
+      `Should list the real reference tool name. Got: "${resultStr}"`,
     );
 
-    // Simulate the past tool call and result in history
-    const learnCall: HistoryEvent = {
-      id: "call-1",
-      type: "tool_call",
-      isOwn: true,
-      name: learnSkillToolName,
-      parameters: {
-        skillName: "p2b-coder",
-        referenceName: "README.md",
-      },
-      timestamp: Date.now(),
-    };
-    const learnResult: HistoryEvent = {
-      id: "result-1",
-      type: "tool_result",
-      isOwn: true,
-      toolCallId: "call-1",
-      result: resultStr,
-      timestamp: Date.now(),
-    };
-
-    const updatedHistory = [...mockHistory, learnCall, learnResult];
-    const specTurn2 = getSpecForTurn(spec, updatedHistory);
-
-    // Verify the skill itself is now FULLY active under activeSkills (because of the fallback)
-    assertEquals(specTurn2.skills!.length, 1);
-    assertEquals(specTurn2.skills![0].name, "p2b-coder");
-    assert(
-      specTurn2.prompt.includes("ALWAYS_PRESENT_CODER_INSTRUCTIONS"),
-      "System prompt should be updated with skill instructions",
-    );
+    // And the correct call actually returns the reference content.
+    const good = await runCommand.handler({
+      command: "p2b-coder/planning-and-design",
+      params: {},
+      spinnerText: "Loading planning doc...",
+    }, "call-id-2");
+    assert(typeof good === "string" && good.includes("planning content"));
   },
 );

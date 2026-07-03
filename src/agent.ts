@@ -320,6 +320,9 @@ export type Skill = {
   references?: { name: string; content: string }[];
 };
 
+export const referenceToolName = (name: string): string =>
+  name.replace(/\.md$/i, "");
+
 export const formatSkillsPrompt = (skills: Skill[]): string =>
   skills.map((skill) => {
     const toolsPart = skill.tools.length > 0
@@ -1666,9 +1669,21 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
       : toolName;
 
   const skillMap = Object.fromEntries(skills.map((s) => [s.name, s]));
+  const referenceAsTool =
+    (skillName: string) => (ref: { name: string; content: string }) => ({
+      name: referenceToolName(ref.name),
+      description: `Load the "${
+        referenceToolName(ref.name)
+      }" reference document for the "${skillName}" skill. Takes no parameters.`,
+      parameters: z.object({}),
+      handler: () => Promise.resolve(ref.content),
+    });
   const toolMap = Object.fromEntries(
     skills.flatMap((skill) =>
-      skill.tools.map((
+      [
+        ...skill.tools,
+        ...(skill.references ?? []).map(referenceAsTool(skill.name)),
+      ].map((
         tool,
       ) => [`${skill.name}/${bareToolName(skill.name, tool.name)}`, tool])
     ),
@@ -1703,9 +1718,12 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         const tool = toolMap[fullToolName];
         if (!tool) {
           const skill = skillMap[skillName];
-          const toolList = skill.tools.map((t) =>
-            `  - ${t.name}: ${t.description}`
-          ).join("\n");
+          const toolList = [
+            ...skill.tools.map((t) => `  - ${t.name}: ${t.description}`),
+            ...(skill.references ?? []).map((r) =>
+              `  - ${referenceToolName(r.name)}: reference document`
+            ),
+          ].join("\n");
           return `Tool "${toolName}" not found in skill "${skillName}".\n\nSkill "${skillName}" instructions:\n${skill.instructions}\n\nAvailable tools in this skill:\n${toolList}`;
         }
         const toolJsonSchema = z.toJSONSchema(tool.parameters);
@@ -1729,18 +1747,15 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
     tool({
       name: learnSkillToolName,
       description:
-        "Get detailed information about a skill including its instructions and available tools. Supports loading only a specific reference file/subsection of a skill to keep context budget low.",
+        "Activate a skill: loads its instructions and tools into your system prompt. Reference documents (if any) are separate tools you call via run_command once the skill is active.",
       parameters: z.object({
         skillName: z.string().describe("The name of the skill to learn about"),
-        referenceName: z.string().optional().describe(
-          "Optional specific reference file or subsection of the skill to load (e.g., 'cbt-protocols.md') to keep context usage minimal.",
-        ),
         spinnerText: z.string().describe(
           "A short progress update or spinner message in active voice (e.g., 'Learning the web search skill...', 'Loading calendar protocols...') representing what this action is actively doing.",
         ),
       }),
       handler: async (
-        { skillName, referenceName, spinnerText: _spinnerText },
+        { skillName, spinnerText: _spinnerText },
       ) => {
         const skill = skillMap[skillName];
         if (!skill) {
@@ -1757,18 +1772,6 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           if (currentTokens > 150000) {
             return `SYSTEM BUDGET EXCEEDED: Your current context size is ${currentTokens} tokens, which exceeds the strict budget of 150,000 tokens. To protect against cost overruns, learning of new skills is temporarily blocked. You must immediately call either "unlearn_skill" to deactivate an active/learned skill, or use the "clean_active_memory" tool to compress or delete verbose/obsolete parts of your conversation history. If the skills are too large or should be divided into smaller subskills, please report this to the system admins so they can optimize them.`;
           }
-        }
-
-        if (referenceName) {
-          const ref = skill.references?.find(
-            (r) => r.name.toLowerCase() === referenceName.toLowerCase(),
-          );
-          if (!ref) {
-            const refList = skill.references?.map((r) => r.name).join(", ") ||
-              "none";
-            return `Reference file "${referenceName}" not found in skill "${skillName}", you need to learn the skill first. Learning the main skill "${skillName}" now...\n\nSkill "${skill.name}" learned successfully. Its tools and instructions are now active and available in your system prompt and tools. Available reference files in this skill: ${refList}`;
-          }
-          return `Reference "${ref.name}" from skill "${skill.name}" learned successfully. Its content is now active and available in your system prompt under active references.`;
         }
 
         return `Skill "${skill.name}" learned successfully. Its tools and instructions are now active and available in your system prompt and tools.`;
@@ -2263,48 +2266,19 @@ export const getSpecForTurn = (
   history: HistoryEvent[],
 ): AgentSpec => {
   const activeSkillNames = new Set<string>();
-  const activeReferences = new Set<string>(); // "skillName/referenceName"
   const sortedHistory = [...history].sort((a, b) => a.timestamp - b.timestamp);
   for (const e of sortedHistory) {
     if (e.type === "tool_call" && e.name === "learn_skill") {
       // deno-lint-ignore no-explicit-any
       const skillName = (e.parameters as any)?.skillName;
-      // deno-lint-ignore no-explicit-any
-      const referenceName = (e.parameters as any)?.referenceName;
       if (skillName) {
-        const normSkill = skillName.toLowerCase();
-        let isValidReference = false;
-        if (referenceName) {
-          const matchingSkill = spec.skills?.find(
-            (s) => s.name.toLowerCase() === normSkill,
-          );
-          if (matchingSkill) {
-            const hasRef = matchingSkill.references?.some(
-              (r) => r.name.toLowerCase() === referenceName.toLowerCase(),
-            );
-            if (hasRef) {
-              isValidReference = true;
-            }
-          }
-        }
-        if (referenceName && isValidReference) {
-          activeReferences.add(`${normSkill}/${referenceName.toLowerCase()}`);
-        } else {
-          activeSkillNames.add(normSkill);
-        }
+        activeSkillNames.add(skillName.toLowerCase());
       }
     } else if (e.type === "tool_call" && e.name === "unlearn_skill") {
       // deno-lint-ignore no-explicit-any
       const skillName = (e.parameters as any)?.skillName;
       if (skillName) {
-        const normSkill = skillName.toLowerCase();
-        activeSkillNames.delete(normSkill);
-        // Also remove any references learned under this skill
-        [...activeReferences].forEach((refKey) => {
-          if (refKey.startsWith(`${normSkill}/`)) {
-            activeReferences.delete(refKey);
-          }
-        });
+        activeSkillNames.delete(skillName.toLowerCase());
       }
     } else if (e.type === "tool_call" && e.name === "run_command") {
       // deno-lint-ignore no-explicit-any
@@ -2340,31 +2314,16 @@ export const getSpecForTurn = (
     }`
     : "";
 
-  const refsList: string[] = [];
-  for (const refStr of activeReferences) {
-    const [skillName, refName] = refStr.split("/");
-    const skill = allPossibleSkills.find(
-      (s) => s.name.toLowerCase() === skillName,
-    );
-    const ref = skill?.references?.find(
-      (r) => r.name.toLowerCase() === refName,
-    );
-    if (ref && skill) {
-      refsList.push(
-        `### Reference: ${skill.name}/${ref.name}\n\n${ref.content}`,
-      );
-    }
-  }
-  const activeReferencesPrompt = refsList.length > 0
-    ? `\n\nActive references:\n${refsList.join("\n\n")}`
-    : "";
-
   const formatActiveSkillsPrompt = (skills: Skill[]): string => {
     if (skills.length === 0) return "";
     const list = skills.map((skill) => {
       const refsPart = skill.references && skill.references.length > 0
-        ? `\n  Available reference files (load with learn_skill):\n${
-          skill.references.map((r) => `    - ${r.name}`).join("\n")
+        ? `\n  Reference documents (call via run_command, e.g. ${skill.name}/${
+          referenceToolName(skill.references[0].name)
+        }):\n${
+          skill.references.map((r) =>
+            `    - ${skill.name}/${referenceToolName(r.name)}`
+          ).join("\n")
         }`
         : "";
       const toolsPart = skill.tools.length > 0
@@ -2385,7 +2344,6 @@ export const getSpecForTurn = (
     ...spec,
     skills: sortedActiveSkills,
     allSkills: allPossibleSkills,
-    prompt: spec.prompt + unactiveSkillsPrompt + activeReferencesPrompt +
-      activeSkillsPrompt,
+    prompt: spec.prompt + unactiveSkillsPrompt + activeSkillsPrompt,
   };
 };
