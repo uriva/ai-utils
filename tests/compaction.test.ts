@@ -659,6 +659,11 @@ llmTest(
   }),
 );
 
+// NOTE: We use space-separated strings ("x ".repeat(1500)) instead of a continuous
+// string of characters ("x".repeat(3000)) to avoid a performance bottleneck in
+// js-tiktoken's quadratic O(N^2) bytePairMerge implementation.
+// Once PR #156 on dqbd/tiktoken is merged and updated, we can revert to continuous strings:
+// https://github.com/dqbd/tiktoken/pull/156
 Deno.test("trimming within single segment respects tool_call/tool_result atomicity", async () => {
   const base = Date.now();
   const events: HistoryEvent[] = [];
