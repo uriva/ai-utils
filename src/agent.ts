@@ -327,7 +327,9 @@ export const formatSkillsPrompt = (skills: Skill[]): string =>
   skills.map((skill) => {
     const toolsPart = skill.tools.length > 0
       ? `\n  Tools:\n${
-        skill.tools.map((t) => `    - ${t.name}: ${t.description}`).join("\n")
+        skill.tools.map((t) =>
+          `    - ${skill.name}/${t.name}: ${t.description}`
+        ).join("\n")
       }`
       : "";
     return `- ${skill.name}: ${skill.description}${toolsPart}`;
@@ -1704,15 +1706,31 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         ),
       }),
       handler: async ({ command, params }, toolCallId) => {
-        const separator = command.includes("/") ? "/" : ":";
-        const lastSep = command.lastIndexOf(separator);
+        let effectiveCommand = command;
+        let separator = command.includes("/") ? "/" : ":";
+        let lastSep = command.lastIndexOf(separator);
         if (lastSep === -1) {
-          return `Invalid command format. Expected "skillName/toolName", got "${command}". Available skills: ${skillNames}`;
+          const resolved = resolveUnambiguousBareName(command, skills);
+          if (resolved) {
+            effectiveCommand = resolved;
+            separator = "/";
+            lastSep = resolved.lastIndexOf(separator);
+          } else {
+            return `Invalid command format. Expected "skillName/toolName", got "${command}". Available skills: ${skillNames}`;
+          }
         }
-        const skillName = command.slice(0, lastSep);
-        const toolName = command.slice(lastSep + 1);
+        let skillName = effectiveCommand.slice(0, lastSep);
+        let toolName = effectiveCommand.slice(lastSep + 1);
         if (!skillMap[skillName]) {
-          return `Skill "${skillName}" not found. Available skills: ${skillNames}`;
+          const resolved = resolveUnambiguousBareName(toolName, skills);
+          if (resolved) {
+            effectiveCommand = resolved;
+            lastSep = resolved.lastIndexOf("/");
+            skillName = resolved.slice(0, lastSep);
+            toolName = resolved.slice(lastSep + 1);
+          } else {
+            return `Skill "${skillName}" not found. Available skills: ${skillNames}`;
+          }
         }
         const fullToolName = `${skillName}/${toolName}`;
         const tool = toolMap[fullToolName];

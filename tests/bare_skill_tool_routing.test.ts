@@ -3,10 +3,12 @@ import { z } from "zod/v4";
 import {
   callToResult,
   createSkillTools,
+  formatSkillsPrompt,
+  getSpecForTurn,
   resolveToolDescription,
   tool,
 } from "../src/agent.ts";
-import type { Skill } from "../src/agent.ts";
+import type { AgentSpec, Skill } from "../src/agent.ts";
 
 const todoWrite = tool({
   name: "todo_write",
@@ -109,4 +111,72 @@ Deno.test("auto-routed skill tool name successfully resolves description", () =>
     [todoSkill],
   );
   assertEquals(desc, undefined);
+});
+
+Deno.test("run_command with bare tool name auto-corrects and routes correctly", async () => {
+  const skillTools = createSkillTools([todoSkill]);
+  const runCommand = skillTools.find((t) => t.name === "run_command");
+  if (!runCommand) throw new Error("run_command missing");
+  const out = await runCommand.handler(
+    {
+      command: "todo_write",
+      params: { todos: ["a", "b"] },
+      spinnerText: "writing",
+    },
+    "call-id",
+  );
+  if (typeof out !== "string") throw new Error("expected string result");
+  assertEquals(out.includes("wrote 2 todos"), true);
+});
+
+Deno.test("run_command with incorrect prefix auto-corrects and routes correctly", async () => {
+  const skillTools = createSkillTools([todoSkill]);
+  const runCommand = skillTools.find((t) => t.name === "run_command");
+  if (!runCommand) throw new Error("run_command missing");
+  const out = await runCommand.handler(
+    {
+      command: "default_api/todo_write",
+      params: { todos: ["a", "b"] },
+      spinnerText: "writing",
+    },
+    "call-id",
+  );
+  if (typeof out !== "string") throw new Error("expected string result");
+  assertEquals(out.includes("wrote 2 todos"), true);
+});
+
+Deno.test("formatSkillsPrompt outputs fully-qualified tool names", () => {
+  const prompt = formatSkillsPrompt([todoSkill]);
+  assertEquals(prompt.includes("- todo/todo_write:"), true);
+  assertEquals(prompt.includes("- todo_write:"), false);
+});
+
+Deno.test("active skills prompt includes tool names and descriptions", () => {
+  const spec: AgentSpec = {
+    tools: [],
+    skills: [todoSkill],
+    prompt: "Help.",
+  } as unknown as AgentSpec;
+
+  const history = [
+    {
+      id: "call-1",
+      type: "tool_call" as const,
+      isOwn: true as const,
+      name: "learn_skill",
+      parameters: { skillName: "todo" },
+      timestamp: 1000,
+    },
+    {
+      id: "result-1",
+      type: "tool_result" as const,
+      isOwn: true as const,
+      toolCallId: "call-1",
+      result: "Skill learned successfully.",
+      timestamp: 2000,
+    },
+  ];
+
+  const specTurn2 = getSpecForTurn(spec, history);
+  assertEquals(specTurn2.prompt.includes("todo/todo_write(params:"), true);
 });
