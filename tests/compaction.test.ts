@@ -664,7 +664,7 @@ Deno.test("trimming within single segment respects tool_call/tool_result atomici
   const events: HistoryEvent[] = [];
   for (let i = 0; i < 30; i++) {
     events.push(
-      makeUtterance("x".repeat(3000), base + i * 60_000, i % 2 === 0),
+      makeUtterance("x ".repeat(1500), base + i * 60_000, i % 2 === 0),
     );
   }
   const callTs = base + 30 * 60_000;
@@ -672,7 +672,7 @@ Deno.test("trimming within single segment respects tool_call/tool_result atomici
   events.push(makeToolResult("c1", callTs + 1));
   for (let i = 0; i < 10; i++) {
     events.push(
-      makeUtterance("x".repeat(3000), callTs + 2 + i * 60_000, i % 2 === 0),
+      makeUtterance("x ".repeat(1500), callTs + 2 + i * 60_000, i % 2 === 0),
     );
   }
 
