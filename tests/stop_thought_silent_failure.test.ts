@@ -1,18 +1,19 @@
 import { assertEquals } from "@std/assert";
-import { injectGeminiToken, runAgent } from "../mod.ts";
-import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
+import {
+  agentDeps,
+  noopRewriteHistory,
+  runForAllProviders,
+} from "../test_helpers.ts";
 import {
   type HistoryEvent,
-  injectCallModel,
   participantUtteranceTurn,
+  stopThoughtPrefix,
 } from "../src/agent.ts";
-import { genJsonOverride } from "../src/genJson.ts";
 
-Deno.test(
-  "REPRO: agent exits silently on a new run when history contains a previous stop thought",
-  async () => {
-    // History contains a previous stop thought injected by checkProgress in a prior run
-    const history: HistoryEvent[] = [
+runForAllProviders(
+  "runAgent - stop thought in history causes silent failure on next user prompt",
+  async (runAgentWithProvider) => {
+    const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
         text: "do something that gets stuck",
@@ -23,7 +24,7 @@ Deno.test(
         id: "stop-thought-id",
         timestamp: Date.now() - 2000,
         text:
-          "I'm working on this for some time and not making progress. I should instead stop and ask the user for help.",
+          `${stopThoughtPrefix} I should instead stop and ask the user for help.`,
       },
       participantUtteranceTurn({
         name: "user",
@@ -31,61 +32,25 @@ Deno.test(
       }),
     ];
 
-    let hasStopThoughtInCall = true;
+    await agentDeps(mockHistory)(runAgentWithProvider)({
+      maxIterations: 30,
+      tools: [],
+      prompt:
+        "You are a specialized movie scene finder bot. If the user asks if you are done or ready, and you are still active, reply saying you are active and ready to help. But if you have already stopped, output exactly [no response] and nothing else.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
 
-    // Mock model to return empty/do_nothing
-    const fakeCallModel = (events?: HistoryEvent[]) => {
-      const hist = events || history;
-      hasStopThoughtInCall = hist.some(
-        (e) =>
-          e.type === "own_thought" &&
-          e.text.startsWith(
-            "I'm working on this for some time and not making progress.",
-          ),
-      );
-      return Promise.resolve([
-        {
-          type: "do_nothing" as const,
-          isOwn: true,
-          id: "do-nothing-id",
-          timestamp: Date.now(),
-        },
-      ]);
-    };
-
-    const mockGenJson = (
-      _opts: unknown,
-      _systemMsg: string,
-      _zodType: unknown,
-    ) => {
-      return (_userMsg: string, _attachments?: unknown) => {
-        return Promise.resolve({
-          shouldContinue: false,
-          thoughtInjection:
-            "I'm working on this for some time and not making progress. I should instead stop.",
-        });
-      };
-    };
-
-    await injectGeminiToken("fake-token")(async () => {
-      await genJsonOverride.inject(() => mockGenJson)(async () => {
-        await injectCallModel(fakeCallModel)(async () => {
-          await agentDeps(history)(runAgent)({
-            maxIterations: 30, // normal user turn has maxIterations: 30
-            tools: [],
-            prompt: "You are a helpful assistant.",
-            rewriteHistory: noopRewriteHistory,
-            timezoneIANA: "UTC",
-          });
-        })();
-      })();
-    })();
-
-    // Verify that the stop thought was filtered out from the history passed to the model
-    assertEquals(hasStopThoughtInCall, false);
-
-    // Buggy behavior: the agent finished silently with 0 new utterances, ignoring the user's "Are you done?"
-    const visible = history.filter((e) => e.type === "own_utterance");
-    assertEquals(visible.length, 0); // Exits silently!
+    // Verification of fixed behavior:
+    // With the fix applied, the previous stop thought is filtered out of the model's history view,
+    // so the real Gemini model responds normally with a helpful own_utterance instead of staying silent.
+    const lastEvent = mockHistory[mockHistory.length - 1];
+    assertEquals(
+      lastEvent.type,
+      "own_utterance",
+      "Expected Gemini to respond with a real utterance to the user prompt.",
+    );
   },
+  3,
+  true, // geminiOnly = true
 );

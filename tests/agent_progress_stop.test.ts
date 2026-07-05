@@ -1,6 +1,10 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import { injectCallModel, runAgent } from "../mod.ts";
-import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
+import {
+  type HistoryEvent,
+  participantUtteranceTurn,
+  stopThoughtPrefix,
+} from "../src/agent.ts";
 import {
   agentDeps,
   noopRewriteHistory,
@@ -121,9 +125,7 @@ runForAllProviders(
     // Verify that the stop thought was successfully injected in history
     const hasStopThought = mockHistory.some((e: HistoryEvent) =>
       e.type === "own_thought" &&
-      e.text.startsWith(
-        "I'm working on this for some time and not making progress.",
-      )
+      e.text.startsWith(stopThoughtPrefix)
     );
 
     assertEquals(

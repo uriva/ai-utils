@@ -20,6 +20,13 @@ import {
   hasJsonThought,
   stripJsonThought,
 } from "./jsonThought.ts";
+export const stopThoughtPrefix =
+  "I'm working on this for some time and not making progress.";
+export const stopThoughtDefault =
+  `${stopThoughtPrefix} I should instead stop and ask the user for feedback.`;
+export const forcedStopUtterance =
+  "I'm sorry, I have been working on this for some time but am unable to make progress. I will stop here and ask for your feedback on how to proceed.";
+
 export type MediaAttachment =
   | { kind: "inline"; mimeType: string; dataBase64: string; caption?: string }
   | { kind: "file"; mimeType: string; fileUri: string; caption?: string };
@@ -1536,9 +1543,7 @@ export const normalizeHistoryForModel = (
   const filteredHistory = history.filter((e) => {
     if (
       e.type === "own_thought" &&
-      e.text.startsWith(
-        "I'm working on this for some time and not making progress.",
-      )
+      e.text.startsWith(stopThoughtPrefix)
     ) {
       return e.timestamp > lastParticipantTimestamp;
     }
@@ -1962,14 +1967,13 @@ export const runAbstractAgent = (
             console.log(
               `[agent-progress-check] stop requested multiple times (${stopAdviceCount}). Escalating to forced user-facing utterance. c=${c}`,
             );
-            const stopUtterance =
-              "I'm sorry, I have been working on this for some time but am unable to make progress. I will stop here and ask for your feedback on how to proceed.";
+            const stopUtterance = forcedStopUtterance;
             const utteranceEvent = ownUtteranceTurn(stopUtterance);
             await outputEvent(utteranceEvent);
             return;
           }
           const stopThought = checkResult.thoughtInjection ||
-            "I'm working on this for some time and not making progress. I should instead stop and ask the user for feedback.";
+            stopThoughtDefault;
           const thoughtEvent = ownThoughtTurn(stopThought);
           await outputEvent(thoughtEvent);
           ephemeralHistory = [...ephemeralHistory, thoughtEvent];
@@ -2241,7 +2245,7 @@ const StopDecisionSchema = z.object({
     "Whether it makes sense to continue working towards the goal, or if we are not making progress, stuck in a loop, or need user feedback.",
   ),
   thoughtInjection: z.string().optional().describe(
-    "If shouldContinue is false, provide the exact system thought that should be injected. MUST start with: 'I'm working on this for some time and not making progress. I should instead...' followed by a brief reason why.",
+    `If shouldContinue is false, provide the exact system thought that should be injected. MUST start with: '${stopThoughtPrefix} I should instead...' followed by a brief reason why.`,
   ),
 });
 
@@ -2261,7 +2265,7 @@ const checkProgress = async (
 You must decide whether the agent should continue executing, or if it should pause and ask the user for feedback/clarification/help.
 Be very conservative about token usage: if the agent is repeatedly running the same commands, facing the same errors, or seems lost, immediately stop it so as not to waste tokens.
 If you decide that the agent should stop, you must provide a 'thoughtInjection'. This thought will be injected as an internal thought (own_thought) into the agent's history to guide the agent to stop calling tools and instead explain the situation/errors and ask the user for feedback.
-The thoughtInjection MUST start with: "I'm working on this for some time and not making progress. I should instead..." followed by a description of what it should do instead (e.g., stop and ask the user for help because ...).`;
+The thoughtInjection MUST start with: "${stopThoughtPrefix} I should instead..." followed by a description of what it should do instead (e.g., stop and ask the user for help because ...).`;
 
     const userPrompt = `User Instructions/Goals:
 ${spec.prompt}

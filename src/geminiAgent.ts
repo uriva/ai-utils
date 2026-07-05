@@ -1503,6 +1503,9 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
   }
 };
 
+export const safetyWarningText =
+  "I am sorry, but I cannot fulfill this request as it violates content safety guidelines.";
+
 const maxHistoryTokens = 800_000;
 
 const noResponseInstruction =
@@ -1614,10 +1617,11 @@ export const geminiAgentCaller =
       const responseId = generateId();
       return [
         ownUtteranceTurnWithMetadata(
-          "Due to safety guardrails your agent has refused to answer. Please use /reset or modify your request.",
+          safetyWarningText,
           {
             type: "gemini",
             responseId,
+            isSafetyBlock: true,
           },
         ) as GeminiHistoryEvent,
       ];
