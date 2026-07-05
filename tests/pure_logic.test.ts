@@ -1170,7 +1170,7 @@ Deno.test("formatSkillsPrompt appends compact tool names and descriptions under 
   const prompt = formatSkillsPrompt(skills);
   assertEquals(
     prompt,
-    "- calculator: Mathematical operations skill\n  Tools:\n    - add_numbers: Add two numbers together",
+    "- calculator: Mathematical operations skill\n  Tools:\n    - calculator/add_numbers: Add two numbers together",
   );
 });
 

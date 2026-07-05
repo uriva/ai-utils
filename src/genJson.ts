@@ -18,12 +18,22 @@ export const genJsonFromConvo = async <T extends ZodType>(
   return await geminiGenJsonFromConvo(opts, messages, zodType, attachments);
 };
 
+import { context, type Injection } from "@uri/inject";
+
+// deno-lint-ignore no-explicit-any
+export const genJsonOverride: Injection<any> = context(() => null);
+
 export const genJson =
   <T extends ZodType>(opts: ModelOpts, systemMsg: string, zodType: T) =>
-  (userMsg: string, attachments?: MediaAttachment[]): Promise<z.infer<T>> =>
-    genJsonFromConvo(
+  (userMsg: string, attachments?: MediaAttachment[]): Promise<z.infer<T>> => {
+    const override = genJsonOverride.access();
+    if (override) {
+      return override(opts, systemMsg, zodType)(userMsg, attachments);
+    }
+    return genJsonFromConvo(
       opts,
       structuredMsgs(systemMsg, userMsg),
       zodType,
       attachments,
     );
+  };

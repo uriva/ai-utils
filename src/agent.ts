@@ -1528,43 +1528,65 @@ const pendingDeferredAcknowledgement =
 export const normalizeHistoryForModel = (
   history: HistoryEvent[],
 ): HistoryEvent[] => {
-  const groupedResults = toolResultsByCallId(history);
+  const lastParticipantUtterance = [...history].reverse().find(
+    (e) => e.type === "participant_utterance",
+  );
+  const lastParticipantTimestamp = lastParticipantUtterance?.timestamp ?? 0;
+
+  const filteredHistory = history.filter((e) => {
+    if (
+      e.type === "own_thought" &&
+      e.text.startsWith(
+        "I'm working on this for some time and not making progress.",
+      )
+    ) {
+      return e.timestamp > lastParticipantTimestamp;
+    }
+    return true;
+  });
+
+  const groupedResults = toolResultsByCallId(filteredHistory);
   const consumedResultIds = new Set<string>();
   let hasPendingDeferredWithUserWaiting = false;
 
-  const interleaved = history.reduce<HistoryEvent[]>((acc, event, index) => {
-    if (event.type === "tool_result") return acc;
-    if (event.type !== "tool_call") return [...acc, event];
-    const matchedResults = (groupedResults.get(event.id) ?? [])
-      .filter((result) => !consumedResultIds.has(result.id));
-    matchedResults.forEach((result) => consumedResultIds.add(result.id));
-    if (nonempty(matchedResults)) {
-      return [...acc, event, ...matchedResults];
-    }
-    if (laterUnansweredUserMessage(history, index)) {
-      // Drop the tool_call + its (would-be) pending functionResponse from the
-      // view; substitute a model-role utterance so the model sees a clean
-      // "user asked a question" as the final turn. See comment above.
-      hasPendingDeferredWithUserWaiting = true;
-      return [...acc, ownUtteranceTurn(pendingDeferredAcknowledgement)];
-    }
-    const syntheticResult: ToolResult = {
-      type: "tool_result",
-      isOwn: true,
-      id: `${event.id}-synthetic-result`,
-      timestamp: event.timestamp,
-      result: pendingToolResultText,
-      toolCallId: event.id,
-    };
-    return [...acc, event, syntheticResult];
-  }, []);
+  const interleaved = filteredHistory.reduce<HistoryEvent[]>(
+    (acc, event, index) => {
+      if (event.type === "tool_result") return acc;
+      if (event.type !== "tool_call") return [...acc, event];
+      const matchedResults = (groupedResults.get(event.id) ?? [])
+        .filter((result) => !consumedResultIds.has(result.id));
+      matchedResults.forEach((result) => consumedResultIds.add(result.id));
+      if (nonempty(matchedResults)) {
+        return [...acc, event, ...matchedResults];
+      }
+      if (laterUnansweredUserMessage(filteredHistory, index)) {
+        // Drop the tool_call + its (would-be) pending functionResponse from the
+        // view; substitute a model-role utterance so the model sees a clean
+        // "user asked a question" as the final turn. See comment above.
+        hasPendingDeferredWithUserWaiting = true;
+        return [...acc, ownUtteranceTurn(pendingDeferredAcknowledgement)];
+      }
+      const syntheticResult: ToolResult = {
+        type: "tool_result",
+        isOwn: true,
+        id: `${event.id}-synthetic-result`,
+        timestamp: event.timestamp,
+        result: pendingToolResultText,
+        toolCallId: event.id,
+      };
+      return [...acc, event, syntheticResult];
+    },
+    [],
+  );
 
-  const orphanedResults = history.filter((event): event is ToolResult => {
-    if (event.type !== "tool_result") return false;
-    if (consumedResultIds.has(event.id)) return false;
-    if (!event.toolCallId) return true;
-    return !hasToolCall(history, event.toolCallId);
-  });
+  const orphanedResults = filteredHistory.filter(
+    (event): event is ToolResult => {
+      if (event.type !== "tool_result") return false;
+      if (consumedResultIds.has(event.id)) return false;
+      if (!event.toolCallId) return true;
+      return !hasToolCall(filteredHistory, event.toolCallId);
+    },
+  );
 
   // High-authority nudge, delivered via the system-notification channel so it
   // reinforces the substitution above and outranks any `[no response]` license.
