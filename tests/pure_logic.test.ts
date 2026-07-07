@@ -43,6 +43,7 @@ import {
   isEmojiFlood,
   isRepetitionFlood,
   isRetryableError,
+  isRetryableUploadError,
   isSyntheticTimeoutError,
   syntheticTimeoutMarker,
 } from "../src/utils.ts";
@@ -1121,6 +1122,21 @@ Deno.test("isRetryableError excludes synthetic timeouts to prevent retry-amplifi
   const rateLimit = new Error("too many requests");
   Object.assign(rateLimit, { status: 429 });
   assert(isRetryableError(rateLimit));
+});
+
+Deno.test("isRetryableUploadError retries transient JSON-parse and network failures from Gemini uploadBlob", () => {
+  assert(
+    isRetryableUploadError(new SyntaxError("Unexpected end of JSON input")),
+    "the Gemini SDK's uploadBlob parses error bodies as JSON; a transient non-JSON body surfaces as SyntaxError and the idempotent upload must be retried",
+  );
+  assert(
+    isRetryableUploadError(new TypeError("error reading a body")),
+    "transient network/connection failures during upload must be retried",
+  );
+  assert(isRetryableUploadError(buildRealServerError()));
+  const rateLimit = new Error("too many requests");
+  Object.assign(rateLimit, { status: 429 });
+  assert(isRetryableUploadError(rateLimit));
 });
 
 Deno.test("isSyntheticTimeoutError marks errors that should skip same-model retry but use fallback model", () => {

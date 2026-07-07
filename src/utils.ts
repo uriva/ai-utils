@@ -47,6 +47,18 @@ export const isRetryableError = (error: unknown) =>
   !isSyntheticTimeoutError(error) &&
   (isServerError(error) || isRateLimitError(error));
 
+// The Gemini SDK's uploadBlob calls response.json() unconditionally, so a
+// transient non-JSON error body (gateway 5xx HTML, empty body) surfaces as a
+// SyntaxError instead of a status code. A TypeError signals a transient
+// network/connection failure. Both are safe to retry for an idempotent upload.
+const isTransientFetchError = (error: unknown) =>
+  error instanceof TypeError &&
+  /reading a body|network|connection/i.test(error.message);
+
+export const isRetryableUploadError = (error: unknown) =>
+  isRetryableError(error) || isTransientFetchError(error) ||
+  error instanceof SyntaxError;
+
 const emojiPattern =
   /\p{Emoji_Presentation}|\p{Extended_Pictographic}|\p{Regional_Indicator}/gu;
 
