@@ -1340,91 +1340,119 @@ export const externalEventPattern: RegExp = new RegExp(
   "gi",
 );
 
-const reclassifyLeakedThoughts = (output: HistoryEvent[]): HistoryEvent[] =>
-  output.flatMap((event) => {
-    if (event.type !== "own_utterance" && event.type !== "own_edit_message") {
+// Mangled tool-call syntax (`<call:...`, `default_api.foo(...)`, etc.) can enter
+// the model's visible text in two very different ways: the model ORIGINATED it
+// (a real intended action that leaked as text — recover it), or the model merely
+// ECHOED it back after seeing it inside a prior tool RESULT (for example a
+// `read_conversation` tool returning another bot's chat log that itself contains
+// a customer-visible leak). Promoting an echo into a real tool call is never
+// correct: the echoed tool usually does not exist on this bot, so the model gets
+// "Tool not found", the poison text stays in context, and the same promotion
+// fires again — an infinite loop. Recovery must therefore only act on syntax the
+// model originated, never on syntax copied out of a tool result.
+const toolResultContainsMangledCall = (
+  history: HistoryEvent[],
+  name: string,
+): boolean =>
+  history.some((event) =>
+    event.type === "tool_result" &&
+    isMangledToolCall(event.result) &&
+    parseMangledToolCall(event.result)?.name === name
+  );
+
+const reclassifyLeakedThoughts =
+  (history: HistoryEvent[]) => (output: HistoryEvent[]): HistoryEvent[] =>
+    output.flatMap((event) => {
+      if (event.type !== "own_utterance" && event.type !== "own_edit_message") {
+        return [event];
+      }
+      const text = stripAllInternalSentTimestamps(event.text);
+
+      // Clean any system notifications and external-event markers from the text to
+      // never allow the model to fabricate them (they must only ever be injected by
+      // the platform, never emitted by the model).
+      let cleanedText = text
+        .replace(systemNotificationPattern, "")
+        .replace(externalEventPattern, "")
+        .trim();
+
+      // Strip raw tool calling tags and system context/instructions injections
+      const callTagPattern = /<call:[\s\S]*?>/gi;
+      const systemContextPattern =
+        /The following is critical context and instructions about the user:[\s\S]*?(\]|$)/gi;
+      const criticalInstructionsPattern =
+        /CRITICAL INSTRUCTIONS \(NEVER VIOLATE\):[\s\S]*?(\]|$)/gi;
+
+      cleanedText = cleanedText
+        .replace(callTagPattern, "")
+        .replace(systemContextPattern, "")
+        .replace(criticalInstructionsPattern, "")
+        .trim();
+
+      const match = cleanedText.match(internalThoughtPattern);
+      if (match) {
+        return [{ ...event, type: "own_thought" as const, text: match[1] }];
+      }
+
+      const thoughtPrefixPattern = /^\[thought\]:\s*([\s\S]*?)$/i;
+      const rawThoughtMatch = cleanedText.match(thoughtPrefixPattern);
+      if (rawThoughtMatch) {
+        return [
+          { ...event, type: "own_thought" as const, text: rawThoughtMatch[1] },
+        ];
+      }
+
+      if (hasJsonThought(cleanedText)) {
+        const thoughtText = extractJsonThought(cleanedText);
+        const remainingText = stripJsonThought(cleanedText);
+        const results: HistoryEvent[] = [];
+        if (thoughtText) {
+          results.push({
+            ...event,
+            type: "own_thought" as const,
+            text: thoughtText,
+          });
+        }
+        if (remainingText) {
+          results.push({ ...event, text: remainingText });
+        }
+        return results;
+      }
+
+      // Gemini sometimes emits a tool call as visible text instead of a real
+      // function_call. Recover it into an actual tool_call so the intended action
+      // runs. Never reclassify it as a thought or pass it through: that would make
+      // the model believe the action already happened and relay fabricated results
+      // to the user. If we detect a mangled call but cannot recover a tool name,
+      // throw so the failure is loud and the loop retries rather than silently
+      // leaking or dropping the action.
+      if (isMangledToolCall(cleanedText)) {
+        const recovered = parseMangledToolCall(cleanedText);
+        if (!recovered) {
+          throw new Error(
+            `Detected a tool call rendered as visible text but could not recover it: ${cleanedText}`,
+          );
+        }
+        // If this same call syntax already appeared in a prior tool result, the
+        // model is echoing tool output, not originating an action. Drop the
+        // event entirely so it neither leaks to the user nor re-triggers the
+        // recovery loop.
+        if (toolResultContainsMangledCall(history, recovered.name)) {
+          return [];
+        }
+        return [{
+          ...toolUseTurn({ name: recovered.name, args: recovered.args }),
+          id: event.id,
+          timestamp: event.timestamp,
+        }];
+      }
+
+      if (cleanedText !== text) {
+        return [{ ...event, text: cleanedText }];
+      }
+
       return [event];
-    }
-    const text = stripAllInternalSentTimestamps(event.text);
-
-    // Clean any system notifications and external-event markers from the text to
-    // never allow the model to fabricate them (they must only ever be injected by
-    // the platform, never emitted by the model).
-    let cleanedText = text
-      .replace(systemNotificationPattern, "")
-      .replace(externalEventPattern, "")
-      .trim();
-
-    // Strip raw tool calling tags and system context/instructions injections
-    const callTagPattern = /<call:[\s\S]*?>/gi;
-    const systemContextPattern =
-      /The following is critical context and instructions about the user:[\s\S]*?(\]|$)/gi;
-    const criticalInstructionsPattern =
-      /CRITICAL INSTRUCTIONS \(NEVER VIOLATE\):[\s\S]*?(\]|$)/gi;
-
-    cleanedText = cleanedText
-      .replace(callTagPattern, "")
-      .replace(systemContextPattern, "")
-      .replace(criticalInstructionsPattern, "")
-      .trim();
-
-    const match = cleanedText.match(internalThoughtPattern);
-    if (match) {
-      return [{ ...event, type: "own_thought" as const, text: match[1] }];
-    }
-
-    const thoughtPrefixPattern = /^\[thought\]:\s*([\s\S]*?)$/i;
-    const rawThoughtMatch = cleanedText.match(thoughtPrefixPattern);
-    if (rawThoughtMatch) {
-      return [
-        { ...event, type: "own_thought" as const, text: rawThoughtMatch[1] },
-      ];
-    }
-
-    if (hasJsonThought(cleanedText)) {
-      const thoughtText = extractJsonThought(cleanedText);
-      const remainingText = stripJsonThought(cleanedText);
-      const results: HistoryEvent[] = [];
-      if (thoughtText) {
-        results.push({
-          ...event,
-          type: "own_thought" as const,
-          text: thoughtText,
-        });
-      }
-      if (remainingText) {
-        results.push({ ...event, text: remainingText });
-      }
-      return results;
-    }
-
-    // Gemini sometimes emits a tool call as visible text instead of a real
-    // function_call. Recover it into an actual tool_call so the intended action
-    // runs. Never reclassify it as a thought or pass it through: that would make
-    // the model believe the action already happened and relay fabricated results
-    // to the user. If we detect a mangled call but cannot recover a tool name,
-    // throw so the failure is loud and the loop retries rather than silently
-    // leaking or dropping the action.
-    if (isMangledToolCall(cleanedText)) {
-      const recovered = parseMangledToolCall(cleanedText);
-      if (!recovered) {
-        throw new Error(
-          `Detected a tool call rendered as visible text but could not recover it: ${cleanedText}`,
-        );
-      }
-      return [{
-        ...toolUseTurn({ name: recovered.name, args: recovered.args }),
-        id: event.id,
-        timestamp: event.timestamp,
-      }];
-    }
-
-    if (cleanedText !== text) {
-      return [{ ...event, text: cleanedText }];
-    }
-
-    return [event];
-  });
+    });
 
 export const noResponseTag = "[no response]";
 
@@ -1578,7 +1606,7 @@ export const sanitizeModelOutput = (
     sanitized,
   );
   const withoutNoResponse = reclassifyNoResponse(withoutFabrications);
-  const reclassified = reclassifyLeakedThoughts(withoutNoResponse);
+  const reclassified = reclassifyLeakedThoughts(history)(withoutNoResponse);
   const withoutEmpty = reclassifyEmptyUtterances(reclassified);
   const safe = splitOversizedUtterances(withoutEmpty);
   return { emit: safe, internal: safe };
