@@ -242,6 +242,11 @@ const getExpiredMediaText = (attachments: MediaAttachment[]) =>
     }>`
     : "";
 
+export const getUnprocessableMediaText = (attachment: MediaAttachment) =>
+  ` <media file could not be processed: ${
+    attachment.caption || attachment.mimeType
+  }>`;
+
 export const stripExpiredFile = (
   error: Error,
   events: GeminiHistoryEvent[],
@@ -1539,33 +1544,83 @@ const enrichGeminiEventsWithMetadata = async (
   });
 };
 
-const resolveAttachments = (
+type ResolvedAttachment =
+  | { resolved: MediaAttachment }
+  | { unprocessable: MediaAttachment };
+
+const isResolved = (
+  r: ResolvedAttachment,
+): r is { resolved: MediaAttachment } => "resolved" in r;
+
+const isUnprocessable = (
+  r: ResolvedAttachment,
+): r is { unprocessable: MediaAttachment } => "unprocessable" in r;
+
+const resolveSingleAttachment =
+  (event: GeminiHistoryEvent, events: GeminiHistoryEvent[]) =>
+  async (att: MediaAttachment): Promise<ResolvedAttachment> => {
+    const needsUpload = (att.kind === "file" && !isGeminiFileUri(att.fileUri) &&
+      !(event.type === "tool_result" &&
+        !isInspectMediaToolResult(indexById(events))(event))) ||
+      att.kind === "inline";
+    if (!needsUpload) return { resolved: att };
+    try {
+      return { resolved: await ensureGeminiAttachmentIsLink(att) };
+    } catch (error) {
+      console.warn(
+        `Degrading un-uploadable attachment on event ${event.id} to placeholder: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return { unprocessable: att };
+    }
+  };
+
+const degradeEventWithUnprocessableAttachments = (
+  event: GeminiHistoryEvent & { attachments?: MediaAttachment[] },
+  resolved: ResolvedAttachment[],
+): GeminiHistoryEvent => {
+  const placeholder = resolved.filter(isUnprocessable)
+    .map((r) => getUnprocessableMediaText(r.unprocessable))
+    .join("");
+  const attachments = resolved.filter(isResolved).map((r) => r.resolved);
+  return {
+    ...event,
+    ...event.type === "tool_result"
+      ? { result: event.result + placeholder }
+      : { text: ((event as { text?: string }).text ?? "") + placeholder },
+    attachments: empty(attachments) ? undefined : attachments,
+  } as GeminiHistoryEvent;
+};
+
+const resolveAttachments = async (
   events: GeminiHistoryEvent[],
-): Promise<GeminiHistoryEvent[]> =>
-  Promise.all(
+): Promise<
+  {
+    updatedHistory: GeminiHistoryEvent[];
+    replacements: Record<string, GeminiHistoryEvent>;
+  }
+> => {
+  const replacements: Record<string, GeminiHistoryEvent> = {};
+  const updatedHistory = await Promise.all(
     events.map(async (event) => {
       if (!("attachments" in event) || !event.attachments) return event;
-      const resolvedAttachments = await Promise.all(
-        event.attachments.map((att) => {
-          if (
-            event.type === "tool_result" &&
-            !isInspectMediaToolResult(indexById(events))(event) &&
-            att.kind === "file"
-          ) {
-            return Promise.resolve(att);
-          }
-          if (att.kind === "file" && !isGeminiFileUri(att.fileUri)) {
-            return ensureGeminiAttachmentIsLink(att);
-          }
-          if (att.kind === "inline") {
-            return ensureGeminiAttachmentIsLink(att);
-          }
-          return Promise.resolve(att);
-        }),
+      const resolved = await Promise.all(
+        event.attachments.map(resolveSingleAttachment(event, events)),
       );
-      return { ...event, attachments: resolvedAttachments };
+      if (resolved.every(isResolved)) {
+        return { ...event, attachments: resolved.map((r) => r.resolved) };
+      }
+      const degraded = degradeEventWithUnprocessableAttachments(
+        event,
+        resolved,
+      );
+      replacements[event.id] = degraded;
+      return degraded;
     }),
   );
+  return { updatedHistory, replacements };
+};
 
 export const prepareGeminiHistory =
   (rewriteHistory: AgentSpec["rewriteHistory"]) =>
@@ -1577,7 +1632,9 @@ export const prepareGeminiHistory =
       filterAndRewriteInvalidToolCallsAsync(rewriteHistory),
       filterAndRewriteUnsupportedGeminiAttachments(rewriteHistory),
     )(enriched);
-    return resolveAttachments(filtered);
+    const { updatedHistory, replacements } = await resolveAttachments(filtered);
+    if (!empty(Object.keys(replacements))) await rewriteHistory(replacements);
+    return updatedHistory;
   };
 
 const geminiMaxTokensReason = "MAX_TOKENS";
