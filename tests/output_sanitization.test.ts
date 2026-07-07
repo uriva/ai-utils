@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import {
   callToResult,
   ownUtteranceTurn,
@@ -6,6 +6,12 @@ import {
   sanitizeModelOutput,
 } from "../src/agent.ts";
 import { z } from "zod/v4";
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+const paramField = (params: unknown, key: string): unknown =>
+  isRecord(params) ? params[key] : undefined;
 
 Deno.test("global tool output sanitization - resolves carriage returns, collapses duplicates, and collapses similar prefixes", async () => {
   const dummyTool = {
@@ -96,6 +102,122 @@ Deno.test("sanitizeModelOutput strips system context injections from output", ()
   assertEquals(event.type, "own_utterance");
   if (event.type !== "own_utterance") throw new Error("unreachable");
   assertEquals(event.text, "Here is the safe part of the message");
+});
+
+// Gemini (flash in particular) intermittently renders a tool call as plain
+// visible text instead of a real function_call. Observed verbatim in the wild
+// (Agent FOMO) and reproduced from the production snapshot:
+//   "startcall:default_api:run_command{command: event_discovery/query ...}"
+// The intended action is recovered into a real tool_call so it actually runs.
+// It must NEVER be reclassified as an own_thought: that would make the model
+// believe the action already happened and relay fabricated results to the user.
+Deno.test("sanitizeModelOutput recovers a mangled tool call leaked as visible text into a real tool_call", () => {
+  const leaked =
+    "startcall:default_api:run_command{command: event_discovery/query ,params:{location: Haifa}, spinnerText: בודקת אירועים קרובים בחיפה...}";
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({
+      name: "user",
+      text: "מה קורה מחר בערב בחיפה?",
+    })],
+    [ownUtteranceTurn(leaked)],
+  );
+  assertEquals(result.emit.length, 1);
+  const event = result.emit[0];
+  assertEquals(event.type, "tool_call");
+  if (event.type !== "tool_call") throw new Error("unreachable");
+  assertEquals(event.name, "run_command");
+  assertEquals(
+    paramField(event.parameters, "command"),
+    "event_discovery/query",
+  );
+});
+
+Deno.test("sanitizeModelOutput recovers other Gemini mangled tool-call renderings into tool_calls", () => {
+  const cases: { leaked: string; name: string }[] = [
+    {
+      leaked:
+        "print(default_api.run_command(command='event_discovery/query', params={}))",
+      name: "run_command",
+    },
+    {
+      leaked: "default_api.learn_skill(skillName='event_discovery')",
+      name: "learn_skill",
+    },
+    {
+      leaked: "```tool_code\ndefault_api.query(location='Haifa')\n```",
+      name: "query",
+    },
+  ];
+  for (const { leaked, name } of cases) {
+    const result = sanitizeModelOutput(
+      [participantUtteranceTurn({ name: "user", text: "hi" })],
+      [ownUtteranceTurn(leaked)],
+    );
+    assertEquals(result.emit.length, 1);
+    const event = result.emit[0];
+    assertEquals(
+      event.type,
+      "tool_call",
+      `expected mangled tool call to be recovered: ${leaked}`,
+    );
+    if (event.type !== "tool_call") throw new Error("unreachable");
+    assertEquals(event.name, name, `wrong recovered tool name for: ${leaked}`);
+  }
+});
+
+Deno.test("sanitizeModelOutput never turns a mangled tool call into an own_thought", () => {
+  const leaked =
+    "startcall:default_api:run_command{command: event_discovery/query ,params:{location: Haifa}}";
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [ownUtteranceTurn(leaked)],
+  );
+  for (const event of result.emit) {
+    assertEquals(
+      event.type === "own_thought",
+      false,
+      "mangled tool calls must not be reclassified as thoughts",
+    );
+  }
+});
+
+Deno.test("sanitizeModelOutput throws when a mangled tool call cannot be recovered", () => {
+  // Detected as a tool-call preamble but no tool name is recoverable. We must
+  // throw (loud failure -> loop retries) rather than leak or drop the action.
+  assertThrows(() =>
+    sanitizeModelOutput(
+      [participantUtteranceTurn({ name: "user", text: "hi" })],
+      [ownUtteranceTurn("startcall:default_api:")],
+    )
+  );
+});
+
+Deno.test("sanitizeModelOutput recovers learn_skill args from a mangled call", () => {
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [ownUtteranceTurn("default_api.learn_skill(skillName='event_discovery')")],
+  );
+  const event = result.emit[0];
+  assertEquals(event.type, "tool_call");
+  if (event.type !== "tool_call") throw new Error("unreachable");
+  assertEquals(paramField(event.parameters, "skillName"), "event_discovery");
+});
+
+Deno.test("sanitizeModelOutput leaves normal utterances that merely mention tools untouched", () => {
+  const normal =
+    "מחר בערב בחיפה די שקט כרגע. רוצה שאבדוק ביום אחר או בעיר אחרת?";
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({
+      name: "user",
+      text: "מה קורה מחר בערב בחיפה?",
+    })],
+    [ownUtteranceTurn(normal)],
+  );
+  assertEquals(result.emit.length, 1);
+  const event = result.emit[0];
+  assertEquals(event.type, "own_utterance");
+  if (event.type !== "own_utterance") throw new Error("unreachable");
+  assertEquals(event.text, normal);
 });
 
 Deno.test("global tool output sanitization - does not collapse scene search result lines", async () => {
