@@ -55,6 +55,8 @@ const isTransientFetchError = (error: unknown) =>
   error instanceof TypeError &&
   /reading a body|network|connection/i.test(error.message);
 
+export const geminiUploadJsonParseErrorMessage = "Unexpected end of JSON input";
+
 export const isRetryableUploadError = (error: unknown) =>
   isRetryableError(error) || isTransientFetchError(error) ||
   error instanceof SyntaxError;

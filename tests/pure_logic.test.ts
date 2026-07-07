@@ -40,6 +40,7 @@ import {
 } from "../src/gemini.ts";
 import {
   collapseDuplicatedText,
+  geminiUploadJsonParseErrorMessage,
   isEmojiFlood,
   isRepetitionFlood,
   isRetryableError,
@@ -1126,7 +1127,7 @@ Deno.test("isRetryableError excludes synthetic timeouts to prevent retry-amplifi
 
 Deno.test("isRetryableUploadError retries transient JSON-parse and network failures from Gemini uploadBlob", () => {
   assert(
-    isRetryableUploadError(new SyntaxError("Unexpected end of JSON input")),
+    isRetryableUploadError(new SyntaxError(geminiUploadJsonParseErrorMessage)),
     "the Gemini SDK's uploadBlob parses error bodies as JSON; a transient non-JSON body surfaces as SyntaxError and the idempotent upload must be retried",
   );
   assert(

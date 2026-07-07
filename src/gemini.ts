@@ -331,10 +331,18 @@ const rawUploadBlobToGemini = async (
   return { geminiUri: uri, mimeType: mimeType2 };
 };
 
-const uploadBlobToGemini = conditionalRetry(isRetryableUploadError)(
+const {
+  inject: injectRawUploadBlobToGemini,
+  access: accessRawUploadBlobToGemini,
+} = context(() => rawUploadBlobToGemini);
+
+export { injectRawUploadBlobToGemini };
+
+export const uploadBlobToGemini = conditionalRetry(isRetryableUploadError)(
   1000,
   4,
-  rawUploadBlobToGemini,
+  (blob: Blob, mimeType: string) =>
+    accessRawUploadBlobToGemini()(blob, mimeType),
 );
 
 const fetchAndUploadToGemini = async (
