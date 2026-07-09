@@ -72,6 +72,7 @@ import {
 } from "./internalMessageMetadata.ts";
 import { inspectMediaUrlToolName } from "./inspectMediaTool.ts";
 import { extractJsonThought, stripJsonThought } from "./jsonThought.ts";
+import { assertNoScriptDrift } from "./scriptDriftGuard.ts";
 
 const fetchUrl = (input: RequestInfo | URL): string =>
   typeof input === "string"
@@ -1656,6 +1657,29 @@ export const isSafetyBlockReason = (reason: string | undefined): boolean => {
   );
 };
 
+const eventText = (event: GeminiHistoryEvent): string =>
+  "text" in event && typeof event.text === "string"
+    ? event.text
+    : "result" in event && typeof event.result === "string"
+    ? event.result
+    : "";
+
+// Gemini-specific: reject a model turn that rewrote the conversation's language
+// into a different writing system (homoglyph corruption). The reference is the
+// system prompt plus all prior turn text; the checked output is the text this
+// turn produced. Throwing lets the agent loop re-roll instead of relaying
+// corrupted glyphs to the user.
+const guardResultScriptDrift = async (
+  prompt: string,
+  inputEvents: GeminiHistoryEvent[],
+  result: GeminiHistoryEvent[],
+): Promise<void> => {
+  const producedText = result.map(eventText).join("\n").trim();
+  if (!producedText) return;
+  const reference = [prompt, ...inputEvents.map(eventText)].join("\n");
+  await assertNoScriptDrift(reference, producedText);
+};
+
 export const geminiAgentCaller =
   (spec: AgentSpec) =>
   async (events: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> => {
@@ -1670,6 +1694,7 @@ export const geminiAgentCaller =
     const result = await finishReasonSink.inject((r: string) => {
       box.reason = r;
     })(() => geminiAgentCallerInner(spec)(events))();
+    await guardResultScriptDrift(spec.prompt, events, result);
     if (isSafetyBlockReason(box.reason)) {
       const responseId = generateId();
       return [

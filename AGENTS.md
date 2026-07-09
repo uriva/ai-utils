@@ -29,6 +29,19 @@ When modifying this library to use in another project like `prompt2bot`:
 4. Go to the consumer project (`prompt2bot`), bump the version of `ai-utils` in
    its `deno.json`, commit and push to deploy the consumer project.
 
+### No Consumer-Specific Data Principle (open source)
+
+This library is open source and shared across many consumers. NEVER put any
+consumer-specific or bot-specific data into this repo — no real system prompts,
+persona text, customer names, brand names, product/pricing details, bot IDs,
+conversation IDs, or verbatim excerpts pulled from a production bot/incident.
+This applies to source, tests, scripts, comments, and fixtures alike.
+
+When reproducing or testing a behavior first observed in a specific production
+bot, reconstruct the scenario with generic, synthetic inputs that exercise the
+same mechanism (e.g. a made-up short Hebrew string instead of the actual bot's
+prompt). The test must prove the generic behavior, not embed the real artifact.
+
 ### No String Duplication Principle
 
 Never duplicate strings (such as system-audit thoughts, model warning/safety

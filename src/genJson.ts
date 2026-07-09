@@ -4,6 +4,24 @@ import type { MediaAttachment } from "./agent.ts";
 import { geminiGenJsonFromConvo } from "./gemini.ts";
 import { openAiGenJsonFromConvo, structuredMsgs } from "./openai.ts";
 import type { ModelOpts } from "./utils.ts";
+import { assertNoScriptDrift } from "./scriptDriftGuard.ts";
+
+const messagesToText = (messages: ChatCompletionMessageParam[]): string =>
+  messages
+    .map(({ content }) => typeof content === "string" ? content : "")
+    .join("\n");
+
+// Gemini-specific: guard against the model rewriting the input's language into
+// a different writing system (homoglyph corruption) inside structured output.
+// Throws so the caller's retry produces a clean generation instead of caching
+// or surfacing corrupted text.
+const guardGeminiScriptDrift = async <R>(
+  inputText: string,
+  result: R,
+): Promise<R> => {
+  await assertNoScriptDrift(inputText, JSON.stringify(result));
+  return result;
+};
 
 export const genJsonFromConvo = async <T extends ZodType>(
   opts: ModelOpts,
@@ -15,7 +33,10 @@ export const genJsonFromConvo = async <T extends ZodType>(
   if (provider === "openai") {
     return await openAiGenJsonFromConvo(opts, messages, zodType);
   }
-  return await geminiGenJsonFromConvo(opts, messages, zodType, attachments);
+  return await guardGeminiScriptDrift(
+    messagesToText(messages),
+    await geminiGenJsonFromConvo(opts, messages, zodType, attachments),
+  );
 };
 
 import { context, type Injection } from "@uri/inject";

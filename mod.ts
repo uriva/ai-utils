@@ -56,6 +56,12 @@ export {
 } from "./src/gemini.ts";
 export { genJson, genJsonFromConvo } from "./src/genJson.ts";
 export {
+  assertNoScriptDrift,
+  driftingScripts,
+  type ScriptDriftError,
+  scriptsPresent,
+} from "./src/scriptDriftGuard.ts";
+export {
   injectGeminiErrorLogger,
   injectGeminiModelCallTimeoutMs,
   injectTokenUsage,
