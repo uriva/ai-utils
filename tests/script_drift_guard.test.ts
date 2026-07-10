@@ -2,6 +2,7 @@ import { assert, assertEquals, assertRejects } from "@std/assert";
 import {
   assertNoScriptDrift,
   driftingScripts,
+  meaningfulScriptDrift,
   type ScriptDriftError,
   scriptsPresent,
 } from "../src/scriptDriftGuard.ts";
@@ -31,6 +32,27 @@ Deno.test("driftingScripts flags Armenian absent from a Hebrew input", () => {
 Deno.test("driftingScripts is empty when output preserves input script", () => {
   const drift = driftingScripts(hebrewInput, "שלום זהו טקסט תקין בעברית");
   assertEquals(Object.keys(drift).length, 0);
+});
+
+// Regression: a real production message was a long, correct Hebrew reply with a
+// single stray glyph from another script (a rare model glitch). The guard must
+// not treat a one-character blip as corruption — it wastes a verifier LLM call
+// and, historically, hard-failed an otherwise-valid reply. Genuine homoglyph
+// corruption rewrites substantial spans, not a single character.
+const hebrewReplyWithOneStrayGlyph =
+  "היי ניצן! הכל מעולה, הנה כמה אירועים מומלצים להערב בתל אביב עם מוזיקה טובה ואווירה מ\u0E51צוינת, תהנה!";
+
+Deno.test("single stray glyph is not counted as meaningful drift", () => {
+  const drift = driftingScripts(hebrewInput, hebrewReplyWithOneStrayGlyph);
+  // The raw detector still sees the one Thai char...
+  assertEquals(drift.Thai, 1);
+  // ...but meaningfulScriptDrift must ignore a trivial one-off blip.
+  assertEquals(
+    Object.keys(
+      meaningfulScriptDrift(hebrewInput, hebrewReplyWithOneStrayGlyph),
+    ).length,
+    0,
+  );
 });
 
 // The corrupted output (input's own language rewritten into another script)
@@ -66,3 +88,9 @@ llmTest(
       );
     })(),
 );
+
+// A single stray glyph must never reach the verifier nor throw. This does not
+// hit the LLM at all (it short-circuits on the trivial-drift threshold), so it
+// is a plain deterministic test rather than an llmTest.
+Deno.test("assertNoScriptDrift ignores a single stray glyph", () =>
+  assertNoScriptDrift(hebrewInput, hebrewReplyWithOneStrayGlyph));

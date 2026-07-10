@@ -56,6 +56,25 @@ export const driftingScripts = (
   return drift;
 };
 
+// Genuine homoglyph corruption rewrites whole words/spans; a lone stray glyph
+// (a rare model blip, e.g. one Thai char inside a long Hebrew reply) is noise.
+// Requiring more than this many chars of a new script before treating it as
+// drift avoids wasting a verifier LLM call — and, historically, hard-failing an
+// otherwise-valid reply — on a single-character artifact.
+const minMeaningfulDriftChars = 2;
+
+// Like driftingScripts, but drops scripts that appear only a trivial number of
+// times, so a one-off stray glyph is not treated as corruption.
+export const meaningfulScriptDrift = (
+  input: string,
+  output: string,
+): Record<string, number> =>
+  Object.fromEntries(
+    Object.entries(driftingScripts(input, output)).filter(
+      ([, count]) => count > minMeaningfulDriftChars,
+    ),
+  );
+
 const sampleOfScript = (text: string, script: string): string => {
   const matches = text.match(new RegExp(`\\p{Script=${script}}+`, "gu"));
   return (matches ?? []).slice(0, 5).join(" ").slice(0, 200);
@@ -99,7 +118,7 @@ export const assertNoScriptDrift = async (
   input: string,
   output: string,
 ): Promise<void> => {
-  const drift = driftingScripts(input, output);
+  const drift = meaningfulScriptDrift(input, output);
   if (Object.keys(drift).length === 0) return;
 
   const driftedList = Object.keys(drift);
