@@ -64,6 +64,7 @@ export {
 export {
   injectGeminiErrorLogger,
   injectGeminiModelCallTimeoutMs,
+  injectPromptBlockedLogger,
   injectTokenUsage,
   type TokenUsage,
 } from "./src/geminiAgent.ts";

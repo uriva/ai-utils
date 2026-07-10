@@ -136,6 +136,16 @@ const geminiError: Injection<
 
 export const injectGeminiErrorLogger = geminiError.inject;
 
+const promptBlocked: Injection<
+  (_1: string, _2: GenerateContentParameters) => void
+> = context((_1: string, _2: GenerateContentParameters) => {});
+
+// Fires when Gemini rejects the entire prompt (`promptFeedback.blockReason`,
+// zero candidates). Consumers can use this to alert the bot operator that their
+// persona/history is driving content blocks, since the end user only sees the
+// generic safety notice and cannot edit the prompt themselves.
+export const injectPromptBlockedLogger = promptBlocked.inject;
+
 export type TokenUsage = GenerateContentResponseUsageMetadata;
 
 const tokenUsage: Injection<
@@ -426,12 +436,14 @@ const rawCallGemini = async (
   const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
   let finalUsageMetadata: TokenUsage | undefined;
   let finalFinishReason: string | undefined;
+  let promptBlockReason: string | undefined;
   const accumulatedParts: Part[] = [];
 
   if (disableStreaming) {
     const response = await sdk.models.generateContent(req);
     finalUsageMetadata = response.usageMetadata;
     finalFinishReason = response.candidates?.[0]?.finishReason;
+    promptBlockReason = response.promptFeedback?.blockReason;
     const parts = response.candidates?.[0]?.content?.parts ?? [];
     usageDiag("buffered", finalUsageMetadata, finalFinishReason, parts);
     logFunctionCallsMissingThoughtSignature(
@@ -461,6 +473,9 @@ const rawCallGemini = async (
       if (chunkCount === 1) console.log("[gemini-step] stream-first-chunk");
       if (chunk.usageMetadata) {
         finalUsageMetadata = chunk.usageMetadata;
+      }
+      if (chunk.promptFeedback?.blockReason) {
+        promptBlockReason = chunk.promptFeedback.blockReason;
       }
       const chunkFinishReason = chunk.candidates?.[0]?.finishReason;
       if (chunkFinishReason) finalFinishReason = chunkFinishReason;
@@ -526,8 +541,20 @@ const rawCallGemini = async (
     tokenUsage.access(finalUsageMetadata, req.model);
   }
 
-  if (finalFinishReason) {
-    finishReasonSink.access(finalFinishReason);
+  // A prompt-level block (`promptFeedback.blockReason`) returns zero candidates,
+  // so `finishReason` is undefined and the turn yields no parts. Without
+  // surfacing it, the agent silently records `do_nothing`, making the bot look
+  // dead to a waiting user. Route it through the same sink the candidate
+  // `finishReason` uses so the safety-block path produces a user-facing message.
+  const isPromptBlock = !!promptBlockReason && empty(accumulatedParts);
+  if (isPromptBlock) {
+    promptBlocked.access(promptBlockReason!, req);
+  }
+  const effectiveFinishReason = finalFinishReason ??
+    (isPromptBlock ? promptBlockReasonPrefix + promptBlockReason : undefined);
+
+  if (effectiveFinishReason) {
+    finishReasonSink.access(effectiveFinishReason);
   }
 
   rejectMalformedFunctionCall(finalFinishReason, accumulatedParts);
@@ -1645,8 +1672,16 @@ const markTruncatedUtterances = (
 ): GeminiHistoryEvent[] =>
   events.map((e) => e.type === "own_utterance" ? { ...e, truncated: true } : e);
 
+// Marks a reason that came from Gemini's `promptFeedback.blockReason` (the whole
+// prompt was rejected, zero candidates) as opposed to a candidate
+// `finishReason`. Any prompt-level block means the model refused to produce
+// output, so it must always surface as a user-facing safety message rather than
+// a silent `do_nothing`.
+export const promptBlockReasonPrefix = "PROMPT_BLOCK:";
+
 export const isSafetyBlockReason = (reason: string | undefined): boolean => {
   if (!reason) return false;
+  if (reason.startsWith(promptBlockReasonPrefix)) return true;
   const upper = reason.toUpperCase();
   return (
     upper === "SAFETY" ||

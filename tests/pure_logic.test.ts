@@ -30,6 +30,7 @@ import {
   geminiMalformedFunctionCallError,
   geminiOutputToHistoryEvents,
   isSafetyBlockReason,
+  promptBlockReasonPrefix,
   rejectMalformedFunctionCall,
   stripEmbeddedThoughtPatterns,
 } from "../src/geminiAgent.ts";
@@ -1286,6 +1287,32 @@ Deno.test("isSafetyBlockReason logic classification", () => {
   assertEquals(isSafetyBlockReason("STOP"), false);
   assertEquals(isSafetyBlockReason("MAX_TOKENS"), false);
   assertEquals(isSafetyBlockReason(undefined), false);
+});
+
+// A prompt-level block (`promptFeedback.blockReason`) returns zero candidates,
+// so the candidate `finishReason` is undefined. Previously the agent recorded a
+// silent `do_nothing`, making the bot look dead to a waiting user. These reasons
+// are now marked with `promptBlockReasonPrefix` and MUST route to the
+// user-facing safety message regardless of the specific block reason string
+// (Gemini uses SAFETY / OTHER / BLOCKLIST / PROHIBITED_CONTENT / IMAGE_SAFETY).
+Deno.test("prompt-block reasons always classify as safety block", () => {
+  for (
+    const reason of [
+      "PROHIBITED_CONTENT",
+      "SAFETY",
+      "OTHER",
+      "BLOCKLIST",
+      "IMAGE_SAFETY",
+    ]
+  ) {
+    assertEquals(
+      isSafetyBlockReason(promptBlockReasonPrefix + reason),
+      true,
+      `prompt block ${reason} should classify as safety block`,
+    );
+  }
+  // The prefix without a real block reason is still a block signal.
+  assertEquals(isSafetyBlockReason(promptBlockReasonPrefix), true);
 });
 
 const syntheticResultFor = (
