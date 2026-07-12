@@ -2027,16 +2027,6 @@ export type AgentSpec = AgentInputs & {
   };
   toolOutputScratchPad?: ToolOutputScratchPad;
   isConsult?: boolean;
-  checkForHallucinations?: boolean;
-  groundTruthPrompt?: string;
-  onHallucination?: (
-    result: {
-      isHallucinating: boolean;
-      explanation: string;
-      noteToBot?: string;
-    },
-    responseText: string,
-  ) => Promise<void> | void;
 };
 
 const hasEmojiFlood = (events: HistoryEvent[]) =>
@@ -2086,7 +2076,6 @@ export const runAbstractAgent = (
     let emojiFloodRetries = 0;
     let repetitionFloodRetries = 0;
     let truncationRetries = 0;
-    let hallucinationRetries = 0;
     let ephemeralHistory: HistoryEvent[] = [];
     let stopAdviceCount = 0;
     while (true) {
@@ -2196,54 +2185,6 @@ export const runAbstractAgent = (
       // Process what needs to be emitted
       if (emitWithDescriptions.length > 0) {
         await each(outputEvent)(emitWithDescriptions);
-
-        const ownUtterance = emitWithDescriptions.find(
-          (
-            ev: HistoryEvent,
-          ): ev is Extract<HistoryEvent, { type: "own_utterance" }> =>
-            ev.type === "own_utterance",
-        );
-        const shouldCheckHallucination = ownUtterance &&
-          !spec.isConsult &&
-          spec.checkForHallucinations &&
-          hallucinationRetries < 2;
-
-        if (shouldCheckHallucination) {
-          const { checkHallucination } = await import("./hallucination.ts");
-          const checkSpec: AgentInputs = {
-            prompt: spec.groundTruthPrompt || spec.prompt,
-            tools: spec.tools || [],
-            skills: spec.skills || [],
-            allSkills: spec.allSkills || [],
-          };
-          const updatedHistoryForCheck = [
-            ...history,
-            ...ephemeralHistory,
-            ownUtterance,
-          ];
-          const result = await checkHallucination(
-            updatedHistoryForCheck,
-            checkSpec,
-          );
-          if (result.isHallucinating) {
-            hallucinationRetries++;
-            console.warn(
-              `[hallucination] Detected hallucination in own_utterance (attempt ${hallucinationRetries}/2): ${result.explanation}`,
-            );
-            if (spec.onHallucination) {
-              await spec.onHallucination(result, ownUtterance.text);
-            }
-            ephemeralHistory = [
-              ...ephemeralHistory,
-              ownUtterance,
-              ownThoughtTurn(
-                result.noteToBot ||
-                  "I hallucinated. I must correct my response using edit_last_message.",
-              ),
-            ];
-            continue;
-          }
-        }
 
         const hadDeferred = await handleFunctionCalls(
           allTools,
