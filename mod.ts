@@ -28,6 +28,10 @@ export {
   stripInternalSentTimestampSuffix,
 } from "./src/internalMessageMetadata.ts";
 export { z } from "zod/v4";
+export {
+  checkHallucination,
+  type HallucinationCheckResult,
+} from "./src/hallucination.ts";
 export * from "./src/agent.ts";
 export {
   eventsToPlainText,
