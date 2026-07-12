@@ -23,6 +23,8 @@ const guardGeminiScriptDrift = async <R>(
   return result;
 };
 
+const maxScriptDriftRerolls = 2;
+
 export const genJsonFromConvo = async <T extends ZodType>(
   opts: ModelOpts,
   messages: ChatCompletionMessageParam[],
@@ -33,19 +35,33 @@ export const genJsonFromConvo = async <T extends ZodType>(
   if (provider === "openai") {
     return await openAiGenJsonFromConvo(opts, messages, zodType);
   }
-  const result = await geminiGenJsonFromConvo(
-    opts,
-    messages,
-    zodType,
-    attachments,
-  );
-  if (opts.disableScriptDriftGuard) {
-    return result;
+  for (let attempt = 0; attempt <= maxScriptDriftRerolls; attempt++) {
+    try {
+      const result = await geminiGenJsonFromConvo(
+        opts,
+        messages,
+        zodType,
+        attachments,
+      );
+      return await guardGeminiScriptDrift(
+        messagesToText(messages),
+        result,
+      );
+    } catch (e) {
+      if (
+        e instanceof Error &&
+        "scriptDrift" in e &&
+        attempt < maxScriptDriftRerolls
+      ) {
+        console.warn(
+          `Script drift detected in genJson (homoglyph corruption) on attempt ${attempt}. Retrying...`,
+        );
+        continue;
+      }
+      throw e;
+    }
   }
-  return await guardGeminiScriptDrift(
-    messagesToText(messages),
-    result,
-  );
+  throw new Error("Unreachable");
 };
 
 import { context, type Injection } from "@uri/inject";

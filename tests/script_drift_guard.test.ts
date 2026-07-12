@@ -99,22 +99,21 @@ Deno.test("assertNoScriptDrift ignores a single stray glyph", () =>
 import { genJsonFromConvo } from "../src/genJson.ts";
 
 llmTest(
-  "genJsonFromConvo bypasses script drift guard when disableScriptDriftGuard is true",
+  "genJsonFromConvo completes successfully on clean Hebrew input",
   () =>
     injectSecrets(async () => {
-      const schema = z.object({ translation: z.string() });
+      const schema = z.object({ response: z.string() });
       const result = await genJsonFromConvo(
-        { provider: "google", mini: true, disableScriptDriftGuard: true },
+        { provider: "google", mini: true },
         [
-          { role: "system", content: "You are a translator." },
+          { role: "system", content: "ענה בעברית בלבד כ-JSON." },
           {
             role: "user",
-            content:
-              "Translate the Hebrew word 'שלום' to Armenian. Return JSON with the translation.",
+            content: "שלום, מה שלומך?",
           },
         ],
         schema,
       );
-      assert(typeof result.translation === "string");
+      assert(typeof result.response === "string");
     })(),
 );
