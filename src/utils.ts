@@ -4,6 +4,7 @@ export type ModelOpts = {
   mini: boolean;
   maxOutputTokens?: number;
   provider?: "google" | "openai" | "gemini";
+  disableScriptDriftGuard?: boolean;
 };
 
 const typeAdherenceError = throwerCatcher("AI refused to adhere to typing");

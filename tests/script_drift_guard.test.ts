@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
+import { z } from "zod/v4";
 import {
   assertNoScriptDrift,
   driftingScripts,
@@ -94,3 +95,26 @@ llmTest(
 // is a plain deterministic test rather than an llmTest.
 Deno.test("assertNoScriptDrift ignores a single stray glyph", () =>
   assertNoScriptDrift(hebrewInput, hebrewReplyWithOneStrayGlyph));
+
+import { genJsonFromConvo } from "../src/genJson.ts";
+
+llmTest(
+  "genJsonFromConvo bypasses script drift guard when disableScriptDriftGuard is true",
+  () =>
+    injectSecrets(async () => {
+      const schema = z.object({ translation: z.string() });
+      const result = await genJsonFromConvo(
+        { provider: "google", mini: true, disableScriptDriftGuard: true },
+        [
+          { role: "system", content: "You are a translator." },
+          {
+            role: "user",
+            content:
+              "Translate the Hebrew word 'שלום' to Armenian. Return JSON with the translation.",
+          },
+        ],
+        schema,
+      );
+      assert(typeof result.translation === "string");
+    })(),
+);

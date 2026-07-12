@@ -33,9 +33,18 @@ export const genJsonFromConvo = async <T extends ZodType>(
   if (provider === "openai") {
     return await openAiGenJsonFromConvo(opts, messages, zodType);
   }
+  const result = await geminiGenJsonFromConvo(
+    opts,
+    messages,
+    zodType,
+    attachments,
+  );
+  if (opts.disableScriptDriftGuard) {
+    return result;
+  }
   return await guardGeminiScriptDrift(
     messagesToText(messages),
-    await geminiGenJsonFromConvo(opts, messages, zodType, attachments),
+    result,
   );
 };
 
