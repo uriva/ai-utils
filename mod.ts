@@ -51,6 +51,7 @@ export {
 } from "./src/continuousCompaction.ts";
 export {
   countTextTokens,
+  emptyGeminiCandidateMessage,
   geminiGenText,
   injectGeminiModelVersions,
   injectGeminiToken,
@@ -58,7 +59,12 @@ export {
   validateZodSchema,
   zodToGeminiParameters,
 } from "./src/gemini.ts";
-export { genJson, genJsonFromConvo } from "./src/genJson.ts";
+export {
+  genJson,
+  genJsonFromConvo,
+  genJsonOverride,
+  invalidGenJsonMessage,
+} from "./src/genJson.ts";
 export {
   assertNoScriptDrift,
   driftingScripts,

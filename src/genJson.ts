@@ -25,6 +25,20 @@ const guardGeminiScriptDrift = async <R>(
 
 const maxScriptDriftRerolls = 2;
 
+export const invalidGenJsonMessage =
+  "genJson result did not match the requested schema";
+
+const validateAgainstSchema = <T extends ZodType>(
+  zodType: T,
+  result: unknown,
+): z.infer<T> => {
+  const parsed = zodType.safeParse(result);
+  if (!parsed.success) {
+    throw new Error(`${invalidGenJsonMessage}: ${parsed.error.message}`);
+  }
+  return parsed.data;
+};
+
 export const genJsonFromConvo = async <T extends ZodType>(
   opts: ModelOpts,
   messages: ChatCompletionMessageParam[],
@@ -33,7 +47,10 @@ export const genJsonFromConvo = async <T extends ZodType>(
 ): Promise<z.infer<T>> => {
   const provider = opts.provider || "google";
   if (provider === "openai") {
-    return await openAiGenJsonFromConvo(opts, messages, zodType);
+    return validateAgainstSchema(
+      zodType,
+      await openAiGenJsonFromConvo(opts, messages, zodType),
+    );
   }
   for (let attempt = 0; attempt <= maxScriptDriftRerolls; attempt++) {
     try {
@@ -45,7 +62,7 @@ export const genJsonFromConvo = async <T extends ZodType>(
       );
       return await guardGeminiScriptDrift(
         messagesToText(messages),
-        result,
+        validateAgainstSchema(zodType, result),
       );
     } catch (e) {
       if (

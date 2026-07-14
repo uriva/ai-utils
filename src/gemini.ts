@@ -22,6 +22,9 @@ import { pruneDefaultsFromRequired } from "./toolTyping.ts";
 
 export { zodToTypingString } from "./toolTyping.ts";
 
+export const emptyGeminiCandidateMessage =
+  "Gemini returned an empty candidate (no text)";
+
 // deno-lint-ignore no-explicit-any
 const isRedundantAnyMember = (x: any) =>
   Object.keys(x).length === 1 && typeof (x.not) === "object" &&
@@ -241,7 +244,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
   zodType: T,
   attachments?: MediaAttachment[],
 ): Promise<z.infer<T>> => {
-  const cacher = makeCache("geminiCompletionResponseText-v2");
+  const cacher = makeCache("geminiCompletionResponseText-v3");
   const cachedCall = cacher(
     conditionalRetry(isRetryableError)(
       1000,
@@ -249,7 +252,10 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
       (req: GenerateContentParameters) =>
         new GoogleGenAI({ apiKey: tokenInjection.access() }).models
           .generateContent(req)
-          .then(({ text }) => text || "{}"),
+          .then(({ text }) => {
+            if (!text) throw new Error(emptyGeminiCandidateMessage);
+            return text;
+          }),
     ),
   );
   const contents = pipe(openAiToGeminiMessage)(messages);
