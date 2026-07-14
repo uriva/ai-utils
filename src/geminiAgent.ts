@@ -999,38 +999,36 @@ const historyHasThoughtSignatures = (
 // model-call timeout fires. The signature on the last (unanswered) `tool_call`
 // is the trigger.
 //
-// We CANNOT simply strip the signatures: Gemini rejects a `functionCall` part
-// that is missing its `thought_signature` with 400 INVALID_ARGUMENT. The only
-// working recovery is to drop the whole trailing chain of unanswered own-turns
-// (own_thought / tool_call / tool_result / own_utterance / do_nothing) back to
-// the last `participant_utterance`, so the poisoned signed function call leaves
-// the request entirely and the model re-decides from the user's message.
+// We must NOT mutate history to recover:
+//   - Stripping the signatures 400s: Gemini rejects a `functionCall` part
+//     missing its `thought_signature` with 400 INVALID_ARGUMENT.
+//   - Dropping the trailing turns loses events that had real-world effects
+//     (tool calls, sent messages) — the model would forget it already reacted /
+//     already sent something and could repeat the side effect.
 //
-// Verified end-to-end against two faithful captured requests (both recover 4/4;
-// stripping signatures 400s on both). See prompt2bot
+// The working, non-destructive recovery is to append one EPHEMERAL system-note
+// user turn (never persisted to history — it only exists in this one retry
+// request). This changes the turn boundary so the model must produce output,
+// and it recovers reliably (verified 8/8 on two faithful captured requests,
+// while the request-as-is is empty 8/8). See prompt2bot
 // `server/src/geminiEmptyCandidate*.test.ts` and the request fixtures beside
-// them, and prompt2bot issue on the empty-candidate do_nothing loop.
-const isParticipantUtterance = (e: GeminiHistoryEvent): boolean =>
-  e.type === "participant_utterance";
+// them, and the prompt2bot issue on the empty-candidate do_nothing loop.
+export const emptyCandidateRecoveryNudge =
+  `${systemNotificationPrefix} respond to the user's latest message now.]`;
 
-const dropTrailingUnansweredOwnTurns = (
+const withEmptyCandidateRecoveryNudge = (
   events: GeminiHistoryEvent[],
-): GeminiHistoryEvent[] => {
-  const lastUser = events.reduce(
-    (acc, e, i) => (isParticipantUtterance(e) ? i : acc),
-    -1,
-  );
-  if (lastUser <= 0) return events;
-  const prevUser = events.slice(0, lastUser).reduce(
-    (acc, e, i) => (isParticipantUtterance(e) ? i : acc),
-    -1,
-  );
-  if (prevUser < 0) return events;
-  return [
-    ...events.slice(0, prevUser + 1),
-    ...events.slice(lastUser),
-  ];
-};
+): GeminiHistoryEvent[] => [
+  ...events,
+  {
+    type: "participant_utterance",
+    isOwn: false,
+    name: "system",
+    text: emptyCandidateRecoveryNudge,
+    id: "empty-candidate-recovery-nudge",
+    timestamp: Date.now(),
+  },
+];
 
 const stripUnsupportedAttachmentsFromEvent = (
   event: GeminiHistoryEvent,
@@ -1535,11 +1533,11 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
       // Empty candidate (buffered path): the model returned normally but with
       // no usable content. If history carries thoughtSignatures, this is the
       // deterministic `gemini-3.5-flash` empty-candidate failure — retry once
-      // with the trailing unanswered signed own-turns dropped instead of
-      // recording a silent do_nothing.
+      // with an ephemeral recovery nudge appended (no history mutation) instead
+      // of recording a silent do_nothing.
       if (didNothing(output) && historyHasThoughtSignatures(events)) {
         return await callGemini(
-          eventsToRequest(dropTrailingUnansweredOwnTurns(events)),
+          eventsToRequest(withEmptyCandidateRecoveryNudge(events)),
           disableStreaming,
         );
       }
@@ -1548,11 +1546,11 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
       const err = normalizeError(error);
       // Empty candidate (streaming path): the empty stream never terminates, so
       // the call hangs until the model-call timeout fires. Same root cause as
-      // above; retry once with the trailing unanswered signed own-turns dropped
-      // before giving up.
+      // above; retry once with an ephemeral recovery nudge appended (no history
+      // mutation) before giving up.
       if (isSyntheticTimeoutError(err) && historyHasThoughtSignatures(events)) {
         return callGemini(
-          eventsToRequest(dropTrailingUnansweredOwnTurns(events)),
+          eventsToRequest(withEmptyCandidateRecoveryNudge(events)),
           disableStreaming,
         );
       }
