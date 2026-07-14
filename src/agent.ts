@@ -2316,9 +2316,25 @@ const tokenCounterInjection: Injection<TokenCounter> = context(
 export const accessTokenCounter = tokenCounterInjection.access;
 export const injectTokenCounter = tokenCounterInjection.inject;
 
-export const estimateTokensLocal = (e: HistoryEvent): number => {
-  return countTokensLocal(eventToPlainTextLocal(e));
-};
+// Provider metadata (Gemini `thoughtSignature`, Anthropic `thinkingContent`) is
+// re-sent to the model on every call (see geminiAgent/anthropicAgent), so it
+// counts as billed input tokens. It is opaque and absent from the plain-text
+// projection, so it must be counted separately or the compaction threshold
+// silently undercounts a bloated history and never fires.
+const metadataTextForTokenEstimate = (modelMetadata: unknown): string =>
+  isRecord(modelMetadata)
+    ? [modelMetadata.thoughtSignature, modelMetadata.thinkingContent]
+      .filter((value): value is string => typeof value === "string")
+      .join(" ")
+    : "";
+
+export const estimateTokensLocal = (e: HistoryEvent): number =>
+  countTokensLocal(eventToPlainTextLocal(e)) +
+  countTokensLocal(
+    metadataTextForTokenEstimate(
+      "modelMetadata" in e ? e.modelMetadata : undefined,
+    ),
+  );
 
 export type TextTokenCounter = (text: string | undefined) => Promise<number>;
 
