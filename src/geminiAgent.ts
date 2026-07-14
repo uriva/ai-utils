@@ -992,20 +992,45 @@ const historyHasThoughtSignatures = (
   events: GeminiHistoryEvent[],
 ): boolean => events.some(eventHasThoughtSignature);
 
-// Removes accumulated `thoughtSignature`s from history. `gemini-3.5-flash`
-// deterministically returns an empty candidate (`finishReason=STOP`, zero
+// Recovers from the `gemini-3.5-flash` empty-candidate failure. When a
+// conversation's own accumulated `thoughtSignature`s are replayed back, the
+// model deterministically returns an empty candidate (`finishReason=STOP`, zero
 // tokens, no parts, no blockReason) — or, on the streaming path, hangs until the
-// model-call timeout fires — when a conversation's own accumulated
-// `thoughtSignature`s are replayed back to it. Stripping them lets the model
-// respond normally. See the faithful reproduction in prompt2bot at
-// `debug/gemini-empty-candidate/` (replaying the exact signed bytes reproduces
-// the empty candidate, and stripping signatures fixes it).
-const stripThoughtSignaturesFromEvents = (
+// model-call timeout fires. The signature on the last (unanswered) `tool_call`
+// is the trigger.
+//
+// We CANNOT simply strip the signatures: Gemini rejects a `functionCall` part
+// that is missing its `thought_signature` with 400 INVALID_ARGUMENT. The only
+// working recovery is to drop the whole trailing chain of unanswered own-turns
+// (own_thought / tool_call / tool_result / own_utterance / do_nothing) back to
+// the last `participant_utterance`, so the poisoned signed function call leaves
+// the request entirely and the model re-decides from the user's message.
+//
+// Verified end-to-end against two faithful captured requests (both recover 4/4;
+// stripping signatures 400s on both). See prompt2bot
+// `server/src/geminiEmptyCandidate*.test.ts` and the request fixtures beside
+// them, and prompt2bot issue on the empty-candidate do_nothing loop.
+const isParticipantUtterance = (e: GeminiHistoryEvent): boolean =>
+  e.type === "participant_utterance";
+
+const dropTrailingUnansweredOwnTurns = (
   events: GeminiHistoryEvent[],
-): GeminiHistoryEvent[] =>
-  events.map((e) =>
-    eventHasThoughtSignature(e) ? { ...e, modelMetadata: undefined } : e
+): GeminiHistoryEvent[] => {
+  const lastUser = events.reduce(
+    (acc, e, i) => (isParticipantUtterance(e) ? i : acc),
+    -1,
   );
+  if (lastUser <= 0) return events;
+  const prevUser = events.slice(0, lastUser).reduce(
+    (acc, e, i) => (isParticipantUtterance(e) ? i : acc),
+    -1,
+  );
+  if (prevUser < 0) return events;
+  return [
+    ...events.slice(0, prevUser + 1),
+    ...events.slice(lastUser),
+  ];
+};
 
 const stripUnsupportedAttachmentsFromEvent = (
   event: GeminiHistoryEvent,
@@ -1510,11 +1535,11 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
       // Empty candidate (buffered path): the model returned normally but with
       // no usable content. If history carries thoughtSignatures, this is the
       // deterministic `gemini-3.5-flash` empty-candidate failure — retry once
-      // with signatures stripped instead of recording a silent do_nothing. See
-      // prompt2bot `debug/gemini-empty-candidate/`.
+      // with the trailing unanswered signed own-turns dropped instead of
+      // recording a silent do_nothing.
       if (didNothing(output) && historyHasThoughtSignatures(events)) {
         return await callGemini(
-          eventsToRequest(stripThoughtSignaturesFromEvents(events)),
+          eventsToRequest(dropTrailingUnansweredOwnTurns(events)),
           disableStreaming,
         );
       }
@@ -1523,10 +1548,11 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
       const err = normalizeError(error);
       // Empty candidate (streaming path): the empty stream never terminates, so
       // the call hangs until the model-call timeout fires. Same root cause as
-      // above; retry once with signatures stripped before giving up.
+      // above; retry once with the trailing unanswered signed own-turns dropped
+      // before giving up.
       if (isSyntheticTimeoutError(err) && historyHasThoughtSignatures(events)) {
         return callGemini(
-          eventsToRequest(stripThoughtSignaturesFromEvents(events)),
+          eventsToRequest(dropTrailingUnansweredOwnTurns(events)),
           disableStreaming,
         );
       }
