@@ -985,6 +985,28 @@ const filterDoNothing = (
   history: GeminiHistoryEvent[],
 ): GeminiHistoryEvent[] => history.filter((e) => e.type !== "do_nothing");
 
+const eventHasThoughtSignature = (e: GeminiHistoryEvent): boolean =>
+  !!("modelMetadata" in e && e.modelMetadata?.thoughtSignature?.trim());
+
+const historyHasThoughtSignatures = (
+  events: GeminiHistoryEvent[],
+): boolean => events.some(eventHasThoughtSignature);
+
+// Removes accumulated `thoughtSignature`s from history. `gemini-3.5-flash`
+// deterministically returns an empty candidate (`finishReason=STOP`, zero
+// tokens, no parts, no blockReason) — or, on the streaming path, hangs until the
+// model-call timeout fires — when a conversation's own accumulated
+// `thoughtSignature`s are replayed back to it. Stripping them lets the model
+// respond normally. See the faithful reproduction in prompt2bot at
+// `debug/gemini-empty-candidate/` (replaying the exact signed bytes reproduces
+// the empty candidate, and stripping signatures fixes it).
+const stripThoughtSignaturesFromEvents = (
+  events: GeminiHistoryEvent[],
+): GeminiHistoryEvent[] =>
+  events.map((e) =>
+    eventHasThoughtSignature(e) ? { ...e, modelMetadata: undefined } : e
+  );
+
 const stripUnsupportedAttachmentsFromEvent = (
   event: GeminiHistoryEvent,
 ): { event: GeminiHistoryEvent; changed: boolean } => {
@@ -1067,7 +1089,7 @@ export const filterInvalidToolCalls = (
   history: GeminiHistoryEvent[],
 ): GeminiHistoryEvent[] =>
   history.filter((e) => {
-    if (e.type === "tool_call" && !e.modelMetadata?.thoughtSignature?.trim()) {
+    if (e.type === "tool_call" && !eventHasThoughtSignature(e)) {
       console.warn(
         `Warning: Filtering out tool_call "${e.name}" (id: ${e.id}) with missing or empty thoughtSignature. ` +
           `This would cause Gemini API error: "Function call is missing a thought_signature in functionCall parts".`,
@@ -1123,9 +1145,7 @@ const computeInvalidToolCallReplacements = (
   // have a thoughtSignature. (In parallel calls, only the first gets a signature).
   const taintedResponseIds = new Set<string>();
   for (const [responseId, toolCalls] of toolCallsByResponseId.entries()) {
-    const hasSignature = toolCalls.some((e) =>
-      "modelMetadata" in e && e.modelMetadata?.thoughtSignature?.trim()
-    );
+    const hasSignature = toolCalls.some(eventHasThoughtSignature);
     if (!hasSignature) taintedResponseIds.add(responseId);
   }
 
@@ -1486,9 +1506,30 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
   try {
     const req = eventsToRequest(events);
     try {
-      return await callGemini(req, disableStreaming);
+      const output = await callGemini(req, disableStreaming);
+      // Empty candidate (buffered path): the model returned normally but with
+      // no usable content. If history carries thoughtSignatures, this is the
+      // deterministic `gemini-3.5-flash` empty-candidate failure — retry once
+      // with signatures stripped instead of recording a silent do_nothing. See
+      // prompt2bot `debug/gemini-empty-candidate/`.
+      if (didNothing(output) && historyHasThoughtSignatures(events)) {
+        return await callGemini(
+          eventsToRequest(stripThoughtSignaturesFromEvents(events)),
+          disableStreaming,
+        );
+      }
+      return output;
     } catch (error) {
       const err = normalizeError(error);
+      // Empty candidate (streaming path): the empty stream never terminates, so
+      // the call hangs until the model-call timeout fires. Same root cause as
+      // above; retry once with signatures stripped before giving up.
+      if (isSyntheticTimeoutError(err) && historyHasThoughtSignatures(events)) {
+        return callGemini(
+          eventsToRequest(stripThoughtSignaturesFromEvents(events)),
+          disableStreaming,
+        );
+      }
       if (isTokenLimitExceeded(err)) {
         const totalTokens = sum(await map(estimateTokens)(events));
         throw new Error(
