@@ -151,6 +151,73 @@ Deno.test("formatSkillsPrompt outputs fully-qualified tool names", () => {
   assertEquals(prompt.includes("- todo_write:"), false);
 });
 
+// Regression: a skill whose tool names already embed the skill prefix (e.g. a
+// tool literally named "browser/create" inside the "browser" skill) must not be
+// rendered to the model as a doubled "browser/browser/create" command, and if
+// the model ever emits that doubled form it must still resolve.
+const prefixedCreate = tool({
+  name: "browser/create",
+  description: "create a browser",
+  parameters: z.object({}),
+  handler: () => Promise.resolve("browser created"),
+});
+
+const prefixedBrowserSkill: Skill = {
+  name: "browser",
+  description: "browser skill",
+  instructions: "x",
+  tools: [prefixedCreate],
+};
+
+Deno.test("skill with self-prefixed tool names is not double-prefixed in prompts", () => {
+  const prompt = formatSkillsPrompt([prefixedBrowserSkill]);
+  assertEquals(prompt.includes("browser/browser/create"), false);
+  assertEquals(prompt.includes("- browser/create:"), true);
+});
+
+Deno.test("active skills prompt does not double-prefix self-prefixed tool names", () => {
+  const spec: AgentSpec = {
+    tools: [],
+    skills: [prefixedBrowserSkill],
+    prompt: "Help.",
+  } as unknown as AgentSpec;
+
+  const history = [
+    {
+      id: "call-1",
+      type: "tool_call" as const,
+      isOwn: true as const,
+      name: "learn_skill",
+      parameters: { skillName: "browser" },
+      timestamp: 1000,
+    },
+    {
+      id: "result-1",
+      type: "tool_result" as const,
+      isOwn: true as const,
+      toolCallId: "call-1",
+      result: "Skill learned successfully.",
+      timestamp: 2000,
+    },
+  ];
+
+  const specTurn2 = getSpecForTurn(spec, history);
+  assertEquals(specTurn2.prompt.includes("browser/browser/create"), false);
+  assertEquals(specTurn2.prompt.includes("browser/create(params:"), true);
+});
+
+Deno.test("run_command tolerates a doubled skill/skill/tool prefix", async () => {
+  const skillTools = createSkillTools([prefixedBrowserSkill]);
+  const runCommand = skillTools.find((t) => t.name === "run_command");
+  if (!runCommand) throw new Error("run_command missing");
+  const out = await runCommand.handler(
+    { command: "browser/browser/create", params: {}, spinnerText: "creating" },
+    "call-id",
+  );
+  if (typeof out !== "string") throw new Error("expected string result");
+  assertEquals(out.includes("browser created"), true);
+});
+
 Deno.test("active skills prompt includes tool names and descriptions", () => {
   const spec: AgentSpec = {
     tools: [],

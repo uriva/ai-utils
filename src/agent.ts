@@ -335,7 +335,7 @@ export const formatSkillsPrompt = (skills: Skill[]): string =>
     const toolsPart = skill.tools.length > 0
       ? `\n  Tools:\n${
         skill.tools.map((t) =>
-          `    - ${skill.name}/${t.name}: ${t.description}`
+          `    - ${qualifiedToolName(skill.name, t.name)}: ${t.description}`
         ).join("\n")
       }`
       : "";
@@ -782,12 +782,39 @@ const formatZodIssues = (
     return hint ? `${base} (expected ${hint})` : base;
   }).join(", ");
 
+const stripSkillPrefix = (skillName: string, toolName: string): string =>
+  toolName.startsWith(`${skillName}/`)
+    ? toolName.slice(skillName.length + 1)
+    : toolName;
+
+export const qualifiedToolName = (
+  skillName: string,
+  toolName: string,
+): string => `${skillName}/${stripSkillPrefix(skillName, toolName)}`;
+
+// A misnamed skill whose tool names already embed the skill prefix (e.g. a tool
+// literally named "browser/create" inside the "browser" skill) makes the model
+// emit a doubled command like "browser/browser/create". Collapse the redundant
+// leading "skill/skill/" segment so the call resolves instead of failing.
+export const collapseDuplicatedSkillPrefix = (
+  command: string,
+  skillMap: Record<string, unknown>,
+): string => {
+  const firstSep = command.indexOf("/");
+  if (firstSep === -1) return command;
+  const head = command.slice(0, firstSep);
+  const rest = command.slice(firstSep + 1);
+  return skillMap[head] && rest.startsWith(`${head}/`) ? rest : command;
+};
+
 const resolveUnambiguousBareName = (
   name: string,
   skills: Skill[],
 ): string | undefined => {
   const matches = skills.flatMap((s) =>
-    s.tools.filter((t) => t.name === name).map(() => `${s.name}/${name}`)
+    s.tools.filter((t) => t.name === name).map(() =>
+      qualifiedToolName(s.name, name)
+    )
   );
   return matches.length === 1 ? matches[0] : undefined;
 };
@@ -1825,11 +1852,6 @@ export const tool = <ParametersSchema extends z.ZodObject<z.ZodRawShape>>(
 
 // deno-lint-ignore no-explicit-any
 export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
-  const bareToolName = (skillName: string, toolName: string) =>
-    toolName.startsWith(`${skillName}/`)
-      ? toolName.slice(skillName.length + 1)
-      : toolName;
-
   const skillMap = Object.fromEntries(skills.map((s) => [s.name, s]));
   const referenceAsTool =
     (skillName: string) => (ref: { name: string; content: string }) => ({
@@ -1847,7 +1869,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         ...(skill.references ?? []).map(referenceAsTool(skill.name)),
       ].map((
         tool,
-      ) => [`${skill.name}/${bareToolName(skill.name, tool.name)}`, tool])
+      ) => [qualifiedToolName(skill.name, tool.name), tool])
     ),
   );
   const skillNames = skills.map((s) => s.name).join(", ");
@@ -1865,7 +1887,8 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           "A short progress update or spinner message in active voice (e.g., 'Searching the web...', 'Deploying server...') representing what this action is actively doing. This message is shown to the user while the tool runs. IMPORTANT: Do NOT include any emojis (such as hourglass ⏳, gears ⚙️, etc.) in this message.",
         ),
       }),
-      handler: async ({ command, params }, toolCallId) => {
+      handler: async ({ command: rawCommand, params }, toolCallId) => {
+        const command = collapseDuplicatedSkillPrefix(rawCommand, skillMap);
         let effectiveCommand = command;
         let separator = command.includes("/") ? "/" : ":";
         let lastSep = command.lastIndexOf(separator);
@@ -2527,7 +2550,9 @@ export const getSpecForTurn = <T extends AgentInputs>(
         ? `\n  Tools:\n${
           skill.tools.map((t) => {
             const typing = zodToTypingString(t.parameters);
-            return `    - ${skill.name}/${t.name}(params: ${typing}): ${t.description}`;
+            return `    - ${
+              qualifiedToolName(skill.name, t.name)
+            }(params: ${typing}): ${t.description}`;
           }).join("\n")
         }`
         : "";
