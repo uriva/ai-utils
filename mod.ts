@@ -34,6 +34,8 @@ export {
 } from "./src/hallucination.ts";
 export * from "./src/agent.ts";
 export {
+  compactionRetentionRatio,
+  compactionRetentionTokens,
   eventsToPlainText,
   eventToPlainText,
   groupToolCallPairs,

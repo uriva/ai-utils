@@ -2,6 +2,7 @@ import { assertEquals } from "@std/assert";
 import { map, sum } from "gamla";
 import { estimateTokensLocal, type HistoryEvent } from "../src/agent.ts";
 import {
+  compactionRetentionTokens,
   eventToPlainText,
   groupToolCallPairs,
   partitionSegments,
@@ -759,3 +760,57 @@ llmTest(
     );
   }),
 );
+
+// Reproduces the "AI Stock Predictor Bot" pathology: a single long-running
+// conversation (no 30-min gaps -> one segment) whose history far exceeds the
+// compaction trigger. Passing the trigger value itself as the retention budget
+// leaves history pinned right below the ceiling, so every subsequent model call
+// re-sends a near-ceiling history and per-run token usage explodes. Retaining
+// only `compactionRetentionTokens(trigger)` (10% of the trigger) fixes it.
+Deno.test("compaction retains a small fraction of the trigger, not the whole ceiling", async () => {
+  const triggerTokens = 100_000;
+  const base = Date.now();
+  // ~700 tokens per event * 300 events ~= 210k tokens, all within one segment.
+  const bigText = "word ".repeat(500);
+  const events: HistoryEvent[] = Array.from(
+    { length: 300 },
+    (_, i) =>
+      makeUtterance(`Msg ${i}: ${bigText}`, base + i * 60_000, i % 2 === 0),
+  );
+  const totalTokens = sum(map(estimateTokensLocal)(events));
+  assertEquals(
+    totalTokens > triggerTokens,
+    true,
+    `history (${totalTokens} tok) must exceed the trigger to force compaction`,
+  );
+  const segments = segmentHistoryEvents(events, segmentGapMs);
+  assertEquals(segments.length, 1, "no 30-min gaps -> single segment");
+
+  const keptTokensFor = async (maxTokens: number) => {
+    const { kept } = await partitionSegments(maxTokens, segments);
+    return sum(map(estimateTokensLocal)(kept.flatMap((s) => s.events)));
+  };
+
+  // Pathology: retention budget == trigger leaves history near the ceiling.
+  const pathologicalKept = await keptTokensFor(triggerTokens);
+  assertEquals(
+    pathologicalKept > triggerTokens * 0.9,
+    true,
+    `pathology: retaining at trigger keeps ${pathologicalKept} tok, pinned near the ${triggerTokens} ceiling`,
+  );
+
+  // Fix: retain only 10% of the trigger -> dramatically smaller history.
+  const retention = compactionRetentionTokens(triggerTokens);
+  assertEquals(retention, 10_000, "retention should be 10% of the trigger");
+  const fixedKept = await keptTokensFor(retention);
+  assertEquals(
+    fixedKept <= retention,
+    true,
+    `fix: retained ${fixedKept} tok must be within the ${retention} budget`,
+  );
+  assertEquals(
+    fixedKept < pathologicalKept / 5,
+    true,
+    `fix must shrink kept history by >5x (was ${pathologicalKept}, now ${fixedKept})`,
+  );
+});

@@ -161,6 +161,17 @@ const trimSegmentToTokenBudget = async (
   };
 };
 
+// Fraction of the compaction TRIGGER threshold that history is compacted DOWN
+// to when compaction fires. Using the trigger value itself as the retention
+// budget pins history permanently at the ceiling: it grows a little, trips the
+// trigger, gets trimmed right back to the ceiling, and every subsequent model
+// call re-sends a near-ceiling history. Retaining a small fraction gives real
+// headroom so compaction is infrequent and the per-call input stays small.
+export const compactionRetentionRatio = 0.1;
+
+export const compactionRetentionTokens = (triggerTokens: number): number =>
+  Math.floor(triggerTokens * compactionRetentionRatio);
+
 export const partitionSegments = async (
   maxTokens: number,
   segments: HistorySegment[],
