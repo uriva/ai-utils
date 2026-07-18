@@ -252,7 +252,13 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
       (req: GenerateContentParameters) =>
         new GoogleGenAI({ apiKey: tokenInjection.access() }).models
           .generateContent(req)
-          .then(({ text }) => {
+          .then((response) => {
+            if (response.candidates?.[0]?.finishReason === "MAX_TOKENS") {
+              throw new Error(
+                "Gemini response truncated due to MAX_TOKENS limit",
+              );
+            }
+            const text = response.text;
             if (!text) throw new Error(emptyGeminiCandidateMessage);
             return text;
           }),

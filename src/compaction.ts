@@ -224,25 +224,25 @@ export const eventsToPlainText: (events: HistoryEvent[]) => string = pipe(
 
 const structuredSummarySchema = z.object({
   entities: z.string().describe(
-    "Key people, organizations, or named things mentioned. One line per entity.",
+    "Key people, organizations, or named things mentioned. One line per entity. Max 50 words.",
   ),
   decisions: z.string().describe(
-    "Agreements, choices, or conclusions reached during the conversation.",
+    "Agreements, choices, or conclusions reached during the conversation. Max 150 words.",
   ),
   actions: z.string().describe(
-    "Actions taken via tools or by the assistant, with outcomes.",
+    "Actions taken via tools or by the assistant, with outcomes. Max 150 words.",
   ),
   pendingItems: z.string().describe(
-    "Open questions, unresolved requests, or next steps the user expects.",
+    "Open questions, unresolved requests, or next steps the user expects. Max 150 words.",
   ),
   abandonedItems: z.string().describe(
-    "Proposals, suggestions, or options that were raised but the user moved on from without confirming or rejecting. Include the specific name of the abandoned item and why it was not pursued.",
+    "Proposals, suggestions, or options that were raised but the user moved on from without confirming or rejecting. Include the specific name of the abandoned item and why it was not pursued. Max 150 words.",
   ),
   context: z.string().describe(
-    "Any other important context needed to continue the conversation coherently. CRITICAL: Do NOT declare the dates/times of this historical segment as the 'current' simulated date, 'today', or 'now', as this summary will be read in the future where those dates are in the past. If you must describe dates, refer to them explicitly as the dates of the segment (e.g., 'The segment took place on May 5, 2026').",
+    "Any other important context needed to continue the conversation coherently. CRITICAL: Do NOT declare the dates/times of this historical segment as the 'current' simulated date, 'today', or 'now', as this summary will be read in the future where those dates are in the past. If you must describe dates, refer to them explicitly as the dates of the segment (e.g., 'The segment took place on May 5, 2026'). Max 150 words.",
   ),
   skillsToReLearn: z.string().describe(
-    "List of active/used skills from the history that were learned (via the learn_skill tool) and are now compacted away, which the assistant must call learn_skill on immediately on the next turn to reload. If no skills were learned/active, write 'None'.",
+    "List of active/used skills from the history that were learned (via the learn_skill tool) and are now compacted away, which the assistant must call learn_skill on immediately on the next turn to reload. If no skills were learned/active, write 'None'. Max 50 words.",
   ),
 });
 
@@ -299,6 +299,11 @@ export const summarizeEvents = async (
     await genJson(
       { provider: "google", mini: false },
       `Summarize the following conversation into structured sections. Write from the assistant's perspective. Be concise but preserve all important details, especially names, numbers, and specific facts that would be needed to continue the conversation.
+
+Critical length constraints to prevent response truncation:
+- Every section must be brief, dense, and highly compacted.
+- Maximum 50 words for Key Entities and Active Skills to Re-Learn.
+- Maximum 150 words per section for Decisions, Actions, Pending Items, Abandoned Items, and Context.
 
 Critical anti-fabrication rules:
 - Use ONLY information that is explicitly present in the source events. Never introduce specific proper-noun entities (hotel names, person names, document titles, restaurant or landmark names, brand names, etc.) that the source did not state.
