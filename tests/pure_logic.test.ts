@@ -22,12 +22,17 @@ import {
   type Skill,
   systemNotificationPrefix,
   toolUseTurn,
+  toolUseTurnWithMetadata,
 } from "../src/agent.ts";
 import {
   buildReq,
+  escalateEmptyCandidateRecovery,
   filterAndRewriteInvalidToolCalls,
   filterOrphanedToolResults,
+  type GeminiHistoryEvent,
   geminiMalformedFunctionCallError,
+  type GeminiMetadata,
+  type GeminiOutput,
   geminiOutputToHistoryEvents,
   isSafetyBlockReason,
   promptBlockReasonPrefix,
@@ -1478,5 +1483,68 @@ Deno.test("normalizeHistoryForModel: a real result for a late-resolving deferred
   assert(
     "result" in results[0] && results[0].result.includes("TIMEOUT WAKEUP"),
     "the real deferred result must survive normalization",
+  );
+});
+
+// Deterministic tests for the empty-candidate escalation policy
+// (`escalateEmptyCandidateRecovery`). The empty-candidate failure itself is a
+// low-rate, environment-sensitive upstream Gemini bug that cannot be reproduced
+// reliably in a generic test, so we drive the escalation with fake `call`
+// implementations and assert the user always ends up with a non-empty reply.
+const emptyGeminiOutput: GeminiOutput = [];
+const nonEmptyGeminiOutput: GeminiOutput = [
+  { type: "text", text: "here is my reply" },
+];
+const signedToolCallMetadata: GeminiMetadata = {
+  type: "gemini",
+  responseId: "r1",
+  thoughtSignature: "sig",
+};
+const userQuestion: GeminiHistoryEvent = {
+  type: "participant_utterance",
+  isOwn: false,
+  name: "user",
+  text: "?",
+  id: "u-question",
+  timestamp: 2,
+};
+const signedHistory: GeminiHistoryEvent[] = [
+  toolUseTurnWithMetadata(
+    { name: "check_status", args: { item: "alpha" } },
+    signedToolCallMetadata,
+  ),
+  userQuestion,
+];
+
+Deno.test("escalateEmptyCandidateRecovery returns the nudge result when it is non-empty", async () => {
+  const calls: number[] = [];
+  const result = await escalateEmptyCandidateRecovery(() => {
+    calls.push(1);
+    return Promise.resolve(nonEmptyGeminiOutput);
+  }, signedHistory);
+  assertEquals(result, nonEmptyGeminiOutput);
+  assertEquals(calls.length, 1, "should stop after the first non-empty tier");
+});
+
+Deno.test("escalateEmptyCandidateRecovery escalates to the compose directive when the nudge is empty", async () => {
+  let call = 0;
+  const result = await escalateEmptyCandidateRecovery(() => {
+    call++;
+    return Promise.resolve(
+      call === 1 ? emptyGeminiOutput : nonEmptyGeminiOutput,
+    );
+  }, signedHistory);
+  assertEquals(result, nonEmptyGeminiOutput);
+  assertEquals(call, 2, "should call the nudge then the compose directive");
+});
+
+Deno.test("escalateEmptyCandidateRecovery never returns empty even when every tier is empty", async () => {
+  const result = await escalateEmptyCandidateRecovery(
+    () => Promise.resolve(emptyGeminiOutput),
+    signedHistory,
+  );
+  assert(
+    result.some((p) => p.type === "text" && p.text.trim().length > 0),
+    `expected a guaranteed non-empty message, got: ${JSON.stringify(result)}`,
   );
 });
