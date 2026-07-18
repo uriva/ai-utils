@@ -204,6 +204,43 @@ const safeCompile = (
   }
 };
 
+const maxWholeGrepLineChars = 500;
+const grepMatchContextChars = 500;
+
+const withoutGlobalFlag = (re: RegExp) =>
+  new RegExp(re.source, re.flags.replaceAll("g", ""));
+
+const withGlobalFlag = (re: RegExp) =>
+  new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`);
+
+const formatLongGrepLine = (
+  re: RegExp,
+  { n, line }: { n: number; line: string },
+) => {
+  const m = withoutGlobalFlag(re).exec(line);
+  const matchIndex = m?.index ?? 0;
+  const matchLength = m?.[0].length ?? 0;
+  const from = Math.max(0, matchIndex - grepMatchContextChars);
+  const to = Math.min(
+    line.length,
+    matchIndex + matchLength + grepMatchContextChars,
+  );
+  const extraMatches = Math.max(
+    0,
+    [...line.matchAll(withGlobalFlag(re))].length - 1,
+  );
+  return `${n} (chars ${from}-${to} of ${line.length}): ${from > 0 ? "…" : ""}${
+    line.slice(from, to)
+  }${to < line.length ? "…" : ""}${
+    extraMatches > 0 ? ` [${extraMatches} more matches in this line]` : ""
+  }`;
+};
+
+const formatGrepMatch = (re: RegExp, match: { n: number; line: string }) =>
+  match.line.length <= maxWholeGrepLineChars
+    ? `${match.n}: ${match.line}`
+    : formatLongGrepLine(re, match);
+
 const grepScratchLines = (
   content: string,
   pattern: string,
@@ -221,7 +258,7 @@ const grepScratchLines = (
   const limited = matches.slice(0, numLines);
   return {
     ok: true,
-    text: limited.map(({ n, line }) => `${n}: ${line}`).join("\n"),
+    text: limited.map((match) => formatGrepMatch(re, match)).join("\n"),
     matchCount: matches.length,
     truncated: matches.length > limited.length,
   };
@@ -241,7 +278,7 @@ const readScratchFileParameters: z.ZodObject<{
     `Max lines to return (default and hard cap ${maxScratchReadLines}).`,
   ),
   grep: z.string().optional().describe(
-    "Optional JS regex; only matching lines (prefixed with line number) are returned. A leading PCRE-style inline flag group like (?i), (?im) is auto-translated to JS RegExp flags.",
+    "Optional JS regex; only matching lines (prefixed with line number) are returned. Lines longer than 500 chars are returned as a window of ±500 chars around the first match, with char offsets. A leading PCRE-style inline flag group like (?i), (?im) is auto-translated to JS RegExp flags.",
   ),
 });
 

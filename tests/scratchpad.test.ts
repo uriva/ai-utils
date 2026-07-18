@@ -232,6 +232,32 @@ Deno.test(
 );
 
 Deno.test(
+  "read_scratch_file grep windows very long lines around the match instead of returning them whole",
+  async () => {
+    const longLine = `${"P".repeat(10000)}the-needle-here${"S".repeat(10000)}`;
+    const history = await runFakeGrepAgent("needle", longLine);
+    const result = findToolResult(history);
+    assert(result, `expected tool_result. History: ${JSON.stringify(history)}`);
+    assert(
+      result.result.includes("the-needle-here"),
+      `expected the match to appear in the window. Got: ${
+        result.result.slice(0, 300)
+      }`,
+    );
+    assert(
+      !result.result.includes("P".repeat(2000)),
+      `a 20k-char matching line must not be returned whole (window it around the match). Got ${result.result.length} chars`,
+    );
+    assert(
+      result.result.includes("S".repeat(400)),
+      `window should include context after the match. Got: ${
+        result.result.slice(0, 300)
+      }`,
+    );
+  },
+);
+
+Deno.test(
   "read_scratch_file with invalid regex returns error to model instead of throwing",
   async () => {
     const history = await runFakeGrepAgent(
