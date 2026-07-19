@@ -4,6 +4,7 @@ import {
   ownUtteranceTurn,
   participantUtteranceTurn,
   sanitizeModelOutput,
+  toolUseTurn,
 } from "../src/agent.ts";
 import { z } from "zod/v4";
 
@@ -252,4 +253,142 @@ Deno.test("global tool output sanitization - does not collapse scene search resu
       `result: {"title":"The Dark Knight","year":2008} time: 01:05:20 score: 0.785`,
     ].join("\n"),
   );
+});
+
+Deno.test("sanitizeModelOutput reclassifies an unclosed <thought> tag leak as own_thought", () => {
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [
+      ownUtteranceTurn(
+        "<thought> I should call the update tool first, then reply.",
+      ),
+      toolUseTurn({ name: "update_entry", args: { weight: 76 } }),
+    ],
+  );
+  assertEquals(result.emit.length, 2);
+  const [thought, toolCall] = result.emit;
+  assertEquals(thought.type, "own_thought");
+  assertEquals(toolCall.type, "tool_call");
+  if (thought.type !== "own_thought") throw new Error("unreachable");
+  assertEquals(
+    thought.text,
+    "I should call the update tool first, then reply.",
+  );
+});
+
+Deno.test("sanitizeModelOutput reclassifies a full-output <thought> tag leak as own_thought", () => {
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [
+      ownUtteranceTurn(
+        "<thought> checking if it is morning or evening. it is evening. no action needed, reply politely.",
+      ),
+    ],
+  );
+  assertEquals(result.emit.length, 1);
+  const event = result.emit[0];
+  assertEquals(event.type, "own_thought");
+  if (event.type !== "own_thought") throw new Error("unreachable");
+  assertEquals(
+    event.text,
+    "checking if it is morning or evening. it is evening. no action needed, reply politely.",
+  );
+});
+
+Deno.test("sanitizeModelOutput drops bare <thought> fragments entirely", () => {
+  const outputs = ["<thought>", "<thought"].map((fragment) =>
+    sanitizeModelOutput(
+      [participantUtteranceTurn({ name: "user", text: "hi" })],
+      [ownUtteranceTurn(fragment)],
+    )
+  );
+  for (const result of outputs) {
+    assertEquals(
+      result.emit.filter((e) => e.type === "own_utterance").length,
+      0,
+    );
+  }
+});
+
+Deno.test("sanitizeModelOutput splits a closed <thought> block from the visible reply", () => {
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [ownUtteranceTurn(
+      "<thought>checking the dates first</thought>היי! מה נשמע?",
+    )],
+  );
+  assertEquals(result.emit.length, 2);
+  const [thought, utterance] = result.emit;
+  assertEquals(thought.type, "own_thought");
+  assertEquals(utterance.type, "own_utterance");
+  if (thought.type !== "own_thought" || utterance.type !== "own_utterance") {
+    throw new Error("unreachable");
+  }
+  assertEquals(thought.text, "checking the dates first");
+  assertEquals(utterance.text, "היי! מה נשמע?");
+});
+
+Deno.test("sanitizeModelOutput reclassifies a leading reasoning utterance in a multi-utterance response", () => {
+  const reasoning =
+    "אני מבין שהמשתמש לא יהיה בבית מחר בבוקר, אז השקילה תהיה ביום שני. אני אענה לו בחום ואאשר את התוכנית.";
+  const reply = "מובן לגמרי! הכל בסדר, נעדכן ביום שני בבוקר. 👌";
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [ownUtteranceTurn(reasoning), ownUtteranceTurn(reply)],
+  );
+  assertEquals(result.emit.length, 2);
+  const [thought, utterance] = result.emit;
+  assertEquals(thought.type, "own_thought");
+  assertEquals(utterance.type, "own_utterance");
+  if (thought.type !== "own_thought" || utterance.type !== "own_utterance") {
+    throw new Error("unreachable");
+  }
+  assertEquals(thought.text, reasoning);
+  assertEquals(utterance.text, reply);
+});
+
+Deno.test("sanitizeModelOutput reclassifies narration of a tool called in the same response", () => {
+  const narration = "אני משתמש ב-send_reminder כדי לתזכר את המשתמש מחר בבוקר.";
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [
+      ownUtteranceTurn(narration),
+      toolUseTurn({ name: "send_reminder", args: {} }),
+    ],
+  );
+  assertEquals(result.emit.length, 2);
+  const [thought, toolCall] = result.emit;
+  assertEquals(thought.type, "own_thought");
+  assertEquals(toolCall.type, "tool_call");
+  if (thought.type !== "own_thought") throw new Error("unreachable");
+  assertEquals(thought.text, narration);
+});
+
+Deno.test("sanitizeModelOutput leaves an utterance naming a tool that is not called in the response", () => {
+  const text = "יש לי כלי בשם send_reminder שמאפשר לי לתזכר אותך.";
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [ownUtteranceTurn(text)],
+  );
+  assertEquals(result.emit.length, 1);
+  const event = result.emit[0];
+  assertEquals(event.type, "own_utterance");
+  if (event.type !== "own_utterance") throw new Error("unreachable");
+  assertEquals(event.text, text);
+});
+
+Deno.test("sanitizeModelOutput leaves a user-facing preamble accompanying a tool call untouched", () => {
+  const text = "רגע אחד, אני בודקת את היומן שלך 👀";
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [
+      ownUtteranceTurn(text),
+      toolUseTurn({ name: "check_calendar", args: {} }),
+    ],
+  );
+  assertEquals(result.emit.length, 2);
+  const event = result.emit[0];
+  assertEquals(event.type, "own_utterance");
+  if (event.type !== "own_utterance") throw new Error("unreachable");
+  assertEquals(event.text, text);
 });
