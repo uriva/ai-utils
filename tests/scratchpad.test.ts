@@ -102,7 +102,8 @@ runForAllProviders(
       }`,
     );
 
-    const readResult = mockHistory.find(
+    const readCallIndex = mockHistory.indexOf(readCall);
+    const readResult = mockHistory.slice(readCallIndex + 1).find(
       (e): e is Extract<HistoryEvent, { type: "tool_result" }> =>
         e.type === "tool_result" && e.toolCallId === readCall.id,
     );
