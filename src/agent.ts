@@ -1578,14 +1578,48 @@ const reclassifyToolCallNarration = (
     event.type === "tool_call" ? [event.name] : []
   );
   if (empty(calledToolNames)) return output;
-  return output.map((event) =>
-    event.type === "own_utterance" &&
-      calledToolNames.some((name) =>
+  return output.flatMap((event): HistoryEvent[] => {
+    if (event.type !== "own_utterance") return [event];
+    if (
+      !calledToolNames.some((name) =>
         toolNameMentionPattern(name).test(event.text)
       )
-      ? { ...event, type: "own_thought" as const }
-      : event
-  );
+    ) {
+      return [event];
+    }
+    const utteranceEvent = event as OwnUtterance<unknown>;
+    return event.text.split(/\n\s*\n/).map((para, index) => {
+      const isNarration = calledToolNames.some((name) =>
+        toolNameMentionPattern(name).test(para)
+      );
+      const id = index === 0 ? event.id : generateId();
+      const timestamp = event.timestamp + index;
+      if (isNarration) {
+        const thought: HistoryEvent = {
+          type: "own_thought",
+          isOwn: true,
+          modelMetadata: utteranceEvent.modelMetadata,
+          text: para,
+          attachments: utteranceEvent.attachments,
+          id,
+          timestamp,
+        };
+        return thought;
+      } else {
+        const utterance: HistoryEvent = {
+          type: "own_utterance",
+          isOwn: true,
+          modelMetadata: utteranceEvent.modelMetadata,
+          text: para,
+          attachments: utteranceEvent.attachments,
+          truncated: utteranceEvent.truncated,
+          id,
+          timestamp,
+        };
+        return utterance;
+      }
+    });
+  });
 };
 
 // A single response carries exactly one user-facing message. When the model

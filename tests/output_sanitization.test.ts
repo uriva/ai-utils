@@ -392,3 +392,26 @@ Deno.test("sanitizeModelOutput leaves a user-facing preamble accompanying a tool
   if (event.type !== "own_utterance") throw new Error("unreachable");
   assertEquals(event.text, text);
 });
+
+Deno.test("sanitizeModelOutput splits and reclassifies paragraph-level tool narration", () => {
+  const narration = "I will call the get_weather tool now.";
+  const preamble = "Checking the weather for you.";
+  const text = `${narration}\n\n${preamble}`;
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [
+      ownUtteranceTurn(text),
+      toolUseTurn({ name: "get_weather", args: {} }),
+    ],
+  );
+  assertEquals(result.emit.length, 3);
+  const [thought, utterance, toolCall] = result.emit;
+  assertEquals(thought.type, "own_thought");
+  assertEquals(utterance.type, "own_utterance");
+  assertEquals(toolCall.type, "tool_call");
+  if (thought.type !== "own_thought" || utterance.type !== "own_utterance") {
+    throw new Error("unreachable");
+  }
+  assertEquals(thought.text, narration);
+  assertEquals(utterance.text, preamble);
+});
