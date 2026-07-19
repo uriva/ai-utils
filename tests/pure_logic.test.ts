@@ -1170,6 +1170,21 @@ Deno.test("Gemini MALFORMED_FUNCTION_CALL is retryable instead of do_nothing", (
   assert(isRetryableError(geminiMalformedFunctionCallError([])));
 });
 
+Deno.test("Gemini MALFORMED_FUNCTION_CALL rejects even when parts are present", () => {
+  // Gemini can return an empty-args functionCall shell plus the raw arg-JSON
+  // as text fragments next to a MALFORMED_FUNCTION_CALL finish reason.
+  const garbageParts = [
+    { functionCall: { name: "update_user_field", args: {} } },
+    { text: ",userId:" },
+    { text: "972506207421" },
+  ];
+  assertThrows(
+    () => rejectMalformedFunctionCall("MALFORMED_FUNCTION_CALL", garbageParts),
+    Error,
+    "MALFORMED_FUNCTION_CALL",
+  );
+});
+
 Deno.test("isRepetitionFlood detects repeated sub-strings", () => {
   assert(isRepetitionFlood("abc".repeat(30)));
   assert(isRepetitionFlood("X".repeat(30)));

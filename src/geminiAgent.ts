@@ -175,12 +175,15 @@ export const geminiMalformedFunctionCallError = (parts: Part[]) => {
   return err;
 };
 
+// Gemini may return parts alongside MALFORMED_FUNCTION_CALL: an empty-args
+// functionCall shell plus the raw arg-JSON as text fragments. Those parts are
+// garbage — emitting them leaks JSON fragments to the user and executes a
+// broken tool call — so reject unconditionally and let retry/fallback run.
 export const rejectMalformedFunctionCall = (
   finishReason: string | undefined,
   parts: Part[],
 ) => {
   if (finishReason !== geminiMalformedFunctionCallReason) return;
-  if (!empty(parts)) return;
   throw geminiMalformedFunctionCallError(parts);
 };
 
@@ -422,13 +425,20 @@ const withAbortSignal = (
   config: { ...(req.config ?? {}), abortSignal: signal },
 });
 
-const rawCallGemini = async (
+type GeminiSdkExchangeResult = {
+  parts: Part[];
+  finishReason?: string;
+  usageMetadata?: TokenUsage;
+  promptBlockReason?: string;
+};
+
+const geminiSdkExchange = async (
   signal: AbortSignal,
   { req: rawReq, disableStreaming }: {
     req: GenerateContentParameters;
     disableStreaming?: boolean;
   },
-): Promise<GeminiOutput> => {
+): Promise<GeminiSdkExchangeResult> => {
   const req = withAbortSignal(signal, rawReq);
   requestDiag(req, disableStreaming);
   const handleStreamChunk = getStreamChunk();
@@ -537,8 +547,34 @@ const rawCallGemini = async (
     );
   }
 
-  if (finalUsageMetadata) {
-    tokenUsage.access(finalUsageMetadata, req.model);
+  return {
+    parts: accumulatedParts,
+    finishReason: finalFinishReason,
+    usageMetadata: finalUsageMetadata,
+    promptBlockReason,
+  };
+};
+
+const geminiSdkExchangeInjection: Injection<typeof geminiSdkExchange> = context(
+  geminiSdkExchange,
+);
+
+// Test seam: script the exact Gemini exchange (parts + finishReason) without
+// hitting the API, e.g. to reproduce malformed function-call responses.
+export const injectGeminiSdkExchange = geminiSdkExchangeInjection.inject;
+
+const rawCallGemini = async (
+  signal: AbortSignal,
+  args: {
+    req: GenerateContentParameters;
+    disableStreaming?: boolean;
+  },
+): Promise<GeminiOutput> => {
+  const { parts, finishReason, usageMetadata, promptBlockReason } =
+    await geminiSdkExchangeInjection.access(signal, args);
+
+  if (usageMetadata) {
+    tokenUsage.access(usageMetadata, args.req.model);
   }
 
   // A prompt-level block (`promptFeedback.blockReason`) returns zero candidates,
@@ -546,20 +582,20 @@ const rawCallGemini = async (
   // surfacing it, the agent silently records `do_nothing`, making the bot look
   // dead to a waiting user. Route it through the same sink the candidate
   // `finishReason` uses so the safety-block path produces a user-facing message.
-  const isPromptBlock = !!promptBlockReason && empty(accumulatedParts);
+  const isPromptBlock = !!promptBlockReason && empty(parts);
   if (isPromptBlock) {
-    promptBlocked.access(promptBlockReason!, req);
+    promptBlocked.access(promptBlockReason!, args.req);
   }
-  const effectiveFinishReason = finalFinishReason ??
+  const effectiveFinishReason = finishReason ??
     (isPromptBlock ? promptBlockReasonPrefix + promptBlockReason : undefined);
 
   if (effectiveFinishReason) {
     finishReasonSink.access(effectiveFinishReason);
   }
 
-  rejectMalformedFunctionCall(finalFinishReason, accumulatedParts);
+  rejectMalformedFunctionCall(finishReason, parts);
 
-  return accumulatedParts.flatMap((part: Part): GeminiOutput => {
+  return parts.flatMap((part: Part): GeminiOutput => {
     const {
       text,
       functionCall,
