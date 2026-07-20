@@ -29,7 +29,7 @@ runForAllProviders(
       },
       // Injected system notification (correctional thought)
       ownThoughtTurn(
-        "I should remain focused on my role as a bot builder assistant and help the administrator manage the 'Atlantis Attractions' bot, rather than outputting arbitrary titles like 'Israel - Sales Bot' which have no relevance to the conversation.",
+        "I should remain focused on my role as a helpful translator bot and translate sentences into French, rather than outputting arbitrary titles like 'Spanish - Pizza Bot' which have no relevance to the conversation.",
       ),
     ];
 
