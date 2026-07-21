@@ -1152,7 +1152,8 @@ Deno.test("isSyntheticTimeoutError marks errors that should skip same-model retr
   assert(!isRetryableError(timeout));
 });
 
-Deno.test("Gemini timeout fallback model differs from primary models", () => {
+Deno.test("Gemini timeout fallback model differs from primary models and uses flash-lite", () => {
+  assertEquals(geminiFallbackVersion, "gemini-3.5-flash-lite");
   assertEquals(new Set([geminiFallbackVersion, geminiFlashVersion]).size, 2);
   assertEquals(new Set([geminiFallbackVersion, geminiProVersion]).size, 2);
 });

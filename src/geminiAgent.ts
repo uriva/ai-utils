@@ -2199,7 +2199,7 @@ export const countEventsTokens = async (
 
     const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
     const { totalTokens } = await sdk.models.countTokens({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.6-flash",
       contents,
     });
     return totalTokens ?? 0;

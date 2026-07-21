@@ -199,9 +199,9 @@ type GeminiModelVersions = {
 };
 
 const defaultGeminiModelVersions: GeminiModelVersions = {
-  pro: "gemini-3.5-flash",
-  flash: "gemini-3.5-flash",
-  fallback: "gemini-3.1-flash-lite",
+  pro: "gemini-3.6-flash",
+  flash: "gemini-3.6-flash",
+  fallback: "gemini-3.5-flash-lite",
 };
 
 const geminiModelVersions: Injection<() => GeminiModelVersions> = context(() =>
@@ -477,7 +477,7 @@ export const countTextTokens = async (
   if (!text) return 0;
   const sdk = new GoogleGenAI({ apiKey: tokenInjection.access() });
   const { totalTokens } = await sdk.models.countTokens({
-    model: "gemini-3.5-flash",
+    model: "gemini-3.6-flash",
     contents: text,
   });
   return totalTokens ?? 0;
