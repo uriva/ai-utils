@@ -62,6 +62,7 @@ export {
   zodToGeminiParameters,
 } from "./src/gemini.ts";
 export {
+  geminiGenJson,
   genJson,
   genJsonFromConvo,
   genJsonOverride,

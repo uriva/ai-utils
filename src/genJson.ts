@@ -100,3 +100,5 @@ export const genJson =
       attachments,
     );
   };
+
+export const geminiGenJson = genJson;

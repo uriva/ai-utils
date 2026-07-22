@@ -886,6 +886,18 @@ const fixStart = (history: Content[]) =>
     ]
     : history;
 
+const fixEnd = (history: Content[]) => {
+  if (empty(history)) return history;
+  const last = history[history.length - 1];
+  if (last.role === "model") {
+    return [
+      ...history,
+      { role: "user", parts: [{ text: "<continue>" }] },
+    ];
+  }
+  return history;
+};
+
 const mergeConsecutiveRoles = (contents: Content[]): Content[] => {
   if (empty(contents)) return [];
   const result: Content[] = [{ ...contents[0] }];
@@ -943,6 +955,7 @@ export const buildReq = (
     ),
     mergeConsecutiveRoles,
     fixStart,
+    fixEnd,
   )(events),
 });
 
