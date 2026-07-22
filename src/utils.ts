@@ -43,17 +43,25 @@ export const isSyntheticTimeoutError = (error: unknown) =>
   error instanceof Error && syntheticTimeoutMarker in error &&
   (error as { syntheticTimeout: unknown }).syntheticTimeout === true;
 
-export const isRetryableError = (error: unknown) =>
-  !isSyntheticTimeoutError(error) &&
-  (isServerError(error) || isRateLimitError(error));
+export const isTransientFetchError = (error: unknown) => {
+  const norm = normalizeError(error);
+  return (
+    norm instanceof TypeError &&
+    (/reading a body|network|connection|fetch/i.test(norm.message) ||
+      norm.message.length === 0)
+  );
+};
 
-// The Gemini SDK's uploadBlob calls response.json() unconditionally, so a
-// transient non-JSON error body (gateway 5xx HTML, empty body) surfaces as a
-// SyntaxError instead of a status code. A TypeError signals a transient
-// network/connection failure. Both are safe to retry for an idempotent upload.
-const isTransientFetchError = (error: unknown) =>
-  error instanceof TypeError &&
-  /reading a body|network|connection/i.test(error.message);
+export const isRetryableError = (error: unknown) => {
+  const norm = normalizeError(error);
+  return (
+    !isSyntheticTimeoutError(norm) &&
+    (isServerError(norm) ||
+      isRateLimitError(norm) ||
+      isTransientFetchError(norm) ||
+      norm instanceof SyntaxError)
+  );
+};
 
 export const geminiUploadJsonParseErrorMessage = "Unexpected end of JSON input";
 

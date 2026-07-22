@@ -1129,6 +1129,18 @@ Deno.test("isRetryableError excludes synthetic timeouts to prevent retry-amplifi
   const rateLimit = new Error("too many requests");
   Object.assign(rateLimit, { status: 429 });
   assert(isRetryableError(rateLimit));
+  assert(
+    isRetryableError(new TypeError("error reading a body")),
+    "transient network/fetch failures must be retried",
+  );
+  assert(
+    isRetryableError(new TypeError("Failed to fetch")),
+    "fetch failures must be retried",
+  );
+  assert(
+    isRetryableError(new SyntaxError("Unexpected token < in JSON")),
+    "JSON parse errors from gateway HTML error pages must be retried",
+  );
 });
 
 Deno.test("isRetryableUploadError retries transient JSON-parse and network failures from Gemini uploadBlob", () => {
