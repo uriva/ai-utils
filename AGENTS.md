@@ -2,6 +2,12 @@
 
 Never fix quality issue without first a reproducing test.
 
+Fix at the **earliest point of failure**, not somewhere along the stack. When
+one root defect cascades into several downstream symptoms, fix the root
+mechanism — do not stack guards at each downstream symptom. If the symptoms are
+only _maybe_ connected, still prefer the single earliest-point fix and verify
+the cascade disappears.
+
 When reproducing a hallucination or quality regression, target the **first
 failure point in history** — the earliest turn where the model emits the bad
 behavior. Do not try to reproduce the downstream cascade (the bot trusting its

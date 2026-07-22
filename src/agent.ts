@@ -1390,15 +1390,18 @@ const parseLooseArgs = (raw: string): Record<string, unknown> | undefined => {
   return undefined;
 };
 
+const cleanMangledToolCallText = (text: string): string =>
+  text.trim().replace(/^`{3}\s*tool_code\s*/i, "").replace(
+    /`{3}\s*$/,
+    "",
+  ).replace(/^print\s*\(\s*/i, "").trim();
+
 // Recovers a { name, args } function call from a mangled tool-call utterance.
 // Returns undefined if we cannot even recover a tool name.
 export const parseMangledToolCall = (
   text: string,
 ): { name: string; args: Record<string, unknown> } | undefined => {
-  const cleaned = text.trim().replace(/^`{3}\s*tool_code\s*/i, "").replace(
-    /`{3}\s*$/,
-    "",
-  ).replace(/^print\s*\(\s*/i, "").trim();
+  const cleaned = cleanMangledToolCallText(text);
   const nameMatch = cleaned.match(mangledToolNamePattern);
   if (!nameMatch) return undefined;
   const name = nameMatch[1];
@@ -1411,6 +1414,66 @@ export const parseMangledToolCall = (
     : cleaned.slice(openIndex + 1);
   return { name, args: parseLooseArgs(body) ?? {} };
 };
+
+// True when the text is exactly one mangled tool call and nothing else: the
+// call preamble sits at the very start and the call's closing bracket is the
+// last character. Joining utterance fragments is only safe under this
+// condition — otherwise genuine user-facing text could be swallowed.
+const isSingleMangledCall = (text: string): boolean => {
+  if (!isMangledToolCall(text)) return false;
+  const cleaned = cleanMangledToolCallText(text);
+  const nameMatch = cleaned.match(mangledToolNamePattern);
+  if (!nameMatch || nameMatch.index !== 0) return false;
+  const open = cleaned[nameMatch[0].length - 1];
+  const close = open === "{" ? "}" : ")";
+  return cleaned.lastIndexOf(close) === cleaned.length - 1;
+};
+
+const isPlainUtterance = (
+  event: HistoryEvent,
+): event is OwnUtterance<unknown> =>
+  event.type === "own_utterance" && empty(event.attachments ?? []);
+
+const allPlainUtterances = (
+  events: HistoryEvent[],
+): events is OwnUtterance<unknown>[] => events.every(isPlainUtterance);
+
+const joinIfFragmentedMangledCall = (
+  run: OwnUtterance<unknown>[],
+): HistoryEvent[] => {
+  if (run.length < 2) return run;
+  const joinedText = run.map(({ text }) => text).join("");
+  return !run.some(({ text }) => isSingleMangledCall(text)) &&
+      isSingleMangledCall(joinedText)
+    ? [{ ...run[0], text: joinedText }]
+    : run;
+};
+
+const appendToSegments = (
+  segments: HistoryEvent[][],
+  event: HistoryEvent,
+): HistoryEvent[][] => {
+  const current = segments.at(-1);
+  return current && isPlainUtterance(event) && allPlainUtterances(current)
+    ? [...segments.slice(0, -1), [...current, event]]
+    : [...segments, [event]];
+};
+
+// The provider can deliver one logical visible message split across several
+// text parts (thought-signature boundaries break the stream), each becoming
+// its own utterance event. A tool call rendered as visible text may therefore
+// arrive fragmented: the preamble part matches the mangled-call pattern but
+// parses to truncated/empty args, and the body parts no longer match the
+// pattern at all, so they would leak to the user as-is. When every part of an
+// adjacent utterance run is a non-standalone fragment yet their concatenation
+// is exactly one mangled call, join the run back into a single utterance so
+// the recovery below promotes the whole call with its full arguments.
+const coalesceFragmentedMangledCalls = (
+  output: HistoryEvent[],
+): HistoryEvent[] =>
+  output.reduce<HistoryEvent[][]>(appendToSegments, []).flatMap((segment) =>
+    allPlainUtterances(segment) ? joinIfFragmentedMangledCall(segment) : segment
+  );
 
 export const systemNotificationPrefix = "[System notification:";
 
@@ -1795,7 +1858,8 @@ export const sanitizeModelOutput = (
     sanitized,
   );
   const withoutNoResponse = reclassifyNoResponse(withoutFabrications);
-  const reclassified = reclassifyLeakedThoughts(history)(withoutNoResponse);
+  const coalesced = coalesceFragmentedMangledCalls(withoutNoResponse);
+  const reclassified = reclassifyLeakedThoughts(history)(coalesced);
   const withoutNarration = reclassifyToolCallNarration(reclassified);
   const withoutLeadingReasoning = reclassifyLeadingReasoningUtterances(
     withoutNarration,
