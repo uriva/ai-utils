@@ -96,6 +96,21 @@ llmTest(
 Deno.test("assertNoScriptDrift ignores a single stray glyph", () =>
   assertNoScriptDrift(hebrewInput, hebrewReplyWithOneStrayGlyph));
 
+llmTest(
+  "assertNoScriptDrift allows script switch on long input where instructions/user query are past top 2000 chars",
+  () =>
+    injectSecrets(async () => {
+      const genericSystemPadding = "System guidelines for agent execution. "
+        .repeat(100);
+      const longInput =
+        `${genericSystemPadding}\n\nLanguage rule: Match the user's language. If they ask in Nepali or Romanized Nepali, reply in Nepali.\nUser query: Namaste, tapai ko kasto chha?`;
+      await assertNoScriptDrift(
+        longInput,
+        "नमस्ते, म सञ्चै छु। तपाइँलाई कसरी सहयोग गर्न सक्छु?",
+      );
+    })(),
+);
+
 import { genJsonFromConvo } from "../src/genJson.ts";
 
 llmTest(

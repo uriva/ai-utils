@@ -90,7 +90,7 @@ const verdictSchema = z.object({
 const verifierSystemPrompt =
   `You detect writing-system corruption in AI output. An AI was given some input text and produced output that introduced a writing system (script) that was NOT present in the input. Decide whether that is legitimate.
 
-Legitimate examples: the input explicitly asked to translate into that language; the input asked for content in that language; a proper noun genuinely uses that script.
+Legitimate examples: the input explicitly asked to translate into that language; the input asked for content in that language; a proper noun genuinely uses that script; the system prompt instructs matching the user's language or replying in that language; or the user's query is in that language or requests a response in that language (even if written in Romanized/Latin script, e.g. Romanized Nepali, Hindi, Arabic, Hebrew, etc.).
 
 NOT legitimate (this is corruption): the output rewrote the input's own language into a different but visually-similar script (e.g. Hebrew rewritten as Armenian homoglyphs), or switched scripts for no reason the input supports. When the output should have preserved the input's language/script but instead used a different one, it is NOT legitimate.
 
@@ -111,6 +111,14 @@ const makeScriptDriftError = (
   return err;
 };
 
+const formatInputForVerifier = (input: string, maxChars = 8000): string => {
+  if (input.length <= maxChars) return input;
+  const half = Math.floor(maxChars / 2);
+  return `${input.slice(0, half)}\n\n[... ${
+    input.length - maxChars
+  } characters truncated ...]\n\n${input.slice(-half)}`;
+};
+
 // Throws ScriptDriftError if the output introduces an unjustified writing
 // system relative to the input. No-op when scripts are consistent, so the
 // extra model call only happens on the rare suspicious case.
@@ -126,14 +134,14 @@ export const assertNoScriptDrift = async (
     .map((s) => `- ${s}: ${sampleOfScript(output, s)}`)
     .join("\n");
 
+  const formattedInput = formatInputForVerifier(input);
+
   const { legitimate, reason } = await genJson(
     { provider: "google", mini: true },
     verifierSystemPrompt,
     verdictSchema,
   )(
-    `INPUT (truncated):\n${
-      input.slice(0, 2000)
-    }\n\nThe output introduced these writing systems that were absent from the input:\n${samples}\n\nIs introducing ${
+    `INPUT (truncated if long):\n${formattedInput}\n\nThe output introduced these writing systems that were absent from the input:\n${samples}\n\nIs introducing ${
       driftedList.join(", ")
     } legitimate here?`,
   );
