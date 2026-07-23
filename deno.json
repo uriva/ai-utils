@@ -1,6 +1,6 @@
 {
   "name": "@uri/ai-utils",
-  "version": "0.1.499",
+  "version": "0.1.500",
   "license": "MIT",
   "exports": "./mod.ts",
   "imports": {
@@ -13,7 +13,7 @@
     "gamla": "jsr:@uri/gamla@0.0.16",
     "js-tiktoken": "npm:js-tiktoken@1.0.21",
     "openai": "npm:openai@5.2.0",
-    "rmmbr": "npm:rmmbr@0.0.26",
+    "rmmbr": "jsr:@uri/rmmbr@0.1.4",
     "zod": "npm:zod@3.25.57"
   },
   "tasks": {
