@@ -53,7 +53,6 @@ export {
 } from "./src/continuousCompaction.ts";
 export {
   countTextTokens,
-  emptyGeminiCandidateMessage,
   geminiGenText,
   injectGeminiModelVersions,
   injectGeminiToken,

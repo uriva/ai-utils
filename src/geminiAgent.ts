@@ -1034,116 +1034,6 @@ const filterDoNothing = (
   history: GeminiHistoryEvent[],
 ): GeminiHistoryEvent[] => history.filter((e) => e.type !== "do_nothing");
 
-const eventHasThoughtSignature = (e: GeminiHistoryEvent): boolean =>
-  !!("modelMetadata" in e && e.modelMetadata?.thoughtSignature?.trim());
-
-const historyHasThoughtSignatures = (
-  events: GeminiHistoryEvent[],
-): boolean => events.some(eventHasThoughtSignature);
-
-// Recovers from the `gemini-3.5-flash` empty-candidate failure. When a
-// conversation's own accumulated `thoughtSignature`s are replayed back, the
-// model deterministically returns an empty candidate (`finishReason=STOP`, zero
-// tokens, no parts, no blockReason) — or, on the streaming path, hangs until the
-// model-call timeout fires. The signature on the last (unanswered) `tool_call`
-// is the trigger.
-//
-// We must NOT mutate history to recover:
-//   - Stripping the signatures 400s: Gemini rejects a `functionCall` part
-//     missing its `thought_signature` with 400 INVALID_ARGUMENT.
-//   - Dropping the trailing turns loses events that had real-world effects
-//     (tool calls, sent messages) — the model would forget it already reacted /
-//     already sent something and could repeat the side effect.
-//
-// The working, non-destructive recovery is to append one EPHEMERAL system-note
-// user turn (never persisted to history — it only exists in this one retry
-// request). This changes the turn boundary so the model must produce output,
-// and it recovers reliably (verified 8/8 on two faithful captured requests,
-// while the request-as-is is empty 8/8). See prompt2bot
-// `server/src/geminiEmptyCandidate*.test.ts` and the request fixtures beside
-// them, and the prompt2bot issue on the empty-candidate do_nothing loop.
-export const emptyCandidateRecoveryNudge =
-  `${systemNotificationPrefix} respond to the user's latest message now.]`;
-
-const withEmptyCandidateRecoveryNudge = (
-  events: GeminiHistoryEvent[],
-): GeminiHistoryEvent[] => [
-  ...events,
-  {
-    type: "participant_utterance",
-    isOwn: false,
-    name: "system",
-    text: emptyCandidateRecoveryNudge,
-    id: "empty-candidate-recovery-nudge",
-    timestamp: Date.now(),
-  },
-];
-
-// Second-tier directive used when the plain recovery nudge ALSO returns an
-// empty candidate. It explicitly instructs the model to compose its reply as
-// plain text (no tool call, no silence), reusing the context it already has —
-// this is what turns a would-be silent `do_nothing` into a useful, contextual
-// user-facing message.
-export const emptyCandidateComposeDirective =
-  `${systemNotificationPrefix} the user is still waiting for a reply. ` +
-  `Compose your answer to the user's latest message now and output it as plain ` +
-  `text. Do NOT call any tool and do NOT stay silent — write the actual ` +
-  `message you want to send the user, using the information you already have.]`;
-
-const withEmptyCandidateComposeDirective = (
-  events: GeminiHistoryEvent[],
-): GeminiHistoryEvent[] => [
-  ...events,
-  {
-    type: "participant_utterance",
-    isOwn: false,
-    name: "system",
-    text: emptyCandidateComposeDirective,
-    id: "empty-candidate-compose-directive",
-    timestamp: Date.now(),
-  },
-];
-
-// Guaranteed non-empty final fallback: when every model attempt returns empty,
-// we still must not leave the user on a silent `do_nothing`. Emitting this as a
-// real text part makes `didNothing` false so the user gets a message.
-const forcedEmptyCandidateUtterance =
-  "I'm sorry, I'm having trouble putting together a response right now. Could you repeat or rephrase your last message?";
-
-const guaranteedNonEmptyOutput = (): GeminiOutput => [
-  { type: "text", text: forcedEmptyCandidateUtterance },
-];
-
-const isNonEmpty = (output: GeminiOutput): boolean => !didNothing(output);
-
-// The escalation policy for the empty-candidate failure, factored out so it can
-// be driven by any call implementation (the real `callGemini` in production, a
-// deterministic fake in tests). Escalates until the user gets a real reply:
-//   1. plain recovery nudge,
-//   2. a forceful compose directive that turns silence into a contextual reply,
-//   3. a guaranteed non-empty generic message (never silent).
-export const escalateEmptyCandidateRecovery = async (
-  call: (events: GeminiHistoryEvent[]) => Promise<GeminiOutput>,
-  events: GeminiHistoryEvent[],
-): Promise<GeminiOutput> => {
-  const nudged = await call(withEmptyCandidateRecoveryNudge(events));
-  if (isNonEmpty(nudged)) return nudged;
-  const composed = await call(withEmptyCandidateComposeDirective(events));
-  return isNonEmpty(composed) ? composed : guaranteedNonEmptyOutput();
-};
-
-// Recovers from the deterministic `gemini-3.5-flash` empty-candidate failure.
-// All tiers are request-scoped; persisted history is never mutated.
-const recoverFromEmptyCandidate = (
-  eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
-  disableStreaming: boolean | undefined,
-  events: GeminiHistoryEvent[],
-): Promise<GeminiOutput> =>
-  escalateEmptyCandidateRecovery(
-    (evs) => callGemini(eventsToRequest(evs), disableStreaming),
-    events,
-  );
-
 const stripUnsupportedAttachmentsFromEvent = (
   event: GeminiHistoryEvent,
 ): { event: GeminiHistoryEvent; changed: boolean } => {
@@ -1221,6 +1111,9 @@ export const filterOrphanedToolResults = (
     return false;
   });
 };
+
+const eventHasThoughtSignature = (e: GeminiHistoryEvent): boolean =>
+  !!("modelMetadata" in e && e.modelMetadata?.thoughtSignature?.trim());
 
 export const filterInvalidToolCalls = (
   history: GeminiHistoryEvent[],
@@ -1643,33 +1536,9 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
   try {
     const req = eventsToRequest(events);
     try {
-      const output = await callGemini(req, disableStreaming);
-      // Empty candidate (buffered path): the model returned normally but with
-      // no usable content. If history carries thoughtSignatures, this is the
-      // deterministic `gemini-3.5-flash` empty-candidate failure — recover with
-      // escalating directives (nudge -> compose -> guaranteed message, no
-      // history mutation) instead of recording a silent do_nothing.
-      if (didNothing(output) && historyHasThoughtSignatures(events)) {
-        return await recoverFromEmptyCandidate(
-          eventsToRequest,
-          disableStreaming,
-          events,
-        );
-      }
-      return output;
+      return await callGemini(req, disableStreaming);
     } catch (error) {
       const err = normalizeError(error);
-      // Empty candidate (streaming path): the empty stream never terminates, so
-      // the call hangs until the model-call timeout fires. Same root cause as
-      // above; recover with escalating directives (never silent) before giving
-      // up.
-      if (isSyntheticTimeoutError(err) && historyHasThoughtSignatures(events)) {
-        return recoverFromEmptyCandidate(
-          eventsToRequest,
-          disableStreaming,
-          events,
-        );
-      }
       if (isTokenLimitExceeded(err)) {
         const totalTokens = sum(await map(estimateTokens)(events));
         throw new Error(

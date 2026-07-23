@@ -22,7 +22,7 @@ import { pruneDefaultsFromRequired } from "./toolTyping.ts";
 
 export { zodToTypingString } from "./toolTyping.ts";
 
-export const emptyGeminiCandidateMessage =
+const emptyGeminiCandidateMessage =
   "Gemini returned an empty candidate (no text)";
 
 // deno-lint-ignore no-explicit-any
