@@ -2466,8 +2466,6 @@ export const runAbstractAgent = (
               updatedHistory,
               { setScratch: (id, content) => scratchPad.set(id, content) },
               spec.rewriteHistory,
-            ).catch((e) =>
-              console.error("[compaction] Tool result compaction failed", e)
             );
           }
           return;
@@ -2479,7 +2477,10 @@ export const runAbstractAgent = (
     }
   })();
 
-const scheduleHistoryCompaction = (
+// Compaction failures must surface as unhandled rejections, not console.error
+// logs: a silently-failing compaction lets history grow unbounded and
+// multiplies token spend on every subsequent model call.
+export const scheduleHistoryCompaction = (
   spec: AgentSpec,
   history: HistoryEvent[],
 ): void => {
@@ -2488,14 +2489,7 @@ const scheduleHistoryCompaction = (
   if (!compactHistory || !threshold) return;
   estimateAgentInputTokens(spec, history).then((totalTokens) => {
     if (totalTokens <= threshold) return;
-    compactHistory(history).catch((error) =>
-      console.error("Failed scheduling history compaction", error)
-    );
-  }).catch((error) => {
-    console.error(
-      "Failed estimating tokens for history compaction check",
-      error,
-    );
+    compactHistory(history);
   });
 };
 

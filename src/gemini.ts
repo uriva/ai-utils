@@ -2,6 +2,7 @@ import {
   type Content,
   type FunctionDeclaration,
   type GenerateContentParameters,
+  type GenerateContentResponse,
   GoogleGenAI,
   type Part,
   ThinkingLevel,
@@ -233,6 +234,30 @@ export const geminiThinkingConfig = (mini: boolean | undefined) => ({
     : { thinkingLevel: ThinkingLevel.HIGH }),
 });
 
+// Parse (and validation-failure) errors must happen INSIDE the cached
+// function: a malformed response body must never be written to the cache,
+// or every later call for the same input replays the poisoned payload.
+const parseGenJsonResponse = (response: GenerateContentResponse) => {
+  if (response.candidates?.[0]?.finishReason === "MAX_TOKENS") {
+    throw new Error(
+      "Gemini response truncated due to MAX_TOKENS limit",
+    );
+  }
+  const text = response.text;
+  if (!text) throw new Error(emptyGeminiCandidateMessage);
+  return JSON.parse(text);
+};
+
+const generateContentInjection: Injection<
+  (req: GenerateContentParameters) => Promise<GenerateContentResponse>
+> = context((req: GenerateContentParameters) =>
+  new GoogleGenAI({ apiKey: tokenInjection.access() }).models.generateContent(
+    req,
+  )
+);
+
+export const injectGeminiGenerateContent = generateContentInjection.inject;
+
 export const geminiGenJsonFromConvo: <T extends ZodType>(
   { mini, maxOutputTokens }: ModelOpts,
   messages: ChatCompletionMessageParam[],
@@ -244,24 +269,13 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
   zodType: T,
   attachments?: MediaAttachment[],
 ): Promise<z.infer<T>> => {
-  const cacher = makeCache("geminiCompletionResponseText-v3");
+  const cacher = makeCache("geminiCompletionResponseText-v4");
   const cachedCall = cacher(
     conditionalRetry(isRetryableError)(
       1000,
       3,
       (req: GenerateContentParameters) =>
-        new GoogleGenAI({ apiKey: tokenInjection.access() }).models
-          .generateContent(req)
-          .then((response) => {
-            if (response.candidates?.[0]?.finishReason === "MAX_TOKENS") {
-              throw new Error(
-                "Gemini response truncated due to MAX_TOKENS limit",
-              );
-            }
-            const text = response.text;
-            if (!text) throw new Error(emptyGeminiCandidateMessage);
-            return text;
-          }),
+        generateContentInjection.access(req).then(parseGenJsonResponse),
     ),
   );
   const contents = pipe(openAiToGeminiMessage)(messages);
@@ -277,18 +291,16 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
       lastUserMessage.parts.push(...attachmentsToParts(resolvedAttachments));
     }
   }
-  return JSON.parse(
-    await cachedCall({
-      model: geminiModelVersion(mini),
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: zodToGeminiParameters(zodType),
-        thinkingConfig: geminiThinkingConfig(mini),
-        ...(maxOutputTokens ? { maxOutputTokens } : {}),
-      },
-      contents,
-    }),
-  );
+  return cachedCall({
+    model: geminiModelVersion(mini),
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: zodToGeminiParameters(zodType),
+      thinkingConfig: geminiThinkingConfig(mini),
+      ...(maxOutputTokens ? { maxOutputTokens } : {}),
+    },
+    contents,
+  });
 };
 
 export const attachmentsToParts = (
