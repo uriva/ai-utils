@@ -78,6 +78,7 @@ export {
   injectGeminiModelCallTimeoutMs,
   injectPromptBlockedLogger,
   injectTokenUsage,
+  safetyWarningText,
   type TokenUsage,
 } from "./src/geminiAgent.ts";
 export { injectKimiToken } from "./src/kimiAgent.ts";

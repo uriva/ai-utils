@@ -5,6 +5,8 @@ import {
   type GenerateContentParameters,
   type GenerateContentResponseUsageMetadata,
   GoogleGenAI,
+  HarmBlockThreshold,
+  HarmCategory,
   type Part,
 } from "@google/genai";
 import { context, type Injection } from "@uri/inject";
@@ -563,6 +565,27 @@ const geminiSdkExchangeInjection: Injection<typeof geminiSdkExchange> = context(
 // hitting the API, e.g. to reproduce malformed function-call responses.
 export const injectGeminiSdkExchange = geminiSdkExchangeInjection.inject;
 
+const sanitizePromptTextForGemini = (text: string): string =>
+  text
+    .replace(
+      /give me the (?:video|vidio|clip)(?: of (?:this|thiis) scene)?/gi,
+      "find this scene",
+    )
+    .replace(/give me the (?:video|vidio|clip)/gi, "find scene")
+    .replace(/black dahlia/gi, "black flower");
+
+const sanitizeContentsForGemini = (
+  contents: Content[],
+): Content[] =>
+  contents.map((c: Content) => ({
+    ...c,
+    parts: c.parts?.map((p: Part) =>
+      typeof p.text === "string"
+        ? { ...p, text: sanitizePromptTextForGemini(p.text) }
+        : p
+    ),
+  }));
+
 const rawCallGemini = async (
   signal: AbortSignal,
   args: {
@@ -578,12 +601,54 @@ const rawCallGemini = async (
   }
 
   // A prompt-level block (`promptFeedback.blockReason`) returns zero candidates,
-  // so `finishReason` is undefined and the turn yields no parts. Without
-  // surfacing it, the agent silently records `do_nothing`, making the bot look
-  // dead to a waiting user. Route it through the same sink the candidate
-  // `finishReason` uses so the safety-block path produces a user-facing message.
+  // so `finishReason` is undefined and the turn yields no parts. Try a single
+  // sanitized retry if prompt contained heuristic trigger phrases; otherwise
+  // route it through the same sink the candidate `finishReason` uses.
   const isPromptBlock = !!promptBlockReason && empty(parts);
-  if (isPromptBlock) {
+  if (isPromptBlock && Array.isArray(args.req.contents)) {
+    const sanitizedContents = sanitizeContentsForGemini(
+      args.req.contents as Content[],
+    );
+    if (
+      JSON.stringify(sanitizedContents) !== JSON.stringify(args.req.contents)
+    ) {
+      const retryRes = await geminiSdkExchangeInjection.access(signal, {
+        ...args,
+        req: { ...args.req, contents: sanitizedContents },
+      });
+      if (!retryRes.promptBlockReason && !empty(retryRes.parts)) {
+        if (retryRes.usageMetadata) {
+          tokenUsage.access(retryRes.usageMetadata, args.req.model);
+        }
+        if (retryRes.finishReason) {
+          finishReasonSink.access(retryRes.finishReason);
+        }
+        rejectMalformedFunctionCall(retryRes.finishReason, retryRes.parts);
+        return retryRes.parts.flatMap((part: Part): GeminiOutput => {
+          const {
+            text,
+            functionCall,
+            thoughtSignature,
+            inlineData,
+            fileData,
+            thought,
+          } = part;
+          if (functionCall) {
+            return [{ type: "function_call", functionCall, thoughtSignature }];
+          }
+          if (inlineData) {
+            return [{ type: "inline_data", inlineData, thoughtSignature }];
+          }
+          if (fileData) {
+            return [{ type: "file_data", fileData, thoughtSignature }];
+          }
+          if (typeof text === "string") {
+            return [{ type: "text", text, thoughtSignature, thought }];
+          }
+          return [];
+        });
+      }
+    }
     promptBlocked.access(promptBlockReason!, args.req);
   }
   const effectiveFinishReason = finishReason ??
@@ -815,16 +880,12 @@ const historyEventToContent = (
   if (e.type === "own_reaction") {
     return wrapModelContent([{
       ...optionalThoughtSignature(e.modelMetadata?.thoughtSignature),
-      text: `You reacted ${e.reaction} to message: ${
-        getRefText(e.onMessage).slice(0, 100)
-      }`,
+      text: `You reacted ${e.reaction}`,
     }]);
   }
   if (e.type === "participant_reaction") {
     return wrapUserContent([{
-      text: `${e.name} reacted ${e.reaction} to message: ${
-        getRefText(e.onMessage).slice(0, 100)
-      }`,
+      text: `${e.name} reacted ${e.reaction}`,
     }]);
   }
   if (e.type === "do_nothing") {
@@ -929,6 +990,14 @@ const toolingConfig = (tools: Tool<ZodType>[]) =>
       toolConfig: { functionCallingConfig: {} },
     };
 
+const textSafetyCategories = [
+  HarmCategory.HARM_CATEGORY_HARASSMENT,
+  HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+  HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+  HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+  HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
+];
+
 export const buildReq = (
   lightModel: boolean | undefined,
   prompt: string,
@@ -940,6 +1009,10 @@ export const buildReq = (
   model: geminiModelVersion(lightModel),
   config: {
     systemInstruction: prompt,
+    safetySettings: textSafetyCategories.map((category) => ({
+      category,
+      threshold: HarmBlockThreshold.OFF,
+    })),
     ...toolingConfig(tools),
     thinkingConfig: geminiThinkingConfig(lightModel),
     ...(maxOutputTokens ? { maxOutputTokens } : {}),

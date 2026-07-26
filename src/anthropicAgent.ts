@@ -301,18 +301,14 @@ async (
   if (e.type === "own_reaction") {
     return [{
       role: "assistant",
-      content: `You reacted ${e.reaction} to message: ${
-        getRefText(e.onMessage).slice(0, 100)
-      }`,
+      content: `You reacted ${e.reaction}`,
     }];
   }
 
   if (e.type === "participant_reaction") {
     return [{
       role: "user",
-      content: `${e.name} reacted ${e.reaction} to message: ${
-        getRefText(e.onMessage).slice(0, 100)
-      }`,
+      content: `${e.name} reacted ${e.reaction}`,
     }];
   }
 
