@@ -2167,7 +2167,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
               parseResult.error instanceof z.ZodError
                 ? formatZodIssues(parseResult.error, toolJsonSchema)
                 : parseResult.error.message
-            }`;
+            }\nExpected parameters: ${zodToTypingString(tool.parameters)}`;
         }
         const out = await tool.handler(parseResult.result, toolCallId);
         if (out === undefined) return out;
