@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { z } from "zod/v4";
-import { coerceArgs } from "../src/argCoercion.ts";
+import { arrayWrapCorrection, coerceArgs } from "../src/argCoercion.ts";
 
 const schemaOf = (s: z.ZodType) => z.toJSONSchema(s);
 
@@ -156,4 +156,75 @@ Deno.test("coerceArgs treats undefined as empty object when schema expects an ob
   const { args, corrections } = coerceArgs(schema, undefined);
   assertEquals(args, {});
   assertEquals(corrections, []);
+});
+
+Deno.test("coerceArgs wraps a scalar into a single-element array when schema expects an array", () => {
+  const schema = schemaOf(
+    z.object({ query: z.array(z.string()).optional(), mapId: z.string() }),
+  );
+  const { args, corrections } = coerceArgs(schema, {
+    mapId: "m1",
+    query: "ramen",
+  });
+  assertEquals(args, { mapId: "m1", query: ["ramen"] });
+  assertEquals(corrections, [arrayWrapCorrection("query")]);
+});
+
+Deno.test("coerceArgs wraps a single object into an array when schema expects an array of objects", () => {
+  const schema = schemaOf(
+    z.object({ filters: z.array(z.object({ season: z.number() })) }),
+  );
+  const { args, corrections } = coerceArgs(schema, { filters: { season: 2 } });
+  assertEquals(args, { filters: [{ season: 2 }] });
+  assertEquals(corrections, [arrayWrapCorrection("filters")]);
+});
+
+Deno.test("coerceArgs wraps scalars nested deep in the args tree", () => {
+  const schema = schemaOf(
+    z.object({
+      query: z.object({ tags: z.array(z.string()), name: z.string() }),
+    }),
+  );
+  const { args, corrections } = coerceArgs(schema, {
+    query: { tags: "a", name: "x" },
+  });
+  assertEquals(args, { query: { tags: ["a"], name: "x" } });
+  assertEquals(corrections, [arrayWrapCorrection("query.tags")]);
+});
+
+Deno.test("coerceArgs leaves existing arrays untouched", () => {
+  const schema = schemaOf(z.object({ query: z.array(z.string()).optional() }));
+  const input = { query: ["a", "b"] };
+  const { args, corrections } = coerceArgs(schema, input);
+  assertEquals(args, input);
+  assertEquals(corrections, []);
+});
+
+Deno.test("coerceArgs does not unwrap an array when schema expects a string", () => {
+  const schema = schemaOf(z.object({ query: z.string().optional() }));
+  const input = { query: ["a", "b"] };
+  const { args, corrections } = coerceArgs(schema, input);
+  assertEquals(args, input);
+  assertEquals(corrections, []);
+});
+
+Deno.test("coerceArgs wraps after renaming when both are needed", () => {
+  const schema = schemaOf(z.object({ query: z.array(z.string()) }));
+  const { args, corrections } = coerceArgs(schema, { Query: "x" });
+  assertEquals(args, { query: ["x"] });
+  assertEquals(corrections.length, 2);
+  assertEquals(corrections[1], arrayWrapCorrection("query"));
+});
+
+Deno.test("coerceArgs wraps scalar items inside array-of-object elements", () => {
+  const schema = schemaOf(
+    z.object({
+      groups: z.array(z.object({ tags: z.array(z.string()) })),
+    }),
+  );
+  const { args, corrections } = coerceArgs(schema, {
+    groups: [{ tags: "a" }],
+  });
+  assertEquals(args, { groups: [{ tags: ["a"] }] });
+  assertEquals(corrections, [arrayWrapCorrection("groups.0.tags")]);
 });

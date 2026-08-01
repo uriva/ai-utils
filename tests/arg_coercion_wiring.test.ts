@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { z } from "zod/v4";
 import { callToResult, createSkillTools, tool } from "../src/agent.ts";
+import { arrayWrapCorrection } from "../src/argCoercion.ts";
 
 const findEpisode = tool({
   name: "find_episode",
@@ -173,6 +174,62 @@ Deno.test("run_command error includes expected object shape when string is passe
   }
   if (!out.includes("title: string")) {
     throw new Error(`expected field hint, got: ${out}`);
+  }
+});
+
+const searchMap = tool({
+  name: "search_map",
+  description: "search pins on a map",
+  parameters: z.object({
+    mapId: z.string(),
+    query: z.array(z.string()).optional(),
+  }),
+  handler: ({ query }) =>
+    Promise.resolve(`queries: ${(query ?? []).join(",")}`),
+});
+
+Deno.test("callToResult wraps a scalar into an array when the schema expects an array", async () => {
+  const out = await callToResult([searchMap])({
+    name: "search_map",
+    args: { mapId: "m1", query: "ramen" },
+    id: "call-5",
+  });
+  if (!out) throw new Error("expected a result");
+  if (!out.result.startsWith("[arguments auto-corrected:")) {
+    throw new Error(`expected correction prefix, got: ${out.result}`);
+  }
+  if (!out.result.includes(arrayWrapCorrection("query"))) {
+    throw new Error(`expected wrap correction, got: ${out.result}`);
+  }
+  if (!out.result.includes("queries: ramen")) {
+    throw new Error(`expected handler result, got: ${out.result}`);
+  }
+});
+
+Deno.test("run_command wraps a scalar into an array for a skill tool param", async () => {
+  const skillTools = createSkillTools([
+    {
+      name: "geo",
+      description: "geo skill",
+      instructions: "x",
+      tools: [searchMap],
+    },
+  ]);
+  const runCommand = skillTools.find((t) => t.name === "run_command");
+  if (!runCommand) throw new Error("run_command missing");
+  const out = await runCommand.handler(
+    {
+      command: "geo/search_map",
+      params: { mapId: "m1", query: "ramen" },
+    },
+    "call-id",
+  );
+  if (typeof out !== "string") throw new Error("expected string result");
+  if (!out.startsWith("[arguments auto-corrected:")) {
+    throw new Error(`expected correction prefix, got: ${out}`);
+  }
+  if (!out.includes("queries: ramen")) {
+    throw new Error(`expected handler output, got: ${out}`);
   }
 });
 

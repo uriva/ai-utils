@@ -65,8 +65,15 @@ const hasAtPath = (root: any, path: Path): boolean => {
 const setAtPath = (root: any, path: Path, value: unknown): any => {
   if (path.length === 0) return value;
   const [head, ...rest] = path;
-  const child = isPlainObject(root) && isPlainObject(root[head])
-    ? root[head]
+  if (Array.isArray(root)) {
+    const index = Number(head);
+    return root.map((item, i) =>
+      i === index ? setAtPath(item, rest, value) : item
+    );
+  }
+  const existing = isPlainObject(root) ? root[head] : undefined;
+  const child = isPlainObject(existing) || Array.isArray(existing)
+    ? existing
     : {};
   return {
     ...(isPlainObject(root) ? root : {}),
@@ -121,6 +128,47 @@ const correctionFor = ({ from, to }: Rewrite): string =>
 const applyRewrite = (root: any, rewrite: Rewrite): any =>
   setAtPath(removeAtPath(root, rewrite.from), rewrite.to, rewrite.value);
 
+export const arrayWrapCorrection = (path: string): string =>
+  `wrapped "${path}" in a single-element array`;
+
+// The array schema node when the value at this path is unambiguously meant to
+// be an array: either directly, or via an anyOf with exactly one array branch
+// (e.g. a nullable array). Multiple array branches means ambiguous.
+const arraySchemaNode = (node: any): any | undefined => {
+  if (!node || typeof node !== "object") return undefined;
+  if (node.type === "array") return node;
+  if (Array.isArray(node.anyOf)) {
+    const arrayBranches = node.anyOf.filter(arraySchemaNode);
+    return arrayBranches.length === 1 ? arrayBranches[0] : undefined;
+  }
+  return undefined;
+};
+
+type Wrap = { path: Path; value: unknown };
+
+// Finds scalar (or single-object) values sitting at paths whose schema says
+// "array": wrapping them into a single-element array has exactly one
+// reasonable interpretation. The reverse (array -> scalar) is ambiguous and
+// left to validation errors.
+const findWraps = (schema: any, args: any, path: Path): Wrap[] => {
+  if (!isPlainObject(args)) return [];
+  const props = schemaProperties(schema);
+  if (!props) return [];
+  return Object.entries(args).flatMap(([key, value]) => {
+    const child = props[key];
+    if (child === undefined || value === undefined || value === null) {
+      return [];
+    }
+    const here = [...path, key];
+    const arrayNode = arraySchemaNode(child);
+    if (!arrayNode) return findWraps(child, value, here);
+    if (!Array.isArray(value)) return [{ path: here, value: [value] }];
+    return value.flatMap((item, i) =>
+      findWraps(arrayNode.items, item, [...here, String(i)])
+    );
+  });
+};
+
 export const coerceArgs = (
   schema: any,
   args: unknown,
@@ -141,5 +189,15 @@ export const coerceArgs = (
     current = applyRewrite(current, rewrite);
     corrections.push(correctionFor(rewrite));
   }
-  return { args: current, corrections };
+  const wraps = findWraps(schema, current, []);
+  return {
+    args: wraps.reduce(
+      (acc, { path, value }) => setAtPath(acc, path, value),
+      current,
+    ),
+    corrections: [
+      ...corrections,
+      ...wraps.map(({ path }) => arrayWrapCorrection(path.join("."))),
+    ],
+  };
 };
