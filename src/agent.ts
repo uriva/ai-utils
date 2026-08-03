@@ -20,6 +20,7 @@ import {
   hasJsonThought,
   stripJsonThought,
 } from "./jsonThought.ts";
+import { verifyConcludingUtterancesGrounded } from "./hallucination.ts";
 export const stopThoughtPrefix =
   "I'm working on this for some time and not making progress.";
 export const stopThoughtDefault =
@@ -2294,6 +2295,20 @@ const maxRepetitionFloodRetries = 3;
 
 const maxTruncationRetries = 2;
 
+const maxGroundingRetries = 2;
+
+// A response concludes the turn when it carries user-facing utterances with no
+// pending tool calls — the loop returns right after emitting it. Only then is
+// grounding verification needed: a response with tool calls is followed by
+// tool results and another model pass, whose eventual concluding reply gets
+// verified instead.
+const concludingUtteranceTexts = (emit: HistoryEvent[]): string[] =>
+  emit.some((event) => event.type === "tool_call")
+    ? []
+    : emit.flatMap((event) =>
+      event.type === "own_utterance" ? [event.text] : []
+    );
+
 const findTruncatedUtterance = (events: HistoryEvent[]) =>
   events.find(
     (e): e is Extract<HistoryEvent, { type: "own_utterance" }> =>
@@ -2331,6 +2346,7 @@ export const runAbstractAgent = (
     let truncationRetries = 0;
     let ephemeralHistory: HistoryEvent[] = [];
     let stopAdviceCount = 0;
+    let groundingRetries = 0;
     while (true) {
       if (await shouldAbort()) return;
       c++;
@@ -2423,6 +2439,26 @@ export const runAbstractAgent = (
         normalizedHistory,
         modelResponse,
       );
+
+      const utteranceTexts = concludingUtteranceTexts(emit);
+      if (nonempty(utteranceTexts) && groundingRetries < maxGroundingRetries) {
+        const verdict = await verifyConcludingUtterancesGrounded(
+          spec,
+          normalizedHistory,
+          utteranceTexts,
+        );
+        if (!verdict.grounded) {
+          groundingRetries++;
+          console.warn(
+            `[grounding-gate] blocked ungrounded concluding reply (attempt ${groundingRetries}/${maxGroundingRetries})`,
+          );
+          ephemeralHistory = [
+            ...ephemeralHistory,
+            ownThoughtTurn(verdict.correctionThought),
+          ];
+          continue;
+        }
+      }
 
       const emitWithDescriptions = emit.map((event) => {
         if (event.type !== "tool_call") return event;

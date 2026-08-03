@@ -41,7 +41,7 @@ const saveItemsTool = tool({
 const syncPrompt =
   `אתה עוזר אוטומציה אישי. המשתמש מנהל איתך מערכת שמסנכרנת את הפריטים שלו מול שירות חיצוני ומפעילה עליהם תהליך אוטומטי.
 יש לך כלים לקריאה מהשירות החיצוני ולכתיבה למערכת.
-עדכן את המשתמש בפעולות שאתה מבצע ובתוצאותיהן.`;
+עדכן את המשתמש בפעולות שאתה מבצע ובתוצאותיהן. ענה בקצרה.`;
 
 const initialHistory = (): HistoryEvent[] => {
   const fetchCall = toolUseTurn({ name: "fetch_remote_items", args: {} });
@@ -67,7 +67,7 @@ const initialHistory = (): HistoryEvent[] => {
 };
 
 const failureDisclosure =
-  /שגיאה|נכשל|כשל|תקלה|נתקל|לא נשמר|לא הצליח|לא עבר|error/i;
+  /שגיא|נכשל|כשל|תקלה|נתקל|לא נשמר|לא הצליח|לא עבר|error/i;
 
 const unperformedSaveClaim =
   /סונכרנו|עודכנו|מולאו|נשמרו|הוגדרו|הכנסתי|סינכרנתי|עדכנתי|בוצע/;
