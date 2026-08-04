@@ -209,10 +209,13 @@ const isTokenLimitExceeded = (error: Error) =>
   "status" in error && (error as { status: number }).status === 400 &&
   error.message.includes("token count exceeds");
 
+export const isInvalidArgumentError = (error: Error) =>
+  error.message.includes("Request contains an invalid argument");
+
 const isImageProcessingOrInternalError = (error: Error) =>
   error.message.includes("Unable to process input image") ||
   error.message.includes("Internal error encountered") ||
-  error.message.includes("Request contains an invalid argument");
+  isInvalidArgumentError(error);
 
 const isRecoverableError = (error: Error) =>
   isFileNotActiveError(error) ||
@@ -704,7 +707,14 @@ const callGemini = (
   disableStreaming?: boolean,
 ): Promise<GeminiOutput> =>
   callGeminiWithRetry({ req, disableStreaming }).catch((err: unknown) => {
-    if (!isRetryableError(err) && !isSyntheticTimeoutError(err)) throw err;
+    // INVALID_ARGUMENT is nominally a client error, but Gemini intermittently
+    // rejects valid requests with it during serving incidents — one attempt on
+    // the alternate model recovers those runs; a genuinely malformed request
+    // just 400s once more and propagates.
+    if (
+      !isRetryableError(err) && !isSyntheticTimeoutError(err) &&
+      !isInvalidArgumentError(normalizeError(err))
+    ) throw err;
     return fallbackModelRetry({
       req: {
         ...req,
