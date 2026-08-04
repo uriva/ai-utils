@@ -1,7 +1,12 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { sleep } from "gamla";
 import { z } from "zod/v4";
-import { type AgentSpec, runAgent, validateZodSchema } from "../mod.ts";
+import {
+  type AgentSpec,
+  runAgent,
+  validateSchema,
+  validateZodSchema,
+} from "../mod.ts";
 import { runForAllProviders } from "../test_helpers.ts";
 import {
   type DeferredTool,
@@ -933,7 +938,7 @@ Deno.test(
 );
 
 Deno.test(
-  "validateZodSchema throws exception for unsupported schema constructs",
+  "validateZodSchema and validateSchema throw exception for unsupported Zod schema constructs",
   () => {
     // Union type schema (translates to anyOf) which Gemini cannot handle
     const invalidSchema = z.object({
@@ -942,6 +947,11 @@ Deno.test(
 
     assertThrows(
       () => validateZodSchema(invalidSchema),
+      Error,
+      "unions or anyOf",
+    );
+    assertThrows(
+      () => validateSchema(invalidSchema),
       Error,
       "unions or anyOf",
     );

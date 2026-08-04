@@ -86,6 +86,11 @@ export const zodToGeminiParameters = (zodObj: ZodType): FunctionDeclaration => {
 export const validateSchema = (schema: any, path: string = "root"): void => {
   if (typeof schema !== "object" || schema === null) return;
 
+  if ("_def" in schema || "safeParse" in schema) {
+    validateZodSchema(schema as ZodType, path);
+    return;
+  }
+
   if ("anyOf" in schema || "any_of" in schema) {
     throw new Error(
       `Unsupported schema construct 'anyOf' at ${path}. unions or anyOf are not supported.`,
