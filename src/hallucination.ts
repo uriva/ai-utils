@@ -33,7 +33,7 @@ const editLastMessageToolName = "edit_last_message";
 
 const correctionInstruction =
   `If hallucinations are detected, provide a note to the bot. Consider the nature of the issue:
-- If the bot claimed it performed an action (e.g. calling a tool) but hasn't yet, the note should simply advise the bot to go ahead and perform that action now — no correction or apology needed.
+- If the bot claimed it performed an action (e.g. calling a tool) but hasn't yet, or committed to a future action without performing or scheduling it, the note should simply advise the bot to go ahead and perform or schedule that action now with the appropriate tool — or, if the action is impossible, to rewrite the reply without the claim or commitment. No correction or apology needed.
 - If the bot stated incorrect information, the note should advise the bot to use the ${editLastMessageToolName} tool to correct the message, or if that fails, to gently correct itself in a follow-up (e.g., "I sent an inaccurate message. I should use ${editLastMessageToolName} to fix it, or follow up with a correction like 'sorry, I meant...'").
 Make sure to phrase this note as if the bot is writing it to itself.`;
 
@@ -88,15 +88,19 @@ ${modelOutput}
 IMPORTANT: The system instructions, available tools, and conversation history sections above are absolute GROUND TRUTH. 
 Any specific factual claim (names, prices, URLs, dates, addresses, etc.) in the bot's last response MUST appear verbatim or be directly traceable as a logical inference from this ground truth text.
 
-Analyze the bot's response carefully. Only flag a hallucination if ALL of the following are true:
-1. The response contains specific factual claims or third-party links/URLs
-2. Those claims are NOT supported by the system instructions, available tools, or conversation history
-3. The fabrication would meaningfully derail the conversation
+Analyze the bot's response carefully. Flag a hallucination if ANY of the following patterns holds:
+
+A. Unsupported facts: the response contains specific factual claims or third-party links/URLs that are NOT supported by the system instructions, available tools, or conversation history, and the fabrication would meaningfully derail the conversation.
+
+B. Phantom actions: the response states that an action was performed — something was sent, saved, recorded, scheduled, booked, updated, deleted, or a person was notified — but no tool_call performing that action appears in the conversation history. Mere conversational acknowledgments (e.g. "noted", "got it") are NOT actions; do not flag those.
+
+C. Empty commitments: the response commits the bot to a future consequential action — notifying, updating or contacting a person, sending or scheduling something, checking and reporting back — but no tool_call performing or scheduling that action appears in the conversation history. The bot's turn is over once this response is sent, so such a commitment will never be fulfilled. Offers and questions (e.g. "shall I update her?") are NOT commitments; do not flag those.
 
 Do NOT flag a hallucination if:
 - The information is reasonably correct common knowledge
 - The information is supported by any tool_result, own_thought, or external_event in the history (even older ones)
 - The bot is paraphrasing, summarizing, or making directly implied logical inferences from the ground truth
+- An action claim or commitment is backed by a tool_call in the history that performs or schedules it
 
 ${correctionInstruction}`;
 };
@@ -122,7 +126,7 @@ export const checkHallucination = async (
 };
 
 export const ungroundedReplyRetryAdvice =
-  "Rewrite the reply so that every statement about what was done and its outcome matches the tool calls and tool results in the conversation. If an action failed or its outcome is unknown, say so plainly instead of claiming success. If something was not actually done, do not claim it was — either do it now using the appropriate tool, or tell the user it has not been done yet.";
+  "Rewrite the reply so that every statement about what was done and its outcome matches the tool calls and tool results in the conversation. If an action failed or its outcome is unknown, say so plainly instead of claiming success. If something was not actually done, do not claim it was — either do it now using the appropriate tool, or tell the user it has not been done yet. Likewise, do not commit to a future action (updating or notifying someone, sending or scheduling something) unless you perform or schedule it now with a tool call; otherwise remove the commitment from the reply.";
 
 export const blockedUngroundedReplyThought = (explanation: string): string =>
   `Your previous draft reply was not sent to the user: it contained claims that contradict the actual conversation record. ${explanation}. ${ungroundedReplyRetryAdvice}`;
