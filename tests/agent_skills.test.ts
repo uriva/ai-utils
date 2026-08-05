@@ -15,6 +15,7 @@ import {
 import {
   addition,
   agentDeps,
+  learnedSkillCall,
   multiplication,
   noopRewriteHistory,
   runForAllProviders,
@@ -151,10 +152,13 @@ Deno.test(
         handler: () => Promise.resolve("calendars: primary, work"),
       }],
     };
-    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
-      name: "user",
-      text: "list my calendars",
-    })];
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "list my calendars",
+      }),
+      learnedSkillCall("@tank/google-calendar"),
+    ];
     let callCount = 0;
     const fakeCallModel = () => {
       callCount += 1;
@@ -341,10 +345,13 @@ Deno.test(
         handler: () => Promise.resolve("updated"),
       }],
     };
-    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
-      name: "user",
-      text: "update the event",
-    })];
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "update the event",
+      }),
+      learnedSkillCall("calendar"),
+    ];
     let callCount = 0;
     const fakeCallModel = () => {
       callCount += 1;

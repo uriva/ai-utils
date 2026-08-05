@@ -2081,6 +2081,59 @@ export const tool = <ParametersSchema extends z.ZodObject<z.ZodRawShape>>(
   ): ReturnType<typeof tool.handler> => tool.handler(params, toolCallId),
 });
 
+const activeSkillNames = (history: HistoryEvent[]): Set<string> => {
+  const names = new Set<string>();
+  const sortedHistory = [...history].sort((a, b) => a.timestamp - b.timestamp);
+  for (const e of sortedHistory) {
+    if (e.type === "tool_call" && e.name === learnSkillToolName) {
+      // deno-lint-ignore no-explicit-any
+      const skillName = (e.parameters as any)?.skillName;
+      if (skillName) names.add(skillName.toLowerCase());
+    } else if (e.type === "tool_call" && e.name === unlearnSkillToolName) {
+      // deno-lint-ignore no-explicit-any
+      const skillName = (e.parameters as any)?.skillName;
+      if (skillName) names.delete(skillName.toLowerCase());
+    } else if (e.type === "tool_call" && e.name === runCommandToolName) {
+      // deno-lint-ignore no-explicit-any
+      const command = (e.parameters as any)?.command;
+      if (typeof command === "string" && command.includes("/")) {
+        names.add(command.split("/")[0].toLowerCase());
+      }
+    } else if (e.type === "tool_call" && e.name.includes("/")) {
+      names.add(e.name.split("/")[0].toLowerCase());
+    }
+  }
+  return names;
+};
+
+const skillPreviouslyUsed = async (
+  toolCallId: string,
+  skillName: string,
+): Promise<boolean> => {
+  const spec = getAgentSpec();
+  if (!spec) return true;
+  const history = await getHistory();
+  return activeSkillNames(history.filter((e) => e.id !== toolCallId)).has(
+    skillName.toLowerCase(),
+  );
+};
+
+const skillToolPromptLine = (
+  skillName: string,
+  t: Skill["tools"][number],
+): string =>
+  `  - ${qualifiedToolName(skillName, t.name)}(params: ${
+    zodToTypingString(t.parameters)
+  }): ${t.description}`;
+
+const skillAutoLoadMessage = (skill: Skill): string =>
+  `Skill "${skill.name}" auto-loaded before first use. Its instructions and tool parameter schemas are now active — retry your call with the correct parameters.\n\nInstructions:\n${skill.instructions}\n\nTools:\n${
+    skill.tools.map((t) => skillToolPromptLine(skill.name, t)).join("\n")
+  }`;
+
+const isReferenceTool = (skill: Skill, toolName: string) =>
+  (skill.references ?? []).some((r) => referenceToolName(r.name) === toolName);
+
 // deno-lint-ignore no-explicit-any
 export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
   const skillMap = Object.fromEntries(skills.map((s) => [s.name, s]));
@@ -2148,8 +2201,8 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         }
         const fullToolName = `${skillName}/${toolName}`;
         const tool = toolMap[fullToolName];
+        const skill = skillMap[skillName];
         if (!tool) {
-          const skill = skillMap[skillName];
           const toolList = [
             ...skill.tools.map((t) => `  - ${t.name}: ${t.description}`),
             ...(skill.references ?? []).map((r) =>
@@ -2158,6 +2211,10 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           ].join("\n");
           return `Tool "${toolName}" not found in skill "${skillName}".\n\nSkill "${skillName}" instructions:\n${skill.instructions}\n\nAvailable tools in this skill:\n${toolList}`;
         }
+        if (
+          !isReferenceTool(skill, toolName) &&
+          !(await skillPreviouslyUsed(toolCallId, skillName))
+        ) return skillAutoLoadMessage(skill);
         const toolJsonSchema = z.toJSONSchema(tool.parameters);
         const coerced = coerceArgs(toolJsonSchema, params);
         const prefix = correctionPrefix(coerced.corrections);
@@ -2745,40 +2802,14 @@ export const getSpecForTurn = <T extends AgentInputs>(
   spec: T,
   history: HistoryEvent[],
 ): T => {
-  const activeSkillNames = new Set<string>();
-  const sortedHistory = [...history].sort((a, b) => a.timestamp - b.timestamp);
-  for (const e of sortedHistory) {
-    if (e.type === "tool_call" && e.name === "learn_skill") {
-      // deno-lint-ignore no-explicit-any
-      const skillName = (e.parameters as any)?.skillName;
-      if (skillName) {
-        activeSkillNames.add(skillName.toLowerCase());
-      }
-    } else if (e.type === "tool_call" && e.name === "unlearn_skill") {
-      // deno-lint-ignore no-explicit-any
-      const skillName = (e.parameters as any)?.skillName;
-      if (skillName) {
-        activeSkillNames.delete(skillName.toLowerCase());
-      }
-    } else if (e.type === "tool_call" && e.name === "run_command") {
-      // deno-lint-ignore no-explicit-any
-      const command = (e.parameters as any)?.command;
-      if (typeof command === "string" && command.includes("/")) {
-        const skillName = command.split("/")[0].toLowerCase();
-        activeSkillNames.add(skillName);
-      }
-    } else if (e.type === "tool_call" && e.name.includes("/")) {
-      const skillName = e.name.split("/")[0].toLowerCase();
-      activeSkillNames.add(skillName);
-    }
-  }
+  const activeNames = activeSkillNames(history);
 
   const allPossibleSkills = spec.skills ?? [];
   const activeSkills = allPossibleSkills.filter((s) =>
-    activeSkillNames.has(s.name.toLowerCase())
+    activeNames.has(s.name.toLowerCase())
   );
   const unactiveSkills = allPossibleSkills.filter((s) =>
-    !activeSkillNames.has(s.name.toLowerCase())
+    !activeNames.has(s.name.toLowerCase())
   );
 
   const sortedActiveSkills = [...activeSkills].sort((a, b) =>
@@ -2808,12 +2839,7 @@ export const getSpecForTurn = <T extends AgentInputs>(
         : "";
       const toolsPart = skill.tools.length > 0
         ? `\n  Tools:\n${
-          skill.tools.map((t) => {
-            const typing = zodToTypingString(t.parameters);
-            return `    - ${
-              qualifiedToolName(skill.name, t.name)
-            }(params: ${typing}): ${t.description}`;
-          }).join("\n")
+          skill.tools.map((t) => skillToolPromptLine(skill.name, t)).join("\n")
         }`
         : "";
       return `### Active Skill: ${skill.name}\nInstructions:\n${skill.instructions}${toolsPart}${refsPart}`;

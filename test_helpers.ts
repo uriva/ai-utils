@@ -20,6 +20,7 @@ import {
   injectCallModelWrapper,
   injectMetadataStore,
   injectOutputEvent,
+  learnSkillToolName,
   type ToolReturn,
 } from "./src/agent.ts";
 
@@ -190,6 +191,17 @@ export const runForAllProviders = (
 };
 
 export const noopRewriteHistory = async () => {};
+
+// Marks a skill as already-learned in a test history: activation logic only
+// scans tool_call events, so a single learn_skill call suffices.
+export const learnedSkillCall = (skillName: string): HistoryEvent => ({
+  type: "tool_call",
+  isOwn: true,
+  id: `learn-${skillName}`,
+  timestamp: 1,
+  name: learnSkillToolName,
+  parameters: { skillName },
+});
 
 export const toolResult = "43212e8e";
 

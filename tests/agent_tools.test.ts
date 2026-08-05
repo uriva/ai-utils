@@ -18,6 +18,7 @@ import {
 } from "../src/agent.ts";
 import {
   agentDeps,
+  learnedSkillCall,
   noopRewriteHistory,
   someTool,
   toolResult,
@@ -138,10 +139,13 @@ runForAllProviders(
 Deno.test(
   "run_command rejects unknown nested skill tool parameters",
   async () => {
-    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
-      name: "user",
-      text: "Find the video source for Spider-Man 3.",
-    })];
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Find the video source for Spider-Man 3.",
+      }),
+      learnedSkillCall("video_sources"),
+    ];
     let callCount = 0;
     const fakeCallModel = (_h: HistoryEvent[]) => {
       callCount += 1;
@@ -216,10 +220,13 @@ Deno.test(
 Deno.test(
   "run_command rejects invalid parameters matching regex with custom error message",
   async () => {
-    const mockHistory: HistoryEvent[] = [participantUtteranceTurn({
-      name: "user",
-      text: "Run some action with a videoHash and code.",
-    })];
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Run some action with a videoHash and code.",
+      }),
+      learnedSkillCall("video_sources"),
+    ];
     let callCount = 0;
     const fakeCallModel = (_h: HistoryEvent[]) => {
       callCount += 1;

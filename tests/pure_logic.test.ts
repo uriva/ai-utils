@@ -39,6 +39,7 @@ import {
   geminiFlashVersion,
   geminiProVersion,
 } from "../src/gemini.ts";
+import { learnedSkillCall } from "../test_helpers.ts";
 import {
   collapseDuplicatedText,
   geminiUploadJsonParseErrorMessage,
@@ -233,7 +234,7 @@ Deno.test(
   "direct skillName/toolName call is routed through run_command",
   async () => {
     let handlerCalledWith = "";
-    const history: HistoryEvent[] = [];
+    const history: HistoryEvent[] = [learnedSkillCall("my_skill")];
 
     const testSkillTool = tool({
       name: "get_info",
@@ -246,7 +247,9 @@ Deno.test(
     });
 
     const mockCallModel = (h: HistoryEvent[]): Promise<HistoryEvent[]> => {
-      const hasCall = h.some((e) => e.type === "tool_call");
+      const hasCall = h.some((e) =>
+        e.type === "tool_call" && e.name === "my_skill/get_info"
+      );
       if (hasCall) return Promise.resolve([ownUtteranceTurn("Done")]);
       return Promise.resolve([{
         type: "tool_call" as const,
@@ -293,7 +296,7 @@ Deno.test(
   "direct skillName:toolName call (colon form) is routed through run_command",
   async () => {
     let handlerCalledWith = "";
-    const history: HistoryEvent[] = [];
+    const history: HistoryEvent[] = [learnedSkillCall("web")];
 
     const testSkillTool = tool({
       name: "read_url",
@@ -306,7 +309,9 @@ Deno.test(
     });
 
     const mockCallModel = (h: HistoryEvent[]): Promise<HistoryEvent[]> => {
-      const hasCall = h.some((e) => e.type === "tool_call");
+      const hasCall = h.some((e) =>
+        e.type === "tool_call" && e.name === "web:read_url"
+      );
       if (hasCall) return Promise.resolve([ownUtteranceTurn("Done")]);
       return Promise.resolve([{
         type: "tool_call" as const,
