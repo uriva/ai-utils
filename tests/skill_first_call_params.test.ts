@@ -25,6 +25,8 @@ import {
 // 2. The tool handler never receives params failing its own schema.
 // 3. The base context stays minimal: unlearned tool schemas are not dumped
 //    into the system prompt.
+// 4. A schema-valid first-touch guess executes immediately: no auto-load
+//    round trip is spent when the model already guessed correctly.
 const exactLineParam = "ingredientLine";
 const pantryCodeParam = "pantryCode";
 const toolName = "find_recipe";
@@ -113,6 +115,87 @@ const reportTokenCost = (prompts: string[]) =>
       prompts.map((p) => Math.ceil(p.length / 4)).join(", ")
     }`,
   );
+
+const promptTokens = (prompt: string) => Math.ceil(prompt.length / 4);
+
+// Measured with the immediate-execution behavior: base 70, total 192.
+// Budgets split that from the always-gate behavior (total 314) and from
+// schema-dumping listings; bump only with a conscious decision.
+const basePromptTokenBudget = 100;
+const correctGuessTotalTokenBudget = 250;
+
+// Gemini's history prep strips tool_calls lacking a thoughtSignature from the
+// model-visible history, so a reactive fake must carry one (queue-driven fakes
+// that ignore their input don't care).
+const correctGuessCall = (id: string, timestamp: number): HistoryEvent => ({
+  type: "tool_call",
+  isOwn: true,
+  id,
+  timestamp,
+  name: runCommandToolName,
+  parameters: {
+    command: `recipes/${toolName}`,
+    params: { [pantryCodeParam]: "PX-41", [exactLineParam]: "2 cups of flour" },
+    spinnerText: "Finding recipes...",
+  },
+  modelMetadata: { type: "gemini", thoughtSignature: "sig", responseId: id },
+});
+
+// Model-visible history filters out events with stale timestamps, so fake
+// calls must carry fresh ones (unlike queue-driven fakes that ignore input).
+const retryUntilExecuted: CallModel = (events) => {
+  const executed = events.some((e) =>
+    e.type === "tool_result" && e.result.includes(recipeResult)
+  );
+  const calls =
+    events.filter((e) =>
+      e.type === "tool_call" && e.name === runCommandToolName
+    ).length;
+  return Promise.resolve([
+    executed
+      ? ownUtteranceTurn("done")
+      : correctGuessCall(`guess-${calls + 1}`, Date.now() + calls),
+  ]);
+};
+
+Deno.test(
+  "correct first-touch guess executes immediately within token budget",
+  async () => {
+    const received: unknown[] = [];
+    const prompts: string[] = [];
+    const history: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text:
+        "Find a recipe with the exact ingredient line '2 cups of flour' in pantry PX-41.",
+    })];
+    await injectCallModel(retryUntilExecuted)(() =>
+      injectCallModelWrapper(capturePrompts(prompts))(() =>
+        agentDeps(history)(runAgent)(
+          scenarioSpec([recipesSkill((a) => received.push(a))]),
+        )
+      )()
+    )();
+    reportTokenCost(prompts);
+    assertHealthySkillUsage(history, received);
+    assert(
+      received.length === 1,
+      `tool should execute exactly once, got ${received.length} executions`,
+    );
+    assert(
+      promptTokens(prompts[0]) <= basePromptTokenBudget,
+      `base prompt costs ${
+        promptTokens(prompts[0])
+      } tokens (budget ${basePromptTokenBudget}): unlearned tool schemas are creeping into the base context`,
+    );
+    const totalTokens = prompts.reduce((sum, p) => sum + promptTokens(p), 0);
+    assert(
+      totalTokens <= correctGuessTotalTokenBudget,
+      `correct first-guess scenario costs ${totalTokens} prompt tokens (budget ${correctGuessTotalTokenBudget}, per call: ${
+        prompts.map(promptTokens).join(", ")
+      }): a schema-valid first-touch guess must execute immediately, without an auto-load round trip`,
+    );
+  },
+);
 
 Deno.test(
   "unlearned skill tool call surfaces no parameter error, handler gets only valid params, base context stays minimal",

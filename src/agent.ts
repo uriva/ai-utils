@@ -2211,15 +2211,15 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           ].join("\n");
           return `Tool "${toolName}" not found in skill "${skillName}".\n\nSkill "${skillName}" instructions:\n${skill.instructions}\n\nAvailable tools in this skill:\n${toolList}`;
         }
-        if (
-          !isReferenceTool(skill, toolName) &&
-          !(await skillPreviouslyUsed(toolCallId, skillName))
-        ) return skillAutoLoadMessage(skill);
         const toolJsonSchema = z.toJSONSchema(tool.parameters);
         const coerced = coerceArgs(toolJsonSchema, params);
         const prefix = correctionPrefix(coerced.corrections);
         const parseResult = parseWithCatch(tool.parameters, coerced.args);
         if (!parseResult.ok) {
+          if (
+            !isReferenceTool(skill, toolName) &&
+            !(await skillPreviouslyUsed(toolCallId, skillName))
+          ) return skillAutoLoadMessage(skill);
           return prefix +
             `Invalid parameters for ${fullToolName}: ${
               parseResult.error instanceof z.ZodError
