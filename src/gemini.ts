@@ -10,6 +10,7 @@ import {
 import { context, type Injection, type Injector } from "@uri/inject";
 import { coerce, conditionalRetry, empty, map, pipe, remove } from "gamla";
 import {
+  isInvalidArgumentError,
   isRetryableError,
   isRetryableUploadError,
   type ModelOpts,
@@ -275,15 +276,29 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
   attachments?: MediaAttachment[],
 ): Promise<z.infer<T>> => {
   const cacher = makeCache("geminiCompletionResponseText-v4");
-  const cachedCall = cacher(
+  const execGenJson = (req: GenerateContentParameters) =>
     conditionalRetry(isRetryableError)(
       1000,
       3,
-      (req: GenerateContentParameters) =>
-        generateContentInjection.access(req).then(parseGenJsonResponse),
-    ),
-  );
+      (r: GenerateContentParameters) =>
+        generateContentInjection.access(r).then(parseGenJsonResponse),
+    )(req).catch((err: unknown) => {
+      if (!isInvalidArgumentError(err)) throw err;
+      return conditionalRetry(isRetryableError)(
+        1000,
+        3,
+        (r: GenerateContentParameters) =>
+          generateContentInjection.access(r).then(parseGenJsonResponse),
+      )({
+        ...req,
+        model: alternateGeminiModelVersion(req.model),
+      });
+    });
+  const cachedCall = cacher(execGenJson);
   const contents = pipe(openAiToGeminiMessage)(messages);
+  if (empty(contents)) {
+    throw new Error("Cannot call Gemini with empty contents");
+  }
   if (attachments && attachments.length > 0) {
     const lastUserMessage = [...contents].reverse().find((c) =>
       c.role === "user"
@@ -325,21 +340,29 @@ export const geminiGenText = async (
   prompt: string,
   attachments: MediaAttachment[],
 ): Promise<string> => {
-  const result = await conditionalRetry(isRetryableError)(
-    1000,
-    3,
-    () =>
-      new GoogleGenAI({
-        apiKey: tokenInjection.access(),
-      }).models.generateContent({
-        model: geminiModelVersion(mini),
-        config: { thinkingConfig: geminiThinkingConfig(mini) },
-        contents: [{
-          role: "user",
-          parts: [...attachmentsToParts(attachments), { text: prompt }],
-        }],
-      }),
-  )();
+  const req = (model: string) => ({
+    model,
+    config: { thinkingConfig: geminiThinkingConfig(mini) },
+    contents: [{
+      role: "user",
+      parts: [...attachmentsToParts(attachments), { text: prompt }],
+    }],
+  });
+  const execGen = (model: string) =>
+    conditionalRetry(isRetryableError)(
+      1000,
+      3,
+      () =>
+        new GoogleGenAI({
+          apiKey: tokenInjection.access(),
+        }).models.generateContent(req(model)),
+    )();
+
+  const primaryModel = geminiModelVersion(mini);
+  const result = await execGen(primaryModel).catch((err: unknown) => {
+    if (!isInvalidArgumentError(err)) throw err;
+    return execGen(alternateGeminiModelVersion(primaryModel));
+  });
   return result.text ?? "";
 };
 

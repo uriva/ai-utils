@@ -21,6 +21,7 @@ import {
 } from "gamla";
 import {
   collapseDuplicatedText,
+  isInvalidArgumentError,
   isRetryableError,
   isSyntheticTimeoutError,
   stripAnsi,
@@ -208,9 +209,6 @@ const isUnsupportedMimeTypeError = (error: Error) =>
 const isTokenLimitExceeded = (error: Error) =>
   "status" in error && (error as { status: number }).status === 400 &&
   error.message.includes("token count exceeds");
-
-export const isInvalidArgumentError = (error: Error) =>
-  error.message.includes("Request contains an invalid argument");
 
 const isImageProcessingOrInternalError = (error: Error) =>
   error.message.includes("Unable to process input image") ||

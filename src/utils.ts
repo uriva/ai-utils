@@ -52,6 +52,11 @@ export const isTransientFetchError = (error: unknown) => {
   );
 };
 
+export const isInvalidArgumentError = (error: unknown) =>
+  normalizeError(error).message.includes(
+    "Request contains an invalid argument",
+  );
+
 export const isRetryableError = (error: unknown) => {
   const norm = normalizeError(error);
   return (

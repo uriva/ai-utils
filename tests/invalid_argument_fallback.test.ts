@@ -1,5 +1,5 @@
-import { assert, assertRejects } from "@std/assert";
-import { runAgent } from "../mod.ts";
+import { assert, assertEquals, assertRejects } from "@std/assert";
+import { runAgent, z } from "../mod.ts";
 import {
   type HistoryEvent,
   injectAccessHistory,
@@ -7,7 +7,11 @@ import {
   participantUtteranceTurn,
 } from "../src/agent.ts";
 import { injectGeminiSdkExchange } from "../src/geminiAgent.ts";
-import { geminiFallbackVersion } from "../src/gemini.ts";
+import {
+  geminiFallbackVersion,
+  geminiGenJsonFromConvo,
+  injectGeminiGenerateContent,
+} from "../src/gemini.ts";
 import { pipe } from "gamla";
 
 // Gemini-specific: the alternate-model fallback wiring lives in geminiAgent.ts,
@@ -95,4 +99,35 @@ Deno.test("400 INVALID_ARGUMENT on both models propagates the error", async () =
     Error,
     "invalid argument",
   );
+});
+
+Deno.test("geminiGenJsonFromConvo falls back to alternate model on 400 INVALID_ARGUMENT", async () => {
+  const attemptedModels: string[] = [];
+  const fakeGenerateContent = (req: { model?: string }) => {
+    attemptedModels.push(req.model ?? "");
+    if (req.model === geminiFallbackVersion) {
+      return Promise.resolve(
+        {
+          candidates: [{ finishReason: "STOP" }],
+          text: '{"ok": true}',
+        } as unknown as ReturnType<
+          Parameters<typeof injectGeminiGenerateContent>[0]
+        > extends Promise<infer R> ? R : never,
+      );
+    }
+    return Promise.reject(invalidArgumentError());
+  };
+
+  const result = await pipe(
+    injectGeminiGenerateContent(fakeGenerateContent),
+  )(() =>
+    geminiGenJsonFromConvo(
+      { mini: true },
+      [{ role: "user", content: "hello" }],
+      z.object({ ok: z.boolean() }),
+    )
+  )();
+
+  assert(attemptedModels.includes(geminiFallbackVersion));
+  assertEquals(result, { ok: true });
 });
