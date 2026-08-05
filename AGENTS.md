@@ -57,6 +57,22 @@ model or the agent, always define it once as an exported module-level constant
 in the source file, and import it into the test file rather than duplicating the
 raw string literal.
 
+### Token Cost Discipline
+
+Every harness feature or quality fix must come with an exact account of its
+token cost: what text enters model context, on which turns, one-shot vs. re-sent
+per model call, and whether it triggers extra model calls.
+
+- Prefer deterministic (CPU-only) checks over LLM judges; a `callModel`-based
+  check pays prompt + completion tokens on every invocation.
+- Anything appended to `ephemeralHistory` is re-sent on every subsequent model
+  call within the run — price injected notices/corrections as per-call cost for
+  the rest of the run, not one-shot.
+- Always-on guards must be zero-cost on the happy path: no context growth and no
+  extra model calls unless the guard fires.
+- Weigh a guard's cost against the tokens it prevents — error payloads and retry
+  spirals enter history and are re-sent on every subsequent model call.
+
 Pre-commit hook runs
 `deno fmt --check && deno lint && deno check *.ts src/**/*.ts tests/**/*.ts`.
 

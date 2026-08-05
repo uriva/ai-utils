@@ -21,6 +21,10 @@ import {
   stripJsonThought,
 } from "./jsonThought.ts";
 import { verifyConcludingUtterancesGrounded } from "./hallucination.ts";
+import {
+  findUngroundedToolCallHosts,
+  ungroundedHostBlockedNotice,
+} from "./urlGrounding.ts";
 export const stopThoughtPrefix =
   "I'm working on this for some time and not making progress.";
 export const stopThoughtDefault =
@@ -2338,6 +2342,10 @@ export type AgentSpec = AgentInputs & {
   };
   toolOutputScratchPad?: ToolOutputScratchPad;
   isConsult?: boolean;
+  // Tools whose parameters may legitimately carry hosts that appear in no
+  // instruction or history (e.g. arbitrary code execution). Matching covers
+  // the tool name and, for router tools, the inner `command` string.
+  urlGroundingExemptToolNames?: string[];
 };
 
 const hasEmojiFlood = (events: HistoryEvent[]) =>
@@ -2353,6 +2361,33 @@ const maxRepetitionFloodRetries = 3;
 const maxTruncationRetries = 2;
 
 const maxGroundingRetries = 2;
+
+const maxUrlGroundingRetries = 2;
+
+// Ground truth for the tool-call URL gate: only text the model did NOT author
+// itself counts — instructions, tool documentation, user messages, tool
+// results, external events. The model's own thoughts/utterances are excluded
+// so it cannot launder a fabricated host through its own reasoning.
+const groundTruthEventText = (e: HistoryEvent): string[] => {
+  if (e.type === "participant_utterance") return [e.text];
+  if (e.type === "tool_result") return [e.result];
+  if (e.type === "external_event") return [e.text];
+  return [];
+};
+
+const toolCallGroundTruthTexts = (
+  spec: AgentSpec,
+  history: HistoryEvent[],
+): string[] => {
+  const turnSpec = getSpecForTurn(spec, history);
+  return [
+    turnSpec.prompt,
+    ...(turnSpec.tools ?? []).map((t) =>
+      `${t.name}: ${t.description}\n${zodToTypingString(t.parameters)}`
+    ),
+    ...history.flatMap(groundTruthEventText),
+  ];
+};
 
 // A response concludes the turn when it carries user-facing utterances with no
 // pending tool calls — the loop returns right after emitting it. Only then is
@@ -2404,6 +2439,7 @@ export const runAbstractAgent = (
     let ephemeralHistory: HistoryEvent[] = [];
     let stopAdviceCount = 0;
     let groundingRetries = 0;
+    let urlGroundingRetries = 0;
     while (true) {
       if (await shouldAbort()) return;
       c++;
@@ -2527,6 +2563,33 @@ export const runAbstractAgent = (
         );
         return desc ? { ...event, description: desc } : event;
       });
+
+      // CPU-only check; skipped entirely on utterance-only turns.
+      const ungroundedHosts = emitWithDescriptions.some((e) =>
+          e.type === "tool_call"
+        )
+        ? findUngroundedToolCallHosts(
+          toolCallGroundTruthTexts(spec, normalizedHistory),
+          spec.urlGroundingExemptToolNames ?? [],
+          emitWithDescriptions,
+        )
+        : [];
+      if (
+        nonempty(ungroundedHosts) &&
+        urlGroundingRetries < maxUrlGroundingRetries
+      ) {
+        urlGroundingRetries++;
+        console.warn(
+          `[url-grounding-gate] blocked tool call to ungrounded host(s): ${
+            ungroundedHosts.join(", ")
+          } (attempt ${urlGroundingRetries}/${maxUrlGroundingRetries})`,
+        );
+        ephemeralHistory = [
+          ...ephemeralHistory,
+          ownThoughtTurn(ungroundedHostBlockedNotice(ungroundedHosts)),
+        ];
+        continue;
+      }
 
       // Process what needs to be emitted
       if (emitWithDescriptions.length > 0) {
