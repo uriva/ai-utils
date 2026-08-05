@@ -29,12 +29,17 @@ const hostsFromAssignments = (text: string): string[] =>
     v.includes(".")
   ).map(normalizeHost);
 
-// Strict extraction for tool-call parameters: a free-text prose mention of a
-// dotted word ("see README.md") is not a request target, so only full URLs,
-// safescript-style `host: "..."` literals, and values that are entirely a
-// domain count.
+// Strict extraction for tool-call parameters: a URL buried inside generated
+// content (HTML, documents, messages the model authors) is content, not a
+// request target — the model legitimately references well-known hosts there.
+// Only whole-value URLs, safescript-style `host: "..."` literals, and values
+// that are entirely a domain count as call targets.
+const wholeValueUrlPattern =
+  /^https?:\/\/([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)\S*$/i;
+
 const hostsInParamString = (text: string): string[] => [
-  ...hostsFromUrls(text),
+  ...(wholeValueUrlPattern.exec(text.trim())?.slice(1).map(normalizeHost) ??
+    []),
   ...hostsFromAssignments(text),
   ...(wholeValueDomainPattern.test(text.trim())
     ? [normalizeHost(text.trim())]

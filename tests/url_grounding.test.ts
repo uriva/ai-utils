@@ -137,6 +137,24 @@ Deno.test("url grounding gate blocks tool call to a host absent from instruction
   assertBlockedWithNotice(history, seenByModel, probe.wasExecuted, unseenHost);
 });
 
+Deno.test("url grounding gate ignores URLs embedded in generated content", async () => {
+  const probe = probeTool("write_page", "Write a web page", "html");
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({
+      name: "user",
+      text: "build me a landing page",
+    }),
+  ];
+  await runWithScriptedModel(
+    { tools: [probe.tool], history },
+    callOnceThenReply("write_page", {
+      html:
+        `<html><head><link href="https://${unseenHost}/fonts.css" rel="stylesheet"></head><body><img src="https://${unseenHost}/hero.jpg"></body></html>`,
+    }),
+  );
+  assertExecuted(history, probe.wasExecuted);
+});
+
 Deno.test("url grounding gate blocks host literal inside code parameters", async () => {
   const probe = probeTool("run_script", "Execute a script", "code");
   const history: HistoryEvent[] = [
