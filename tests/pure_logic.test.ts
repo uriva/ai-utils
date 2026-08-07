@@ -676,6 +676,53 @@ Deno.test("collapseDuplicatedText behavior", () => {
   assertEquals(collapseDuplicatedText(almostDuplicated), almostDuplicated);
 });
 
+Deno.test("collapseDuplicatedText collapses whole-message repetitions", () => {
+  const verse =
+    "The morning routine is ready. Drink water, stretch for ten minutes, and take a short walk before breakfast.";
+  // 1. Exact triple repetition separated by blank lines
+  const tripled = `${verse}\n\n${verse}\n\n${verse}`;
+  assertEquals(collapseDuplicatedText(tripled), verse);
+  // 2. Exact quadruple repetition with no separators at all
+  const quadrupledNoSep = verse + verse + verse + verse;
+  assertEquals(collapseDuplicatedText(quadrupledNoSep), verse);
+  // 3. Repetitions with mixed trailing separators
+  const mixedSeps = `${verse}\n\n${verse}\n${verse}\n\n\n${verse}`;
+  assertEquals(collapseDuplicatedText(mixedSeps), verse);
+  // 4. Final repetition truncated mid-way (output cut off while repeating)
+  const withTruncatedTail = `${verse}\n\n${verse}\n\n${verse}\n\n${
+    verse.slice(0, 40)
+  }`;
+  assertEquals(collapseDuplicatedText(withTruncatedTail), verse);
+});
+
+Deno.test("collapseDuplicatedText tolerates emphasis variation between repetitions", () => {
+  // The model sometimes regenerates a repetition with slightly different
+  // markdown emphasis (e.g. ** vs *). The whole message is still one
+  // repetition block and must collapse to the first, formatting intact.
+  const firstRep =
+    "**Daily summary**\n\nYou logged every meal today. Great consistency, keep the streak going strong!";
+  const secondRep =
+    "*Daily summary*\n\nYou logged every meal today. Great consistency, keep the streak going strong!";
+  assertEquals(
+    collapseDuplicatedText(`${firstRep}\n\n${secondRep}`),
+    firstRep,
+  );
+});
+
+Deno.test("collapseDuplicatedText leaves non-periodic and degenerate input alone", () => {
+  // 1. Two different paragraphs must survive
+  const para1 =
+    "Here is your plan for tomorrow: start with protein, then a short walk, and log your weight before eating breakfast.";
+  const para2 =
+    "For dinner, prefer something light: a salad with eggs or a vegetable stir fry, and remember to drink enough water.";
+  const twoParagraphs = `${para1}\n\n${para2}`;
+  assertEquals(collapseDuplicatedText(twoParagraphs), twoParagraphs);
+  // 2. Repetition of punctuation-only content is not a message duplication
+  const rule = "-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-";
+  const rules = Array(8).fill(rule).join("");
+  assertEquals(collapseDuplicatedText(rules), rules);
+});
+
 Deno.test("geminiOutputToHistoryEvents collapses duplicated text parts", () => {
   const longSentence =
     "This is a very long sentence designed to test the duplication collapsing helper. It must be more than eighty characters long.";

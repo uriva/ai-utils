@@ -110,22 +110,61 @@ export const stripAnsi = (text: string): string => {
   );
 };
 
+// Models sometimes emit the same message body several times back to back in a
+// single response, with arbitrary separators, occasional markdown emphasis
+// variation between repetitions (e.g. ** vs *), and sometimes a final
+// repetition truncated mid-way. Detect a whole-message repetition and collapse
+// it to the first repetition, formatting intact.
+const repetitionIgnoredChars = /[\s*_~`]/;
+
+const buildContentWithMap = (text: string) => {
+  const chars: string[] = [];
+  const map: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (repetitionIgnoredChars.test(ch)) continue;
+    chars.push(ch);
+    map.push(i);
+  }
+  return { content: chars.join(""), map };
+};
+
+const minRepetitionUnitContentLength = 10;
+const repetitionHeadLength = 30;
+
+const countLeadingRepetitions = (content: string, unit: string): number =>
+  content.startsWith(unit)
+    ? 1 + countLeadingRepetitions(content.slice(unit.length), unit)
+    : 0;
+
+const headOccurrences = (
+  content: string,
+  head: string,
+  from = 1,
+): number[] => {
+  const at = content.indexOf(head, from);
+  return at === -1 ? [] : [at, ...headOccurrences(content, head, at + 1)];
+};
+
 export const collapseDuplicatedText = (text: string): string => {
   const trimmed = text.trim();
-  const len = trimmed.length;
-  if (len < 80) return text;
-  const halfLen = Math.floor(len / 2);
-  const firstHalf = trimmed.slice(0, halfLen).trim();
-  const secondHalf = trimmed.slice(halfLen).trim();
-  if (firstHalf === secondHalf) {
-    const origLen = text.length;
-    const origHalfLen = Math.floor(origLen / 2);
-    const origFirst = text.slice(0, origHalfLen);
-    const origSecond = text.slice(origHalfLen);
-    if (origFirst.trim() === origSecond.trim()) {
-      return origFirst;
-    }
-    return firstHalf;
+  if (trimmed.length < 80) return text;
+  const { content, map } = buildContentWithMap(trimmed);
+  if (content.length < 2 * minRepetitionUnitContentLength) return text;
+  const head = content.slice(0, repetitionHeadLength);
+  const tryUnitEnd = (unitEnd: number): string | undefined => {
+    if (unitEnd < minRepetitionUnitContentLength) return undefined;
+    const unit = content.slice(0, unitEnd);
+    if (!/[\p{L}\p{N}]/u.test(unit)) return undefined;
+    const repetitions = countLeadingRepetitions(content, unit);
+    if (repetitions < 2) return undefined;
+    const remainder = content.slice(repetitions * unitEnd);
+    if (remainder.length > 0 && !unit.startsWith(remainder)) return undefined;
+    return trimmed.slice(0, map[unitEnd - 1] + 1);
+  };
+  for (const unitEnd of headOccurrences(content, head)) {
+    const collapsed = tryUnitEnd(unitEnd);
+    if (collapsed !== undefined) return collapsed;
   }
   return text;
 };
