@@ -2394,6 +2394,23 @@ const maxGroundingRetries = 2;
 
 const maxUrlGroundingRetries = 2;
 
+const maxDoNothingRetries = 2;
+
+export const unansweredUserCorrectionText =
+  "[SYSTEM NOTICE]: You executed tool calls or loaded skills to help the user, but you have not yet sent a response to the user. Please proceed to answer the user's request or take the next required action now.";
+
+export const hasUnansweredUserMessage = (history: HistoryEvent[]): boolean => {
+  const lastUserIndex = history.findLastIndex(
+    (e) =>
+      e.type === "participant_utterance" ||
+      e.type === "participant_edit_message",
+  );
+  if (lastUserIndex === -1) return false;
+  return !history.slice(lastUserIndex + 1).some(
+    (e) => e.type === "own_utterance" || e.type === "own_edit_message",
+  );
+};
+
 // Ground truth for the tool-call URL gate: only text the model did NOT author
 // itself counts — instructions, tool documentation, user messages, tool
 // results, external events. The model's own thoughts/utterances are excluded
@@ -2470,6 +2487,8 @@ export const runAbstractAgent = (
     let stopAdviceCount = 0;
     let groundingRetries = 0;
     let urlGroundingRetries = 0;
+    let doNothingRetries = 0;
+    let hadToolCallInRun = false;
     while (true) {
       if (await shouldAbort()) return;
       c++;
@@ -2623,6 +2642,10 @@ export const runAbstractAgent = (
 
       // Process what needs to be emitted
       if (emitWithDescriptions.length > 0) {
+        if (emitWithDescriptions.some((ev) => ev.type === "tool_call")) {
+          hadToolCallInRun = true;
+        }
+
         await each(outputEvent)(emitWithDescriptions);
 
         const hadDeferred = await handleFunctionCalls(
@@ -2640,21 +2663,40 @@ export const runAbstractAgent = (
         if (
           !(emitWithDescriptions.some((ev: HistoryEvent) =>
             ev.type === "tool_call"
-          )) &&
-          nonempty(updatedHistory) &&
-          last(updatedHistory).isOwn &&
-          !emitWithDescriptions.every((ev: HistoryEvent) =>
-            ev.type === "own_thought"
-          )
+          ))
         ) {
-          if (scratchPad && spec.rewriteHistory) {
-            runToolResultCompaction(
-              updatedHistory,
-              { setScratch: (id, content) => scratchPad.set(id, content) },
-              spec.rewriteHistory,
+          if (
+            hadToolCallInRun &&
+            hasUnansweredUserMessage(updatedHistory) &&
+            doNothingRetries < maxDoNothingRetries
+          ) {
+            doNothingRetries++;
+            console.warn(
+              `[unanswered-user-gate] model chose do_nothing after tool calls without answering user message (attempt ${doNothingRetries}/${maxDoNothingRetries}); retrying with correctional thought`,
             );
+            ephemeralHistory = [
+              ...ephemeralHistory,
+              ownThoughtTurn(unansweredUserCorrectionText),
+            ];
+            continue;
           }
-          return;
+
+          if (
+            nonempty(updatedHistory) &&
+            last(updatedHistory).isOwn &&
+            !emitWithDescriptions.every((ev: HistoryEvent) =>
+              ev.type === "own_thought"
+            )
+          ) {
+            if (scratchPad && spec.rewriteHistory) {
+              runToolResultCompaction(
+                updatedHistory,
+                { setScratch: (id, content) => scratchPad.set(id, content) },
+                spec.rewriteHistory,
+              );
+            }
+            return;
+          }
         }
       } else {
         // Nothing was emitted to the outside world, accumulate the internal state (e.g., thoughts)
