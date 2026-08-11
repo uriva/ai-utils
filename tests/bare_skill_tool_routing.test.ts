@@ -1,14 +1,23 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { z } from "zod/v4";
+import { runAgent } from "../mod.ts";
 import {
+  type CallModel,
   callToResult,
   createSkillTools,
   formatSkillsPrompt,
   getSpecForTurn,
+  type HistoryEvent,
+  injectCallModel,
+  ownUtteranceTurn,
+  participantUtteranceTurn,
+  qualifiedToolName,
   resolveToolDescription,
+  runCommandToolName,
   tool,
 } from "../src/agent.ts";
 import type { AgentSpec, Skill } from "../src/agent.ts";
+import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
 
 const todoWrite = tool({
   name: "todo_write",
@@ -149,6 +158,113 @@ Deno.test("formatSkillsPrompt outputs fully-qualified tool names", () => {
   const prompt = formatSkillsPrompt([todoSkill]);
   assertEquals(prompt.includes("- todo/todo_write:"), true);
   assertEquals(prompt.includes("- todo_write:"), false);
+});
+
+// A model that read about a tool inside another skill's instructions may
+// attribute it to the wrong skill (e.g. a travel-guide skill telling the model
+// to "use geocode" when geocode lives in the geo skill). When the tool name
+// exists in exactly one other skill, run_command must retarget the call there
+// and surface the canonical command, instead of failing with "not found".
+const misroutedCommand = `file/${todoWrite.name}`;
+const canonicalCommand = qualifiedToolName(todoSkill.name, todoWrite.name);
+
+Deno.test("run_command retargets a tool misrouted to another existing skill", async () => {
+  const skillTools = createSkillTools([fileSkill, todoSkill]);
+  const runCommand = skillTools.find((t) => t.name === runCommandToolName);
+  if (!runCommand) throw new Error("run_command missing");
+  const out = await runCommand.handler(
+    {
+      command: misroutedCommand,
+      params: { todos: ["a", "b"] },
+      spinnerText: "writing",
+    },
+    "call-id",
+  );
+  if (typeof out !== "string") throw new Error("expected string result");
+  assertEquals(out.includes("wrote 2 todos"), true);
+  assertEquals(
+    out.includes(canonicalCommand),
+    true,
+    `result should surface the canonical command "${canonicalCommand}", got: ${out}`,
+  );
+});
+
+Deno.test("run_command does not retarget when the tool name is ambiguous across other skills", async () => {
+  const skillTools = createSkillTools([todoSkill, fileSkill, dbSkill]);
+  const runCommand = skillTools.find((t) => t.name === runCommandToolName);
+  if (!runCommand) throw new Error("run_command missing");
+  const out = await runCommand.handler(
+    {
+      command: `todo/${sharedDelete.name}`,
+      params: { id: "x" },
+      spinnerText: "deleting",
+    },
+    "call-id",
+  );
+  if (typeof out !== "string") throw new Error("expected string result");
+  assertEquals(
+    out.startsWith(`Tool "${sharedDelete.name}" not found in skill "todo".`),
+    true,
+  );
+});
+
+Deno.test("agent-level: a misrouted skill command executes the target tool and surfaces the canonical command", async () => {
+  const executed: string[][] = [];
+  const recordingTodoSkill: Skill = {
+    ...todoSkill,
+    tools: [{
+      ...todoWrite,
+      handler: ({ todos }) => {
+        executed.push(todos);
+        return Promise.resolve(`wrote ${todos.length} todos`);
+      },
+    }],
+  };
+  const misrouteCall = (): HistoryEvent => ({
+    type: "tool_call",
+    isOwn: true,
+    id: "misroute-1",
+    timestamp: Date.now(),
+    name: runCommandToolName,
+    parameters: {
+      command: misroutedCommand,
+      params: { todos: ["a", "b"] },
+      spinnerText: "writing",
+    },
+  });
+  const fakeModel: CallModel = () =>
+    Promise.resolve(
+      executed.length > 0 ? [ownUtteranceTurn("done")] : [misrouteCall()],
+    );
+  const history: HistoryEvent[] = [participantUtteranceTurn({
+    name: "user",
+    text: "Write the todos a and b.",
+  })];
+  await injectCallModel(fakeModel)(() =>
+    agentDeps(history)(runAgent)({
+      maxIterations: 4,
+      tools: [],
+      skills: [fileSkill, recordingTodoSkill],
+      prompt: "You help users manage todos.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    })
+  )();
+  assertEquals(
+    executed.length,
+    1,
+    `misrouted command should still execute the target tool once. History: ${
+      JSON.stringify(history, null, 2)
+    }`,
+  );
+  const toolResult = history.find(
+    (e): e is Extract<HistoryEvent, { type: "tool_result" }> =>
+      e.type === "tool_result" && e.toolCallId === "misroute-1",
+  );
+  assert(
+    toolResult?.result.includes(canonicalCommand),
+    `tool result should surface the canonical command "${canonicalCommand}", got: ${toolResult?.result}`,
+  );
 });
 
 // Regression: a skill whose tool names already embed the skill prefix (e.g. a

@@ -861,6 +861,26 @@ const resolveUnambiguousBareName = (
   return matches.length === 1 ? matches[0] : undefined;
 };
 
+// A model that read about a tool inside another skill's instructions can
+// attribute it to the wrong skill ("guide/geocode" when the tool lives in
+// "geo"). When the tool name exists in exactly one other skill, retarget the
+// command there and surface the canonical name so the model self-corrects.
+const retargetMisroutedCommand = (
+  skills: Skill[],
+  skillName: string,
+  toolName: string,
+): { skillName: string; toolName: string; correction: string } | undefined => {
+  const resolved = resolveUnambiguousBareName(toolName, skills);
+  if (!resolved) return undefined;
+  const sep = resolved.lastIndexOf("/");
+  const targetSkillName = resolved.slice(0, sep);
+  return targetSkillName === skillName ? undefined : {
+    skillName: targetSkillName,
+    toolName: resolved.slice(sep + 1),
+    correction: `command "${skillName}/${toolName}" rewritten to "${resolved}"`,
+  };
+};
+
 const resolveCarriageReturns = (text: string): string =>
   text
     .replace(/\r\n/g, "\n")
@@ -2203,6 +2223,13 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
             return `Skill "${skillName}" not found. Available skills: ${skillNames}`;
           }
         }
+        const misrouted = toolMap[`${skillName}/${toolName}`]
+          ? undefined
+          : retargetMisroutedCommand(skills, skillName, toolName);
+        if (misrouted) {
+          skillName = misrouted.skillName;
+          toolName = misrouted.toolName;
+        }
         const fullToolName = `${skillName}/${toolName}`;
         const tool = toolMap[fullToolName];
         const skill = skillMap[skillName];
@@ -2217,7 +2244,10 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         }
         const toolJsonSchema = z.toJSONSchema(tool.parameters);
         const coerced = coerceArgs(toolJsonSchema, params);
-        const prefix = correctionPrefix(coerced.corrections);
+        const prefix = correctionPrefix([
+          ...(misrouted ? [misrouted.correction] : []),
+          ...coerced.corrections,
+        ]);
         const parseResult = parseWithCatch(tool.parameters, coerced.args);
         if (!parseResult.ok) {
           if (
