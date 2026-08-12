@@ -18,33 +18,59 @@ export const pruneDefaultsFromRequired = (schema: any) => {
   };
 };
 
-// deno-lint-ignore no-explicit-any
-const jsonSchemaNodeToTyping = (node: any): string => {
+const jsonSchemaNodeToTyping = (
+  includeDescriptions: boolean,
+  // deno-lint-ignore no-explicit-any
+  node: any,
+): string => {
   if (node.enum) return node.enum.map((v: string) => `"${v}"`).join(" | ");
-  if (node.anyOf) return node.anyOf.map(jsonSchemaNodeToTyping).join(" | ");
+  if (node.anyOf) {
+    // deno-lint-ignore no-explicit-any
+    return node.anyOf.map((child: any) =>
+      jsonSchemaNodeToTyping(includeDescriptions, child)
+    ).join(" | ");
+  }
   if (node.type === "array") {
-    return `${jsonSchemaNodeToTyping(node.items || { type: "unknown" })}[]`;
+    return `${
+      jsonSchemaNodeToTyping(
+        includeDescriptions,
+        node.items || { type: "unknown" },
+      )
+    }[]`;
   }
   if (node.type === "object" && node.properties) {
-    return jsonSchemaObjectToTyping(node);
+    return jsonSchemaObjectToTyping(includeDescriptions, node);
   }
   return node.type || "unknown";
 };
 
-// deno-lint-ignore no-explicit-any
-const jsonSchemaObjectToTyping = (schema: any): string => {
+const jsonSchemaObjectToTyping = (
+  includeDescriptions: boolean,
+  // deno-lint-ignore no-explicit-any
+  schema: any,
+): string => {
   const pruned = pruneDefaultsFromRequired(schema);
   const required = new Set(pruned.required || []);
   const entries = Object.entries(pruned.properties || {}).map(
     // deno-lint-ignore no-explicit-any
     ([key, prop]: [string, any]) => {
       const opt = required.has(key) ? "" : "?";
-      const desc = prop.description ? ` /* ${prop.description} */` : "";
-      return `${key}${opt}: ${jsonSchemaNodeToTyping(prop)}${desc}`;
+      const desc = includeDescriptions && prop.description
+        ? ` /* ${prop.description} */`
+        : "";
+      return `${key}${opt}: ${
+        jsonSchemaNodeToTyping(includeDescriptions, prop)
+      }${desc}`;
     },
   );
   return `{ ${entries.join(", ")} }`;
 };
 
 export const zodToTypingString = (zodObj: ZodType): string =>
-  jsonSchemaObjectToTyping(z.toJSONSchema(zodObj));
+  jsonSchemaObjectToTyping(true, z.toJSONSchema(zodObj));
+
+// Parameter names, types and optionality, without the per-parameter
+// descriptions — compact enough for the always-on inactive skills listing,
+// where the goal is a schema-valid first touch, not full documentation.
+export const zodToCompactTypingString = (zodObj: ZodType): string =>
+  jsonSchemaObjectToTyping(false, z.toJSONSchema(zodObj));

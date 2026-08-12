@@ -1,7 +1,11 @@
 import { assertEquals } from "@std/assert";
 import { cleanActiveMemoryToolRaw } from "../src/compaction.ts";
 import { cleanActiveMemoryToolName } from "../src/utils.ts";
-import { callToResult, type HistoryEvent } from "../src/agent.ts";
+import {
+  callToResult,
+  type HistoryEvent,
+  skillLoadedResultText,
+} from "../src/agent.ts";
 
 Deno.test("clean_active_memory tool - deletes target events successfully", async () => {
   const history: HistoryEvent[] = [
@@ -200,7 +204,7 @@ Deno.test(
         type: "tool_result",
         isOwn: true,
         toolCallId: "call-1",
-        result: "Skill loaded successfully.",
+        result: skillLoadedResultText,
         timestamp: 2000,
       },
     ];

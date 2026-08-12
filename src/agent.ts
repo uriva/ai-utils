@@ -7,7 +7,7 @@ import { runToolResultCompaction } from "./continuousCompaction.ts";
 import { cleanActiveMemoryToolName } from "./utils.ts";
 import { accessGeminiToken } from "./gemini.ts";
 import { genJson } from "./genJson.ts";
-import { zodToTypingString } from "./toolTyping.ts";
+import { zodToCompactTypingString, zodToTypingString } from "./toolTyping.ts";
 import { coerceArgs } from "./argCoercion.ts";
 import {
   hasInternalSentTimestampSuffix,
@@ -372,17 +372,34 @@ export type Skill = {
 export const referenceToolName = (name: string): string =>
   name.replace(/\.md$/i, "");
 
-export const formatSkillsPrompt = (skills: Skill[]): string =>
-  skills.map((skill) => {
-    const toolsPart = skill.tools.length > 0
-      ? `\n  Tools:\n${
-        skill.tools.map((t) =>
-          `    - ${qualifiedToolName(skill.name, t.name)}: ${t.description}`
-        ).join("\n")
-      }`
-      : "";
-    return `- ${skill.name}: ${skill.description}${toolsPart}`;
-  }).join("\n");
+const formatSkillsPromptWith =
+  (toolLine: (skillName: string, t: Skill["tools"][number]) => string) =>
+  (skills: Skill[]): string =>
+    skills.map((skill) => {
+      const toolsPart = skill.tools.length > 0
+        ? `\n  Tools:\n${
+          skill.tools.map((t) => toolLine(skill.name, t)).join("\n")
+        }`
+        : "";
+      return `- ${skill.name}: ${skill.description}${toolsPart}`;
+    }).join("\n");
+
+export const formatSkillsPrompt: (skills: Skill[]) => string =
+  formatSkillsPromptWith(
+    (skillName, t) =>
+      `    - ${qualifiedToolName(skillName, t.name)}: ${t.description}`,
+  );
+
+// Inactive skills carry compact parameter signatures (names, types,
+// optionality — no descriptions) so a direct first-touch run_command call is
+// schema-valid and executes immediately, instead of paying an auto-load gate
+// round trip on a blindly guessed call.
+const formatInactiveSkillsPrompt = formatSkillsPromptWith(
+  (skillName, t) =>
+    `    - ${qualifiedToolName(skillName, t.name)}(params: ${
+      zodToCompactTypingString(t.parameters)
+    }): ${t.description}`,
+);
 
 type SharedFields = { id: MessageId; timestamp: number; isOwn: boolean };
 
@@ -2150,8 +2167,10 @@ const skillToolPromptLine = (
     zodToTypingString(t.parameters)
   }): ${t.description}`;
 
+export const skillAutoLoadMarker = "auto-loaded before first use";
+
 const skillAutoLoadMessage = (skill: Skill): string =>
-  `Skill "${skill.name}" auto-loaded before first use. Its instructions and tool parameter schemas are now active — retry your call with the correct parameters.\n\nInstructions:\n${skill.instructions}\n\nTools:\n${
+  `Skill "${skill.name}" ${skillAutoLoadMarker}. Its instructions and tool parameter schemas are now active — retry your call with the correct parameters.\n\nInstructions:\n${skill.instructions}\n\nTools:\n${
     skill.tools.map((t) => skillToolPromptLine(skill.name, t)).join("\n")
   }`;
 
@@ -2915,6 +2934,36 @@ ${historyToPlainTextLocal(normalizedHistory)}`;
   }
 };
 
+export const skillLoadedResultText = "Skill loaded successfully.";
+
+// Short stand-in for the auto-load gate payload once the skill is active: the
+// gate fires at most once per skill, and from the next model call the skill's
+// instructions and schemas are already re-sent via the active-skills section
+// of the system prompt, so keeping the full payload in history would re-send
+// the same text twice per call for the rest of the conversation.
+const skillAutoLoadedShortResult = (skillName: string): string =>
+  `Skill "${skillName}" loaded — parameter schemas are in the now-active skill instructions; retry the call.`;
+
+const gateResultSkillName = (result: string): string | undefined => {
+  if (!result.startsWith('Skill "') || !result.includes(skillAutoLoadMarker)) {
+    return undefined;
+  }
+  return result.slice(7, result.indexOf('"', 7));
+};
+
+const sanitizeSkillResult =
+  (callIds: Set<string>, activeNames: Set<string>) =>
+  (e: HistoryEvent): HistoryEvent => {
+    if (e.type !== "tool_result") return e;
+    if (e.toolCallId && callIds.has(e.toolCallId)) {
+      return { ...e, result: skillLoadedResultText };
+    }
+    const gatedSkill = gateResultSkillName(e.result);
+    return gatedSkill && activeNames.has(gatedSkill.toLowerCase())
+      ? { ...e, result: skillAutoLoadedShortResult(gatedSkill) }
+      : e;
+  };
+
 export const sanitizeHistorySkillsForModel = (
   events: HistoryEvent[],
 ): HistoryEvent[] => {
@@ -2925,12 +2974,7 @@ export const sanitizeHistorySkillsForModel = (
       callIds.add(e.id);
     }
   }
-  return events.map((e) => {
-    if (e.type === "tool_result" && e.toolCallId && callIds.has(e.toolCallId)) {
-      return { ...e, result: "Skill loaded successfully." };
-    }
-    return e;
-  });
+  return events.map(sanitizeSkillResult(callIds, activeSkillNames(events)));
 };
 
 export const getSpecForTurn = <T extends AgentInputs>(
@@ -2956,7 +3000,7 @@ export const getSpecForTurn = <T extends AgentInputs>(
 
   const unactiveSkillsPrompt = sortedUnactiveSkills.length > 0
     ? `\n\nAvailable skills (load with learn_skill):\n${
-      formatSkillsPrompt(sortedUnactiveSkills)
+      formatInactiveSkillsPrompt(sortedUnactiveSkills)
     }`
     : "";
 
