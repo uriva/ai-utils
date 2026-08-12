@@ -174,9 +174,6 @@ Deno.test({
   }),
 });
 
-const commitmentPattern =
-  /אעדכן|אודיע|אמסור|אעביר|אשלח לה|אחזור אליה|אצור איתה קשר/;
-
 const singleAgentAttempt = async (
   runAgentWithProvider: Parameters<Parameters<typeof runForAllProviders>[1]>[0],
 ) => {
@@ -200,10 +197,13 @@ const singleAgentAttempt = async (
     .filter((e) => e.type === "own_utterance")
     .map((e) => ("text" in e ? e.text : ""))
     .join("\n");
-  assert(
-    relayScheduled || !commitmentPattern.test(utterances),
-    `agent committed to relay the answer to ${thirdPartyName} but concluded its turn without scheduling the relay:\n${utterances}`,
-  );
+  if (!relayScheduled && utterances) {
+    const verdict = await judgeDraft(history, utterances);
+    assert(
+      !verdict.isHallucinating,
+      `agent committed to relay the answer to ${thirdPartyName} but concluded its turn without scheduling the relay:\n${utterances}\nExplanation: ${verdict.explanation}`,
+    );
+  }
 };
 
 runForAllProviders(
