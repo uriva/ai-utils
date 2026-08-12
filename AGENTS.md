@@ -45,8 +45,18 @@ This applies to source, tests, scripts, comments, and fixtures alike.
 
 When reproducing or testing a behavior first observed in a specific production
 bot, reconstruct the scenario with generic, synthetic inputs that exercise the
-same mechanism (e.g. a made-up short Hebrew string instead of the actual bot's
+same mechanism (e.g. a made-up short English string instead of the actual bot's
 prompt). The test must prove the generic behavior, not embed the real artifact.
+
+### English Test Suite Principle
+
+All test prompts, instructions, mock tool outputs, and assertions in this
+repository MUST be written in English. Non-English text (e.g., Hebrew) is
+permitted ONLY in tests that specifically verify language- or script-dependent
+mechanisms (such as script-drift detection, non-ASCII token estimation, or RTL
+text sanitization). General harness behavior, commitment checks, tool routing,
+and agent logic tests must always be written in English for clarity,
+maintainability, and accessibility.
 
 ### No String Duplication Principle
 

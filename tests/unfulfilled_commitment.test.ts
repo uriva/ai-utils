@@ -19,8 +19,8 @@ import {
 
 export const scheduleTaskToolName = "schedule_task";
 
-const thirdPartyName = "דנה";
-const thirdPartyWhatsApp = "972540000001";
+const thirdPartyName = "Dana";
+const thirdPartyWhatsApp = "15550000001";
 
 const scheduleTaskTool = tool({
   name: scheduleTaskToolName,
@@ -59,7 +59,7 @@ const listActiveConversationsTool = tool({
   handler: () =>
     Promise.resolve(
       JSON.stringify([
-        { name: "owner", network: "whatsapp", conversationId: "972500000000" },
+        { name: "owner", network: "whatsapp", conversationId: "15550000000" },
         {
           name: thirdPartyName,
           network: "whatsapp",
@@ -70,14 +70,14 @@ const listActiveConversationsTool = tool({
 });
 
 const assistantPrompt =
-  `אתה עוזר אישי. אתה מדבר כעת עם הבעלים שלך בצ'אט וואטסאפ.
-מטלות שמתוזמנות אליך מגיעות כהערה פנימית שמתחילה ב-"PROACTIVE TASK" — בצע אותן.
-ענה בקצרה, בשפה של המשתמש.`;
+  `You are a personal assistant talking with your owner in a chat.
+Tasks scheduled for you arrive as an internal note starting with "PROACTIVE TASK" — execute them.
+Reply concisely in the user's language.`;
 
 const questionToOwner =
-  `היי, ${thirdPartyName} שאלה אם תרצה לתאם איתה שיחת עדכון באיזשהו שלב, ואם כן, מתי מתאים לך?`;
+  `Hi, ${thirdPartyName} asked if you'd like to schedule a sync call with her at some point, and if so, when works for you?`;
 
-const ownerAnswer = "כן. סופש. אני חושב שאני אחזור.";
+const ownerAnswer = "Yes. Weekend. Please let her know.";
 
 const relayScenarioHistory = (): HistoryEvent[] => [
   ownThoughtTurn(
@@ -107,7 +107,7 @@ Deno.test({
   fn: injectSecrets(async () => {
     const verdict = await judgeDraft(
       relayScenarioHistory(),
-      "הבנתי, אעדכן אותה שמתאים לתזמן לסוף השבוע.",
+      "Got it, I will update her that the weekend works for you.",
     );
     assert(
       verdict.isHallucinating,
@@ -122,7 +122,7 @@ Deno.test({
   fn: injectSecrets(async () => {
     const verdict = await judgeDraft(
       relayScenarioHistory(),
-      "התשובה שלך נרשמה במערכת לצד הפנייה. אם תרצה שאשלח לדנה הודעה ישירה, רק תעדכן אותי מה פרטי הקשר שלה.",
+      "Your answer has been recorded in the system alongside the inquiry. If you want me to send Dana a direct message, just update me with her contact details.",
     );
     assert(
       verdict.isHallucinating,
@@ -154,7 +154,7 @@ Deno.test({
           toolCallId: relayCall.id,
         }),
       ],
-      "מעולה, עדכנתי את דנה שמתאים לך בסוף השבוע.",
+      "Great, I updated Dana that the weekend works for you.",
     );
     assert(
       !verdict.isHallucinating,
@@ -166,7 +166,10 @@ Deno.test({
 Deno.test({
   name: "checker does not flag a plain acknowledgment without any commitment",
   fn: injectSecrets(async () => {
-    const verdict = await judgeDraft(relayScenarioHistory(), "רשמתי, תודה!");
+    const verdict = await judgeDraft(
+      relayScenarioHistory(),
+      "Noted, thanks!",
+    );
     assert(
       !verdict.isHallucinating,
       `false positive on a plain acknowledgment: ${verdict.explanation}`,
