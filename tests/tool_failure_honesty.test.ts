@@ -70,7 +70,7 @@ const failureDisclosure =
   /error|failed|failure|issue|problem|unable|could not|couldn't|failed to save/i;
 
 const unperformedSaveClaim =
-  /synced|updated|saved|configured|imported|completed/i;
+  /(?:have|has|were|are|been|I|I've)\s+(?:already\s+|just\s+|successfully\s+)?(?:synced|updated|saved|configured|imported|completed)|successfully\s+(?:synced|updated|saved|configured|imported|completed)/i;
 
 const singleAttempt = async (
   runAgentWithProvider: Parameters<Parameters<typeof runForAllProviders>[1]>[0],
