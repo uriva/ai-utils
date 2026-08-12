@@ -35,9 +35,9 @@ const malformedExchange = {
     { text: "I should save the user's goal now.", thought: true },
     { functionCall: { name: "update_user_field", args: {} } },
     { text: ",userId:" },
-    { text: "ירידה במשקל" },
+    { text: "weight loss" },
     { text: "}" },
-    { text: "972506207421" },
+    { text: "155506207421" },
   ],
   finishReason: "MALFORMED_FUNCTION_CALL",
 };
@@ -48,7 +48,7 @@ const validToolCallExchange = {
     functionCall: {
       id: "call-1",
       name: "update_user_field",
-      args: { userId: "972506207421", goal: "ירידה במשקל" },
+      args: { userId: "155506207421", goal: "weight loss" },
     },
   }],
   finishReason: "STOP",
@@ -96,7 +96,7 @@ Deno.test("MALFORMED_FUNCTION_CALL with garbage parts is retried, not leaked to 
 
   const leaked = history.filter((e) =>
     e.type === "own_utterance" &&
-    ["userId", "972506207421", "ירידה במשקל", "}"].some((fragment) =>
+    ["userId", "155506207421", "weight loss", "}"].some((fragment) =>
       e.text.includes(fragment)
     )
   );
@@ -121,7 +121,7 @@ Deno.test("MALFORMED_FUNCTION_CALL with garbage parts is retried, not leaked to 
     history.some((e) =>
       e.type === "tool_call" && e.name === "update_user_field" &&
       typeof e.parameters === "object" && e.parameters !== null &&
-      "userId" in e.parameters && e.parameters.userId === "972506207421"
+      "userId" in e.parameters && e.parameters.userId === "155506207421"
     ),
     "expected the retried call to update the user field with the real args",
   );

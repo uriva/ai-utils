@@ -7,29 +7,29 @@ import {
 } from "../src/agent.ts";
 import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
-const participantName = "אורח/ת";
+const participantName = "Guest";
 
 const buildHistory = (): HistoryEvent[] => [
   participantUtteranceTurn({
     name: participantName,
-    text: "שלום, אני מחפש תנור אפייה חדש למטבח",
+    text: "Hello, I am looking for a new baking oven for my kitchen",
   }),
   ownUtteranceTurn(
-    "שלום! אשמח לעזור לך למצוא תנור אפייה. יש לך העדפות מסוימות? תקציב? גודל?",
+    "Hello! I'd love to help you find an oven. Do you have any specific preferences? Budget? Size?",
   ),
   participantUtteranceTurn({
     name: participantName,
-    text: "תנור בילד-אין, תקציב עד 5000 שקל",
+    text: "A built-in oven, budget up to $1500",
   }),
   ownUtteranceTurn(
-    "מעולה! יש לנו כמה אפשרויות בטווח המחירים הזה. למשל, תנור Bosch HBG5780S6 ב-4,500 ₪, או Electrolux EOD5H70X ב-3,800 ₪.",
+    "Great! We have several options in that price range. For example, Bosch HBG5780S6 for $1200 or Electrolux EOD5H70X for $900.",
   ),
   participantUtteranceTurn({
     name: participantName,
-    text: "מה ההבדל ביניהם?",
+    text: "What is the difference between them?",
   }),
   ownUtteranceTurn(
-    "ל-Bosch יש 71 ליטר נפח ו-13 תכניות אפייה, עם ניקוי פירוליטי. ל-Electrolux יש 72 ליטר עם 10 תכניות וניקוי קטליטי. שניהם איכותיים מאוד.",
+    "The Bosch has a 71-liter capacity with pyrolytic cleaning. The Electrolux has a 72-liter capacity with catalytic cleaning. Both are high quality.",
   ),
 ];
 
@@ -41,7 +41,7 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt:
-        "You are a sales assistant for a home appliance store. Continue the conversation naturally in Hebrew. " +
+        "You are a sales assistant for a home appliance store. Continue the conversation naturally in English. " +
         "The customer is asking about ovens. Be helpful and provide recommendations.",
       rewriteHistory: async () => {},
       timezoneIANA: "Asia/Jerusalem",
@@ -68,16 +68,16 @@ runForAllProviders(
 
 Deno.test("sanitizeModelOutput self-corrects fabricated user message with timestamp", () => {
   const history = [
-    participantUtteranceTurn({ name: participantName, text: "שלום" }),
-    ownUtteranceTurn("שלום! איך אני יכול לעזור?"),
+    participantUtteranceTurn({ name: participantName, text: "Hello" }),
+    ownUtteranceTurn("Hello! How can I help you?"),
     participantUtteranceTurn({
       name: participantName,
-      text: "אני מחפש תנור חדש",
+      text: "I am looking for a new oven",
     }),
   ];
   const output = [
     ownUtteranceTurn(
-      `${participantName}: לא ממש משנה לי המחיר, משהו איכותי. שמעתי על Miele שהם טובים — sent Mar 30, 2026, 3:12 PM`,
+      `${participantName}: Price doesn't matter to me, something high quality. I heard Miele is good — sent Mar 30, 2026, 3:12 PM`,
     ),
   ];
   const result = sanitizeModelOutput(

@@ -114,11 +114,11 @@ Deno.test("sanitizeModelOutput strips system context injections from output", ()
 // believe the action already happened and relay fabricated results to the user.
 Deno.test("sanitizeModelOutput recovers a mangled tool call leaked as visible text into a real tool_call", () => {
   const leaked =
-    "startcall:default_api:run_command{command: event_discovery/query ,params:{location: Haifa}, spinnerText: בודקת אירועים קרובים בחיפה...}";
+    "startcall:default_api:run_command{command: event_discovery/query ,params:{location: London}, spinnerText: Checking events in London...}";
   const result = sanitizeModelOutput(
     [participantUtteranceTurn({
       name: "user",
-      text: "מה קורה מחר בערב בחיפה?",
+      text: "What is happening tomorrow evening in London?",
     })],
     [ownUtteranceTurn(leaked)],
   );
@@ -206,11 +206,11 @@ Deno.test("sanitizeModelOutput recovers learn_skill args from a mangled call", (
 
 Deno.test("sanitizeModelOutput leaves normal utterances that merely mention tools untouched", () => {
   const normal =
-    "מחר בערב בחיפה די שקט כרגע. רוצה שאבדוק ביום אחר או בעיר אחרת?";
+    "Tomorrow evening in London is pretty quiet right now. Would you like me to check another date or city?";
   const result = sanitizeModelOutput(
     [participantUtteranceTurn({
       name: "user",
-      text: "מה קורה מחר בערב בחיפה?",
+      text: "What is happening tomorrow evening in London?",
     })],
     [ownUtteranceTurn(normal)],
   );
@@ -314,7 +314,7 @@ Deno.test("sanitizeModelOutput splits a closed <thought> block from the visible 
   const result = sanitizeModelOutput(
     [participantUtteranceTurn({ name: "user", text: "hi" })],
     [ownUtteranceTurn(
-      "<thought>checking the dates first</thought>היי! מה נשמע?",
+      "<thought>checking the dates first</thought>Hi! How are you?",
     )],
   );
   assertEquals(result.emit.length, 2);
@@ -325,13 +325,14 @@ Deno.test("sanitizeModelOutput splits a closed <thought> block from the visible 
     throw new Error("unreachable");
   }
   assertEquals(thought.text, "checking the dates first");
-  assertEquals(utterance.text, "היי! מה נשמע?");
+  assertEquals(utterance.text, "Hi! How are you?");
 });
 
 Deno.test("sanitizeModelOutput reclassifies a leading reasoning utterance in a multi-utterance response", () => {
   const reasoning =
-    "אני מבין שהמשתמש לא יהיה בבית מחר בבוקר, אז השקילה תהיה ביום שני. אני אענה לו בחום ואאשר את התוכנית.";
-  const reply = "מובן לגמרי! הכל בסדר, נעדכן ביום שני בבוקר. 👌";
+    "I understand the user won't be home tomorrow morning, so the check-in will be on Monday. I will reply warmly and confirm.";
+  const reply =
+    "Totally understood! Everything is fine, let's sync on Monday morning. 👌";
   const result = sanitizeModelOutput(
     [participantUtteranceTurn({ name: "user", text: "hi" })],
     [ownUtteranceTurn(reasoning), ownUtteranceTurn(reply)],
@@ -348,7 +349,8 @@ Deno.test("sanitizeModelOutput reclassifies a leading reasoning utterance in a m
 });
 
 Deno.test("sanitizeModelOutput reclassifies narration of a tool called in the same response", () => {
-  const narration = "אני משתמש ב-send_reminder כדי לתזכר את המשתמש מחר בבוקר.";
+  const narration =
+    "I am using send_reminder to remind the user tomorrow morning.";
   const result = sanitizeModelOutput(
     [participantUtteranceTurn({ name: "user", text: "hi" })],
     [
@@ -365,7 +367,8 @@ Deno.test("sanitizeModelOutput reclassifies narration of a tool called in the sa
 });
 
 Deno.test("sanitizeModelOutput leaves an utterance naming a tool that is not called in the response", () => {
-  const text = "יש לי כלי בשם send_reminder שמאפשר לי לתזכר אותך.";
+  const text =
+    "I have a tool called send_reminder that allows me to remind you.";
   const result = sanitizeModelOutput(
     [participantUtteranceTurn({ name: "user", text: "hi" })],
     [ownUtteranceTurn(text)],
@@ -378,7 +381,7 @@ Deno.test("sanitizeModelOutput leaves an utterance naming a tool that is not cal
 });
 
 Deno.test("sanitizeModelOutput leaves a user-facing preamble accompanying a tool call untouched", () => {
-  const text = "רגע אחד, אני בודקת את היומן שלך 👀";
+  const text = "One moment, checking your calendar 👀";
   const result = sanitizeModelOutput(
     [participantUtteranceTurn({ name: "user", text: "hi" })],
     [

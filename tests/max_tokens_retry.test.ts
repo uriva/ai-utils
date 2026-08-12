@@ -21,12 +21,14 @@ Deno.test(
       call++;
       if (call === 1) {
         const partial = ownUtteranceTurnWithMetadata(
-          "שלום, זוהי התחלה של תשובה שנקט",
+          "Hello, this is the beginning of a response that got cut",
           undefined,
         );
         return Promise.resolve([{ ...partial, truncated: true }]);
       }
-      return Promise.resolve([ownUtteranceTurn("תשובה מלאה וקצרה.")]);
+      return Promise.resolve([
+        ownUtteranceTurn("Short and complete response."),
+      ]);
     };
 
     const history: HistoryEvent[] = [
@@ -51,14 +53,14 @@ Deno.test(
     );
     if (utterances[0].type !== "own_utterance") throw new Error("unreachable");
     assert(
-      utterances[0].text === "תשובה מלאה וקצרה.",
+      utterances[0].text === "Short and complete response.",
       `expected complete reply, got: ${utterances[0].text}`,
     );
     assert(
       !history.some(
         (e) =>
           e.type === "own_utterance" &&
-          e.text.includes("נקט"),
+          e.text.includes("cut"),
       ),
       "truncated partial must not leak to history",
     );

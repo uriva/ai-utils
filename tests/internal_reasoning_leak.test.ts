@@ -16,9 +16,10 @@ import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
 // provider-agnostic and deterministic.
 Deno.test("runAgent delivers only the reply when the model emits leading reasoning parts", async () => {
   const reasoning =
-    "אני מבין שהמשתמש לא יהיה בבית מחר בבוקר, אז השקילה תהיה ביום שני. אני אענה לו בחום ואאשר את התוכנית.";
-  const reply = "מובן לגמרי! הכל בסדר, נעדכן ביום שני בבוקר. 👌";
-  const history = [participantUtteranceTurn({ name: "user", text: "היי" })];
+    "I understand that the user won't be home tomorrow morning, so the check-in will be on Monday. I will reply warmly and confirm the plan.";
+  const reply =
+    "Totally understood! Everything is fine, let's sync on Monday morning. 👌";
+  const history = [participantUtteranceTurn({ name: "user", text: "Hi" })];
   await pipe(
     injectCallModel(() =>
       Promise.resolve([ownUtteranceTurn(reasoning), ownUtteranceTurn(reply)])
