@@ -262,9 +262,7 @@ export const mediaToolWithCaption = {
 
 export const recognizedTheDog = (e: HistoryEvent) =>
   e.type === "own_utterance" &&
-  (e.text.toLowerCase().includes("dog") ||
-    e.text.toLowerCase().includes("retriever") ||
-    e.text.toLowerCase().includes("puppy"));
+  /dog|retriever|puppy|canine|malinois|shepherd/i.test(e.text);
 
 export const findTextualAnswer = (events: HistoryEvent[]) =>
   events.find((event): event is Extract<HistoryEvent, {

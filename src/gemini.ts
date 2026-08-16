@@ -303,9 +303,11 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
     );
     if (lastUserMessage) {
       if (!lastUserMessage.parts) lastUserMessage.parts = [];
-      const resolvedAttachments = await Promise.all(
-        attachments.map(ensureGeminiAttachmentIsLink),
-      );
+      const resolvedAttachments = (await Promise.all(
+        attachments.map((att) =>
+          ensureGeminiAttachmentIsLink(att).catch(() => null)
+        ),
+      )).filter((a): a is MediaAttachment => a !== null);
       lastUserMessage.parts.push(...attachmentsToParts(resolvedAttachments));
     }
   }

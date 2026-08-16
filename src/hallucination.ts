@@ -4,12 +4,14 @@ import {
   type AgentInputs,
   getSpecForTurn,
   type HistoryEvent,
+  type MediaAttachment,
   ownUtteranceTurn,
 } from "./agent.ts";
 import { eventToPlainText } from "./compaction.ts";
 import { formatInternalSentTimestamp } from "./internalMessageMetadata.ts";
 import { zodToTypingString } from "./toolTyping.ts";
 import { z } from "zod/v4";
+import { empty } from "gamla";
 
 export type HallucinationCheckResult = {
   isHallucinating: boolean;
@@ -37,6 +39,18 @@ const correctionInstruction =
 - If the bot stated incorrect information, the note should advise the bot to use the ${editLastMessageToolName} tool to correct the message, or if that fails, to gently correct itself in a follow-up (e.g., "I sent an inaccurate message. I should use ${editLastMessageToolName} to fix it, or follow up with a correction like 'sorry, I meant...'").
 Make sure to phrase this note as if the bot is writing it to itself.`;
 
+const eventAttachmentSummary = (e: HistoryEvent): string => {
+  if (!("attachments" in e) || !e.attachments || empty(e.attachments)) {
+    return "";
+  }
+  const summaries = e.attachments.map((att) =>
+    att.caption?.trim()
+      ? `[attachment: ${att.mimeType}, caption: "${att.caption.trim()}"]`
+      : `[attachment: ${att.mimeType}]`
+  );
+  return ` ${summaries.join(" ")}`;
+};
+
 // The checker judges claims against the serialized history, so that view must
 // carry everything the model legitimately grounds claims in. Message
 // timestamps are shown to the model (as " — sent ..." suffixes) and are the
@@ -46,7 +60,12 @@ const eventToGroundTruthText =
   (timezoneIANA: string) => (e: HistoryEvent): string =>
     `[${formatInternalSentTimestamp(e.timestamp, timezoneIANA)}] ${
       eventToPlainText(e)
-    }`;
+    }${eventAttachmentSummary(e)}`;
+
+const historyAttachments = (history: HistoryEvent[]): MediaAttachment[] =>
+  history.flatMap((e) =>
+    "attachments" in e && e.attachments ? e.attachments : []
+  );
 
 export const createHallucinationCheckPrompt = (
   history: HistoryEvent[],
@@ -85,18 +104,19 @@ ${serializedHistory}
 === BOT'S LAST RESPONSE ===
 ${modelOutput}
 
-IMPORTANT: The system instructions, available tools, and conversation history sections above are absolute GROUND TRUTH. 
-Any specific factual claim (names, prices, URLs, dates, addresses, etc.) in the bot's last response MUST appear verbatim or be directly traceable as a logical inference from this ground truth text.
+IMPORTANT: The system instructions, available tools, attachments, and conversation history sections above are absolute GROUND TRUTH. 
+Any specific factual claim (names, prices, URLs, dates, addresses, visual/auditory details from attached media, etc.) in the bot's last response MUST appear verbatim or be directly traceable as a logical inference from this ground truth text and attached media.
 
 Analyze the bot's response carefully. Flag a hallucination if ANY of the following patterns holds:
 
-A. Unsupported facts: the response contains specific factual claims or third-party links/URLs that are NOT supported by the system instructions, available tools, or conversation history, and the fabrication would meaningfully derail the conversation.
+A. Unsupported facts: the response contains specific factual claims or third-party links/URLs that are NOT supported by the system instructions, available tools, attachments, or conversation history, and the fabrication would meaningfully derail the conversation.
 
 B. Phantom actions: the response states that an action was performed — something was sent, saved, recorded, scheduled, booked, updated, deleted, or a person was notified — but no tool_call performing that action appears in the conversation history. Mere conversational acknowledgments (e.g. "noted", "got it") are NOT actions; do not flag those.
 
 C. Empty commitments: the response commits the bot to a future consequential action — notifying, updating or contacting a person, sending or scheduling something, checking and reporting back — but no tool_call performing or scheduling that action appears in the conversation history. The bot's turn is over once this response is sent, so such a commitment will never be fulfilled. Offers and questions (e.g. "shall I update her?") are NOT commitments; do not flag those.
 
 Do NOT flag a hallucination if:
+- The information is directly visible, audible, or described in attached media
 - The information is reasonably correct common knowledge
 - The information is supported by any tool_result, own_thought, or external_event in the history (even older ones)
 - The bot is paraphrasing, summarizing, or making directly implied logical inferences from the ground truth
@@ -105,12 +125,12 @@ Do NOT flag a hallucination if:
 ${correctionInstruction}`;
 };
 
-const callModel = (prompt: string) =>
+const callModel = (prompt: string, attachments?: MediaAttachment[]) =>
   genJson(
     { provider: "google", mini: false },
-    `You are a hallucination detection expert. Your job is to verify whether a bot's response contains fabricated or unverified information with NO basis in its instructions, prompt, or conversation history. The instructions, prompt, tools, and history are absolute ground truth. Only flag clear-cut fabrications, not paraphrasing, reasonable inferences, or common knowledge.`,
+    `You are a hallucination detection expert. Your job is to verify whether a bot's response contains fabricated or unverified information with NO basis in its instructions, prompt, or conversation history. The instructions, prompt, tools, attachments, and history are absolute ground truth. Only flag clear-cut fabrications, not paraphrasing, reasonable inferences, or common knowledge.`,
     hallucinationCheckSchema,
-  )(prompt);
+  )(prompt, attachments);
 
 export const checkHallucination = async (
   history: HistoryEvent[],
@@ -122,7 +142,11 @@ export const checkHallucination = async (
     spec,
     timezoneIANA,
   );
-  return await callModel(checkPrompt);
+  const attachments = historyAttachments(history);
+  return await callModel(
+    checkPrompt,
+    empty(attachments) ? undefined : attachments,
+  );
 };
 
 export const ungroundedReplyRetryAdvice =

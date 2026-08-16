@@ -9,9 +9,6 @@ import {
   runForAllProviders,
 } from "../test_helpers.ts";
 
-const mentionsDogLikeContent = (text: string) =>
-  /dog|retriever|puppy|canine|malinois/i.test(text);
-
 runForAllProviders(
   "tool inline attachment is forwarded to model",
   async (runAgentWithProvider) => {
@@ -116,7 +113,7 @@ runForAllProviders(
       mockHistory.some((e) =>
         e.type === "own_utterance" &&
         (e.text.toLowerCase().includes("buddy") ||
-          mentionsDogLikeContent(e.text))
+          recognizedTheDog(e))
       ),
       `AI did not mention the caption information. History: ${
         JSON.stringify(mockHistory, null, 2)
