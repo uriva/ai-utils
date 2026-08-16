@@ -10,6 +10,7 @@ import {
 import { context, type Injection, type Injector } from "@uri/inject";
 import { coerce, conditionalRetry, empty, map, pipe, remove } from "gamla";
 import {
+  emptyGeminiCandidateMessage,
   isInvalidArgumentError,
   isRetryableError,
   isRetryableUploadError,
@@ -23,9 +24,6 @@ import { makeCache } from "./cacher.ts";
 import { pruneDefaultsFromRequired } from "./toolTyping.ts";
 
 export { zodToTypingString } from "./toolTyping.ts";
-
-const emptyGeminiCandidateMessage =
-  "Gemini returned an empty candidate (no text)";
 
 // deno-lint-ignore no-explicit-any
 const isRedundantAnyMember = (x: any) =>
@@ -283,7 +281,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
       (r: GenerateContentParameters) =>
         generateContentInjection.access(r).then(parseGenJsonResponse),
     )(req).catch((err: unknown) => {
-      if (!isInvalidArgumentError(err)) throw err;
+      if (!isRetryableError(err) && !isInvalidArgumentError(err)) throw err;
       return conditionalRetry(isRetryableError)(
         1000,
         3,
@@ -360,7 +358,7 @@ export const geminiGenText = async (
 
   const primaryModel = geminiModelVersion(mini);
   const result = await execGen(primaryModel).catch((err: unknown) => {
-    if (!isInvalidArgumentError(err)) throw err;
+    if (!isRetryableError(err) && !isInvalidArgumentError(err)) throw err;
     return execGen(alternateGeminiModelVersion(primaryModel));
   });
   return result.text ?? "";

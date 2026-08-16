@@ -57,6 +57,12 @@ export const isInvalidArgumentError = (error: unknown) =>
     "Request contains an invalid argument",
   );
 
+export const emptyGeminiCandidateMessage =
+  "Gemini returned an empty candidate (no text)";
+
+export const isEmptyGeminiCandidateError = (error: unknown) =>
+  normalizeError(error).message.includes(emptyGeminiCandidateMessage);
+
 export const isRetryableError = (error: unknown) => {
   const norm = normalizeError(error);
   return (
@@ -64,7 +70,8 @@ export const isRetryableError = (error: unknown) => {
     (isServerError(norm) ||
       isRateLimitError(norm) ||
       isTransientFetchError(norm) ||
-      norm instanceof SyntaxError)
+      norm instanceof SyntaxError ||
+      isEmptyGeminiCandidateError(norm))
   );
 };
 
