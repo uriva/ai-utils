@@ -1,7 +1,7 @@
 import { assert } from "@std/assert";
 import { checkHallucination } from "../mod.ts";
 import type { HistoryEvent } from "../src/agent.ts";
-import { injectSecrets } from "../test_helpers.ts";
+import { b64, injectSecrets } from "../test_helpers.ts";
 import { z } from "zod/v4";
 
 Deno.test({
@@ -229,6 +229,46 @@ Deno.test({
     assert(
       !result.isHallucinating,
       `False positive: checker flagged community group links as hallucination. Explanation: ${result.explanation}`,
+    );
+  }),
+});
+
+Deno.test({
+  name:
+    "hallucination checker does not flag details grounded in attached media as hallucination",
+  fn: injectSecrets(async () => {
+    const prompt = "You are a helpful assistant.";
+    const history: HistoryEvent[] = [
+      {
+        type: "participant_utterance",
+        isOwn: false,
+        name: "user",
+        text: "Please describe the attached image.",
+        attachments: [
+          { kind: "inline", mimeType: "image/jpeg", dataBase64: b64 },
+        ],
+        id: "media-u1",
+        timestamp: 1742634033000,
+      },
+      {
+        type: "own_utterance",
+        isOwn: true,
+        text:
+          "The image shows a Belgian Shepherd dog standing against a white background.",
+        id: "media-o1",
+        timestamp: 1742634045000,
+      },
+    ];
+
+    const result = await checkHallucination(history, {
+      prompt,
+      tools: [],
+      skills: [],
+    });
+
+    assert(
+      !result.isHallucinating,
+      `False positive: checker flagged attached image description as hallucination. Explanation: ${result.explanation}`,
     );
   }),
 });
