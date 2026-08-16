@@ -21,6 +21,7 @@ import {
 } from "gamla";
 import {
   collapseDuplicatedText,
+  is403PermissionError,
   isInvalidArgumentError,
   isRetryableError,
   isSyntheticTimeoutError,
@@ -190,13 +191,7 @@ export const rejectMalformedFunctionCall = (
   throw geminiMalformedFunctionCallError(parts);
 };
 
-export const is403PermissionError = (error: Error) => {
-  if ("status" in error && (error as { status: number }).status === 403) {
-    return true;
-  }
-  return error.message.includes("403") &&
-    error.message.includes("PERMISSION_DENIED");
-};
+export { is403PermissionError };
 
 const isFileNotActiveError = (error: Error) =>
   error.message.includes("not in an ACTIVE state") ||

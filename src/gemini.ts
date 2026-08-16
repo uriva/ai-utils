@@ -11,10 +11,12 @@ import { context, type Injection, type Injector } from "@uri/inject";
 import { coerce, conditionalRetry, empty, map, pipe, remove } from "gamla";
 import {
   emptyGeminiCandidateMessage,
+  is403PermissionError,
   isInvalidArgumentError,
   isRetryableError,
   isRetryableUploadError,
   type ModelOpts,
+  normalizeError,
 } from "./utils.ts";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z, type ZodType } from "zod/v4";
@@ -297,30 +299,46 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
   if (empty(contents)) {
     throw new Error("Cannot call Gemini with empty contents");
   }
+  const callWithReq = (c: Content[]) =>
+    cachedCall({
+      model: geminiModelVersion(mini),
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: zodToGeminiParameters(zodType),
+        thinkingConfig: geminiThinkingConfig(mini),
+        ...(maxOutputTokens ? { maxOutputTokens } : {}),
+      },
+      contents: c,
+    });
+
   if (attachments && attachments.length > 0) {
-    const lastUserMessage = [...contents].reverse().find((c) =>
-      c.role === "user"
-    );
-    if (lastUserMessage) {
-      if (!lastUserMessage.parts) lastUserMessage.parts = [];
-      const resolvedAttachments = (await Promise.all(
-        attachments.map((att) =>
-          ensureGeminiAttachmentIsLink(att).catch(() => null)
-        ),
-      )).filter((a): a is MediaAttachment => a !== null);
-      lastUserMessage.parts.push(...attachmentsToParts(resolvedAttachments));
+    try {
+      const withAttachments: Content[] = contents.map((c) => ({
+        ...c,
+        parts: [...(c.parts ?? [])],
+      }));
+      const lastUserMessage = [...withAttachments].reverse().find((c) =>
+        c.role === "user"
+      );
+      if (lastUserMessage) {
+        if (!lastUserMessage.parts) lastUserMessage.parts = [];
+        const resolvedAttachments = (await Promise.all(
+          attachments.map((att) =>
+            ensureGeminiAttachmentIsLink(att).catch(() => null)
+          ),
+        )).filter((a): a is MediaAttachment => a !== null);
+        if (!empty(resolvedAttachments)) {
+          lastUserMessage.parts.push(
+            ...attachmentsToParts(resolvedAttachments),
+          );
+          return await callWithReq(withAttachments);
+        }
+      }
+    } catch (err) {
+      if (!is403PermissionError(normalizeError(err))) throw err;
     }
   }
-  return cachedCall({
-    model: geminiModelVersion(mini),
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: zodToGeminiParameters(zodType),
-      thinkingConfig: geminiThinkingConfig(mini),
-      ...(maxOutputTokens ? { maxOutputTokens } : {}),
-    },
-    contents,
-  });
+  return await callWithReq(contents);
 };
 
 export const attachmentsToParts = (

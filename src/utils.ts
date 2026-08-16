@@ -63,6 +63,15 @@ export const emptyGeminiCandidateMessage =
 export const isEmptyGeminiCandidateError = (error: unknown) =>
   normalizeError(error).message.includes(emptyGeminiCandidateMessage);
 
+export const is403PermissionError = (error: unknown) => {
+  const norm = normalizeError(error);
+  if ("status" in norm && (norm as { status: number }).status === 403) {
+    return true;
+  }
+  return norm.message.includes("403") &&
+    norm.message.includes("PERMISSION_DENIED");
+};
+
 export const isRetryableError = (error: unknown) => {
   const norm = normalizeError(error);
   return (
