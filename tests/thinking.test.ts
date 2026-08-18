@@ -97,29 +97,18 @@ Deno.test(
 );
 
 Deno.test(
-  "geminiThinkingConfig bounds thinkingBudget to prevent thinking from starving output space",
+  "geminiThinkingConfig enables includeThoughts without hardcoded thinkingBudget cap",
   () => {
-    const fullConfig = geminiThinkingConfig(false, 16000);
+    const fullConfig = geminiThinkingConfig(false);
     assert(fullConfig.includeThoughts === true);
-    assert(fullConfig.thinkingBudget === 8000);
+    assert(!("thinkingBudget" in fullConfig));
     assert(!("thinkingLevel" in fullConfig));
 
-    const mediumConfig = geminiThinkingConfig(false, 8192);
-    assert(mediumConfig.thinkingBudget === 4096);
-
-    const miniConfig = geminiThinkingConfig(true, 16000);
+    const miniConfig = geminiThinkingConfig(true);
+    assert(miniConfig.includeThoughts === true);
     assert(
       miniConfig.thinkingLevel === ThinkingLevel.THINKING_LEVEL_UNSPECIFIED,
     );
     assert(!("thinkingBudget" in miniConfig));
-
-    const defaultMini = geminiThinkingConfig(true);
-    assert(
-      defaultMini.thinkingLevel === ThinkingLevel.THINKING_LEVEL_UNSPECIFIED,
-    );
-    assert(!("thinkingBudget" in defaultMini));
-
-    const defaultFull = geminiThinkingConfig(false);
-    assert(defaultFull.thinkingBudget === 8192);
   },
 );

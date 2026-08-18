@@ -1018,7 +1018,7 @@ export const buildReq = (
       threshold: HarmBlockThreshold.OFF,
     })),
     ...toolingConfig(tools),
-    thinkingConfig: geminiThinkingConfig(lightModel, maxOutputTokens),
+    thinkingConfig: geminiThinkingConfig(lightModel),
     ...(maxOutputTokens ? { maxOutputTokens } : {}),
   },
   contents: pipe(

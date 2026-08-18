@@ -236,19 +236,9 @@ export const alternateGeminiModelVersion = (model: string) => {
 
 export const geminiThinkingConfig = (
   mini: boolean | undefined,
-  maxOutputTokens?: number,
 ): ThinkingConfig => ({
   includeThoughts: true,
-  ...(mini
-    ? { thinkingLevel: ThinkingLevel.THINKING_LEVEL_UNSPECIFIED }
-    : maxOutputTokens
-    ? {
-      thinkingBudget: Math.min(
-        8192,
-        Math.max(1024, Math.floor(maxOutputTokens / 2)),
-      ),
-    }
-    : { thinkingBudget: 8192 }),
+  ...(mini ? { thinkingLevel: ThinkingLevel.THINKING_LEVEL_UNSPECIFIED } : {}),
 });
 
 // Parse (and validation-failure) errors must happen INSIDE the cached
@@ -372,7 +362,7 @@ export const geminiGenText = async (
   const req = (model: string) => ({
     model,
     config: {
-      thinkingConfig: geminiThinkingConfig(mini, maxOutputTokens),
+      thinkingConfig: geminiThinkingConfig(mini),
       ...(maxOutputTokens ? { maxOutputTokens } : {}),
     },
     contents: [{
