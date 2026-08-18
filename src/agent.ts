@@ -2418,7 +2418,7 @@ const maxUrlGroundingRetries = 2;
 const maxDoNothingRetries = 2;
 
 export const unansweredUserCorrectionText =
-  "[SYSTEM NOTICE]: The user is waiting for a response to their message, but you have not yet sent a reply or taken action. Please proceed to answer the user's request or take the next required action now.";
+  "[SYSTEM NOTICE]: The user is waiting for a response to their message, but you have not yet sent a reply or taken action. Please proceed to answer the user's request or take the next required action now. (If your instructions explicitly require staying silent or ignoring this message, you may remain silent).";
 
 export const hasUnansweredUserMessage = (history: HistoryEvent[]): boolean => {
   const lastUserIndex = history.findLastIndex(

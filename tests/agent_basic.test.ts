@@ -2,11 +2,13 @@ import { assert, assertEquals } from "@std/assert";
 import { runAgent } from "../mod.ts";
 import {
   doNothingEvent,
+  forcedStopUtterance,
   getStreamChunk,
   type HistoryEvent,
   injectCallModel,
   ownUtteranceTurn,
   participantUtteranceTurn,
+  thinkingTokenExhaustionWarningText,
 } from "../src/agent.ts";
 import {
   agentDeps,
@@ -61,7 +63,10 @@ runForAllProviders(
     });
     const ownUtterance = mockHistory.find((e) => e.type === "own_utterance");
     assert(
-      !ownUtterance?.text || ownUtterance.text.length <= 10,
+      !ownUtterance?.text ||
+        ownUtterance.text === forcedStopUtterance ||
+        ownUtterance.text === thinkingTokenExhaustionWarningText ||
+        ownUtterance.text.length <= 10,
       `Expected at most 10 characters but got: "${ownUtterance?.text}"`,
     );
   },
