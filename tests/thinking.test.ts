@@ -7,6 +7,7 @@ import {
   ownUtteranceTurn,
   participantUtteranceTurn,
 } from "../src/agent.ts";
+import { geminiThinkingConfig } from "../src/gemini.ts";
 import {
   agentDeps,
   noopRewriteHistory,
@@ -91,5 +92,27 @@ Deno.test(
       thinkingText === "The answer is 42 because math says so.",
       `expected assembled thinking text, got: ${thinkingText}`,
     );
+  },
+);
+
+Deno.test(
+  "geminiThinkingConfig bounds thinkingBudget to prevent thinking from starving output space",
+  () => {
+    const fullConfig = geminiThinkingConfig(false, 16000);
+    assert(fullConfig.includeThoughts === true);
+    assert(fullConfig.thinkingBudget === 8000);
+    assert(!("thinkingLevel" in fullConfig));
+
+    const mediumConfig = geminiThinkingConfig(false, 8192);
+    assert(mediumConfig.thinkingBudget === 4096);
+
+    const miniConfig = geminiThinkingConfig(true, 16000);
+    assert(miniConfig.thinkingBudget === 1024);
+
+    const defaultMini = geminiThinkingConfig(true);
+    assert(defaultMini.thinkingBudget === 1024);
+
+    const defaultFull = geminiThinkingConfig(false);
+    assert(defaultFull.thinkingBudget === 8192);
   },
 );

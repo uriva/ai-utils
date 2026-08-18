@@ -5,7 +5,6 @@ import {
   type GenerateContentResponse,
   GoogleGenAI,
   type Part,
-  ThinkingLevel,
 } from "@google/genai";
 import { context, type Injection, type Injector } from "@uri/inject";
 import { coerce, conditionalRetry, empty, map, pipe, remove } from "gamla";
@@ -233,11 +232,19 @@ export const alternateGeminiModelVersion = (model: string) => {
     : model;
 };
 
-export const geminiThinkingConfig = (mini: boolean | undefined) => ({
+export const geminiThinkingConfig = (
+  mini: boolean | undefined,
+  maxOutputTokens?: number,
+) => ({
   includeThoughts: true,
-  ...(mini
-    ? { thinkingLevel: ThinkingLevel.LOW }
-    : { thinkingLevel: ThinkingLevel.HIGH }),
+  ...(mini ? { thinkingBudget: 1024 } : maxOutputTokens
+    ? {
+      thinkingBudget: Math.min(
+        8192,
+        Math.max(1024, Math.floor(maxOutputTokens / 2)),
+      ),
+    }
+    : { thinkingBudget: 8192 }),
 });
 
 // Parse (and validation-failure) errors must happen INSIDE the cached
@@ -354,13 +361,16 @@ export const attachmentsToParts = (
   });
 
 export const geminiGenText = async (
-  { mini }: ModelOpts,
+  { mini, maxOutputTokens }: ModelOpts,
   prompt: string,
   attachments: MediaAttachment[],
 ): Promise<string> => {
   const req = (model: string) => ({
     model,
-    config: { thinkingConfig: geminiThinkingConfig(mini) },
+    config: {
+      thinkingConfig: geminiThinkingConfig(mini, maxOutputTokens),
+      ...(maxOutputTokens ? { maxOutputTokens } : {}),
+    },
     contents: [{
       role: "user",
       parts: [...attachmentsToParts(attachments), { text: prompt }],
