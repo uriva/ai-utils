@@ -1193,7 +1193,7 @@ export const participantUtteranceTurn = (
 export const ownUtteranceTurn = (
   text: string,
   attachments?: MediaAttachment[],
-): HistoryEvent => ({
+): OwnUtterance<undefined> => ({
   type: "own_utterance",
   isOwn: true,
   text,
@@ -1205,10 +1205,12 @@ export const ownUtteranceTurnWithMetadata = <Metadata>(
   text: string,
   modelMetadata: Metadata | undefined,
   attachments?: MediaAttachment[],
-): HistoryEventWithMetadata<Metadata> => ({
+): OwnUtterance<Metadata> => ({
   ...ownUtteranceTurn(text, attachments),
+  type: "own_utterance",
+  isOwn: true,
   modelMetadata,
-} as HistoryEventWithMetadata<Metadata>);
+});
 
 export const ownThoughtTurn = (
   text: string,
@@ -2467,6 +2469,9 @@ const concludingUtteranceTexts = (emit: HistoryEvent[]): string[] =>
       event.type === "own_utterance" ? [event.text] : []
     );
 
+export const thinkingTokenExhaustionWarningText =
+  "The model exhausted its thinking token limit. Please retry with smaller, more focused instructions (avoiding generating large files or code blocks in a single step).";
+
 const findTruncatedUtterance = (events: HistoryEvent[]) =>
   events.find(
     (e): e is Extract<HistoryEvent, { type: "own_utterance" }> =>
@@ -2474,6 +2479,9 @@ const findTruncatedUtterance = (events: HistoryEvent[]) =>
   );
 
 const truncationCorrectionText = (partialText: string) => {
+  if (partialText === thinkingTokenExhaustionWarningText) {
+    return "Your previous response hit the output token budget during internal reasoning without completing an answer or tool call. Restart from the beginning — keep your internal reasoning brief, do not draft large files in thought, and proceed immediately to answer or execute tools in small steps.";
+  }
   const tail = partialText.slice(-400);
   return `Your previous response hit the output token budget and was cut off mid-way. You had written: "${tail}". Restart the response from the beginning — keep it significantly more concise and keep any internal reasoning brief so the full answer fits within the budget.`;
 };

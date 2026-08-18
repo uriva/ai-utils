@@ -56,6 +56,7 @@ import {
   type ParticipantEditMessage,
   type ParticipantUtterance,
   systemNotificationPrefix,
+  thinkingTokenExhaustionWarningText,
   type Tool,
   type ToolResult,
   toolUseTurnWithMetadata,
@@ -1060,8 +1061,9 @@ type GeminiFilePart = {
 
 export type GeminiMetadata = {
   type: "gemini";
-  thoughtSignature: string;
-  responseId: string;
+  thoughtSignature?: string;
+  responseId?: string;
+  isSafetyBlock?: boolean;
 };
 
 export type GeminiHistoryEvent = HistoryEventWithMetadata<GeminiMetadata>;
@@ -1795,8 +1797,27 @@ const geminiMaxTokensReason = "MAX_TOKENS";
 
 const markTruncatedUtterances = (
   events: GeminiHistoryEvent[],
-): GeminiHistoryEvent[] =>
-  events.map((e) => e.type === "own_utterance" ? { ...e, truncated: true } : e);
+): GeminiHistoryEvent[] => {
+  const hasOwnUtterance = events.some((e) => e.type === "own_utterance");
+  if (!hasOwnUtterance) {
+    const responseId = generateId();
+    const warningEvent: OwnUtterance<GeminiMetadata> =
+      ownUtteranceTurnWithMetadata(
+        thinkingTokenExhaustionWarningText,
+        {
+          type: "gemini",
+          responseId,
+        },
+      );
+    return [
+      ...events.filter((e) => e.type !== "do_nothing"),
+      { ...warningEvent, truncated: true },
+    ];
+  }
+  return events.map((e) =>
+    e.type === "own_utterance" ? { ...e, truncated: true } : e
+  );
+};
 
 // Marks a reason that came from Gemini's `promptFeedback.blockReason` (the whole
 // prompt was rejected, zero candidates) as opposed to a candidate
