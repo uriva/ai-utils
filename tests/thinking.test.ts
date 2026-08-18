@@ -1,4 +1,5 @@
 import { assert } from "@std/assert";
+import { ThinkingLevel } from "@google/genai";
 import { runAgent } from "../mod.ts";
 import {
   getStreamThinkingChunk,
@@ -107,10 +108,16 @@ Deno.test(
     assert(mediumConfig.thinkingBudget === 4096);
 
     const miniConfig = geminiThinkingConfig(true, 16000);
-    assert(miniConfig.thinkingBudget === 1024);
+    assert(
+      miniConfig.thinkingLevel === ThinkingLevel.THINKING_LEVEL_UNSPECIFIED,
+    );
+    assert(!("thinkingBudget" in miniConfig));
 
     const defaultMini = geminiThinkingConfig(true);
-    assert(defaultMini.thinkingBudget === 1024);
+    assert(
+      defaultMini.thinkingLevel === ThinkingLevel.THINKING_LEVEL_UNSPECIFIED,
+    );
+    assert(!("thinkingBudget" in defaultMini));
 
     const defaultFull = geminiThinkingConfig(false);
     assert(defaultFull.thinkingBudget === 8192);

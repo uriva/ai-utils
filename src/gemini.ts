@@ -5,6 +5,8 @@ import {
   type GenerateContentResponse,
   GoogleGenAI,
   type Part,
+  type ThinkingConfig,
+  ThinkingLevel,
 } from "@google/genai";
 import { context, type Injection, type Injector } from "@uri/inject";
 import { coerce, conditionalRetry, empty, map, pipe, remove } from "gamla";
@@ -235,9 +237,11 @@ export const alternateGeminiModelVersion = (model: string) => {
 export const geminiThinkingConfig = (
   mini: boolean | undefined,
   maxOutputTokens?: number,
-) => ({
+): ThinkingConfig => ({
   includeThoughts: true,
-  ...(mini ? { thinkingBudget: 1024 } : maxOutputTokens
+  ...(mini
+    ? { thinkingLevel: ThinkingLevel.THINKING_LEVEL_UNSPECIFIED }
+    : maxOutputTokens
     ? {
       thinkingBudget: Math.min(
         8192,
