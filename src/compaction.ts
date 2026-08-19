@@ -4,9 +4,11 @@ import {
   join,
   last,
   map,
+  nonempty,
   pipe,
   reverse,
   sortCompare,
+  sum,
 } from "gamla";
 import { z } from "zod/v4";
 import { accessTokenCounter, type HistoryEvent } from "./agent.ts";
@@ -68,6 +70,25 @@ export const groupToolCallPairs = (
   return result;
 };
 
+export const isCompactedSummaryText = (text: string): boolean =>
+  text.startsWith("[This summary covers") ||
+  text.startsWith("Past conversation history was compacted");
+
+const isOwnUtterance = (e: HistoryEvent): boolean =>
+  e.type === "own_utterance" || e.type === "own_edit_message";
+
+const isParticipantUtterance = (e: HistoryEvent): boolean =>
+  e.type === "participant_utterance" || e.type === "participant_edit_message";
+
+const unansweredParticipantEventIds = (events: HistoryEvent[]): Set<string> => {
+  const lastOwnIndex = events.findLastIndex(isOwnUtterance);
+  return new Set(
+    events.slice(lastOwnIndex + 1).filter(isParticipantUtterance).map((e) =>
+      e.id
+    ),
+  );
+};
+
 export const segmentHistoryEvents = (
   events: HistoryEvent[],
   gap: number,
@@ -88,7 +109,10 @@ export const segmentHistoryEvents = (
     const currStart = groupTimestamp(groups[i]);
     const gapOk = currStart - prevEnd >= gap;
     const currentEvents = flattenGroups(currentGroups);
-    if (gapOk && currentEvents.length >= 2) {
+    const hasUnanswered = nonempty(
+      Array.from(unansweredParticipantEventIds(currentEvents)),
+    );
+    if (gapOk && !hasUnanswered && currentEvents.length >= 2) {
       segments.push({
         events: currentEvents,
         start: head(currentEvents).timestamp,
@@ -139,19 +163,35 @@ const trimSegmentToTokenBudget = async (
 ) => {
   const sorted = sortEventsChronologically(events);
   const groups = groupToolCallPairs(sorted);
+  const unansweredIds = unansweredParticipantEventIds(sorted);
+  const isUnansweredGroup = (g: HistoryEvent[]) =>
+    g.some((e) => unansweredIds.has(e.id));
+  const mandatoryGroups = groups.filter(isUnansweredGroup);
+  const mandatoryTokensList = await Promise.all(
+    mandatoryGroups.map((group) => accessTokenCounter(group)),
+  );
+  const mandatoryTokens = sum(mandatoryTokensList);
+
   const reversedGroups = [...groups].reverse();
   const groupTokensList = await Promise.all(
     reversedGroups.map((group) => accessTokenCounter(group)),
   );
-  const kept: HistoryEvent[][] = [];
-  let tokens = 0;
+  const keptGroups = new Set<HistoryEvent[]>(mandatoryGroups);
+  let tokens = mandatoryTokens;
   for (let i = 0; i < reversedGroups.length; i++) {
     const group = reversedGroups[i];
+    if (keptGroups.has(group)) continue;
     const groupTokens = groupTokensList[i];
-    if (tokens + groupTokens > maxTokens && kept.length > 0) break;
-    kept.unshift(group);
+    if (
+      tokens + groupTokens > maxTokens &&
+      keptGroups.size > mandatoryGroups.length
+    ) {
+      break;
+    }
+    keptGroups.add(group);
     tokens += groupTokens;
   }
+  const kept = groups.filter((g) => keptGroups.has(g));
   const keptEvents = kept.flatMap((g) => g);
   const keptIds = new Set(keptEvents.map((e) => e.id));
   return {

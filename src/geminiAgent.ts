@@ -78,6 +78,7 @@ import {
 import { inspectMediaUrlToolName } from "./inspectMediaTool.ts";
 import { extractJsonThought, stripJsonThought } from "./jsonThought.ts";
 import { assertNoScriptDrift } from "./scriptDriftGuard.ts";
+import { isCompactedSummaryText } from "./compaction.ts";
 
 const fetchUrl = (input: RequestInfo | URL): string =>
   typeof input === "string"
@@ -871,7 +872,11 @@ const historyEventToContent = (
       : e.modelMetadata
       ? wrapModelContent([{ text: " " }])
       : wrapUserContent([
-        { text: stampText(`${systemNotificationPrefix} ${e.text}]`) },
+        {
+          text: isCompactedSummaryText(e.text)
+            ? stampText(e.text)
+            : stampText(`${systemNotificationPrefix} ${e.text}]`),
+        },
         ...attachmentsToPartsOrEmpty(e.attachments),
       ]);
   }

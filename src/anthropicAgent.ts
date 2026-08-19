@@ -3,6 +3,7 @@ import { context, type Injection, type Injector } from "@uri/inject";
 import { conditionalRetry, empty, map, sum } from "gamla";
 import type { ZodType } from "zod/v4";
 import { zodToGeminiParameters } from "./gemini.ts";
+import { isCompactedSummaryText } from "./compaction.ts";
 import {
   accessMetadataStore,
   type AgentSpec,
@@ -274,7 +275,9 @@ async (
     const contentBlocks = await attachmentsToContentBlocks(e.attachments);
     const textBlock: Anthropic.Messages.TextBlockParam = {
       type: "text",
-      text: `${systemNotificationPrefix} ${e.text}]`,
+      text: isCompactedSummaryText(e.text)
+        ? e.text
+        : `${systemNotificationPrefix} ${e.text}]`,
     };
     return [{
       role: "user",

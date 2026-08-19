@@ -7,6 +7,7 @@ import type {
 } from "openai/resources/index.mjs";
 import type { ZodType } from "zod/v4";
 import { zodToGeminiParameters } from "./gemini.ts";
+import { isCompactedSummaryText } from "./compaction.ts";
 import {
   accessMetadataStore,
   type AgentSpec,
@@ -260,7 +261,9 @@ async (e: KimiHistoryEvent): Promise<ChatCompletionMessageParam[]> => {
     const contentParts = await attachmentsToContentParts(e.attachments);
     const textPart: OpenAI.Chat.Completions.ChatCompletionContentPart = {
       type: "text",
-      text: `${systemNotificationPrefix} ${e.text}]`,
+      text: isCompactedSummaryText(e.text)
+        ? e.text
+        : `${systemNotificationPrefix} ${e.text}]`,
     };
     return [{
       role: "user",

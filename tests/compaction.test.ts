@@ -814,3 +814,93 @@ Deno.test("compaction retains a small fraction of the trigger, not the whole cei
     `fix must shrink kept history by >5x (was ${pathologicalKept}, now ${fixedKept})`,
   );
 });
+
+Deno.test(
+  "partitionSegments preserves active unanswered participant utterance at start of kept events while trimming intermediate tool calls",
+  async () => {
+    const base = Date.now();
+    const oldEvents: HistoryEvent[] = [
+      makeParticipantUtterance("Initial greeting", base),
+      makeOwnUtterance("Hello! How can I help?", base + 1000),
+    ];
+    const unansweredUserPrompt = makeParticipantUtterance(
+      "Please execute the multi-step migration script and verify results",
+      base + 2000,
+    );
+    const largeToolOutput = "log line data ".repeat(100);
+    const toolEvents: HistoryEvent[] = [];
+    for (let i = 0; i < 30; i++) {
+      const callId = `call-${i}`;
+      toolEvents.push(makeToolCall(callId, "run_shell", base + 3000 + i * 200));
+      toolEvents.push({
+        id: crypto.randomUUID(),
+        type: "tool_result",
+        isOwn: true,
+        toolCallId: callId,
+        result: `Output ${i}: ${largeToolOutput}`,
+        timestamp: base + 3000 + i * 200 + 100,
+      });
+    }
+
+    const allEvents = [...oldEvents, unansweredUserPrompt, ...toolEvents];
+    const segments = segmentHistoryEvents(allEvents, segmentGapMs);
+    const { kept, toSummarize } = await partitionSegments(3000, segments);
+
+    const keptEvents = kept.flatMap((s) => s.events);
+    const summarizedEvents = toSummarize.flatMap((s) => s.events);
+
+    const userPromptInKept = keptEvents.some(
+      (e) => e.id === unansweredUserPrompt.id,
+    );
+    assertEquals(
+      userPromptInKept,
+      true,
+      "Active unanswered participant utterance must be preserved in kept events",
+    );
+
+    const userPromptInSummarized = summarizedEvents.some(
+      (e) => e.id === unansweredUserPrompt.id,
+    );
+    assertEquals(
+      userPromptInSummarized,
+      false,
+      "Active unanswered participant utterance must not be sent to toSummarize",
+    );
+
+    assertEquals(
+      keptEvents[0].id,
+      unansweredUserPrompt.id,
+      "Unanswered user prompt must be at the beginning of the active turn in kept events",
+    );
+
+    const keptToolCalls = keptEvents.filter((e) => e.type === "tool_call");
+    assertEquals(
+      keptToolCalls.length > 0,
+      true,
+      "Recent tool calls should be retained in kept events",
+    );
+    assertEquals(
+      keptToolCalls.length < 30,
+      true,
+      "Older tool calls should have been trimmed to budget",
+    );
+  },
+);
+
+Deno.test(
+  "segmentHistoryEvents does not split in-flight unanswered turn across 30-minute gap",
+  () => {
+    const base = Date.now();
+    const events: HistoryEvent[] = [
+      makeParticipantUtterance("Start long background process", base),
+      makeToolCall("c1", "start_job", base + 1000),
+      makeToolResult("c1", base + segmentGapMs + 10_000),
+    ];
+    const segments = segmentHistoryEvents(events, segmentGapMs);
+    assertEquals(
+      segments.length,
+      1,
+      "In-flight unanswered turn must not be split into multiple segments despite 30m gap",
+    );
+  },
+);
