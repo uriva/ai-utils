@@ -384,7 +384,7 @@ async (
     id: crypto.randomUUID(),
     type: "own_thought",
     text: `${rangeHeader}\n\n${summaryText}`,
-    timestamp: Math.round((segment.start + segment.end) / 2),
+    timestamp: segment.start,
     isOwn: true,
   };
 };
