@@ -20,10 +20,11 @@ import {
   hasJsonThought,
   stripJsonThought,
 } from "./jsonThought.ts";
-import { verifyConcludingUtterancesGrounded } from "./hallucination.ts";
 import {
   findUngroundedToolCallHosts,
+  findUngroundedUtteranceArtifacts,
   ungroundedHostBlockedNotice,
+  ungroundedUtteranceBlockedNotice,
 } from "./urlGrounding.ts";
 export const stopThoughtPrefix =
   "I'm working on this for some time and not making progress.";
@@ -2607,19 +2608,25 @@ export const runAbstractAgent = (
 
       const utteranceTexts = concludingUtteranceTexts(emit);
       if (nonempty(utteranceTexts) && groundingRetries < maxGroundingRetries) {
-        const verdict = await verifyConcludingUtterancesGrounded(
-          spec,
-          normalizedHistory,
-          utteranceTexts,
+        const modelThoughts = emit.flatMap((e) =>
+          e.type === "own_thought" ? [e.text] : []
         );
-        if (!verdict.grounded) {
+        const artifacts = findUngroundedUtteranceArtifacts(
+          toolCallGroundTruthTexts(spec, normalizedHistory),
+          utteranceTexts,
+          modelThoughts,
+        );
+        if (
+          nonempty(artifacts.ungroundedUrls) ||
+          nonempty(artifacts.ungroundedPhones)
+        ) {
           groundingRetries++;
           console.warn(
-            `[grounding-gate] blocked ungrounded concluding reply (attempt ${groundingRetries}/${maxGroundingRetries})`,
+            `[grounding-gate] blocked ungrounded utterance artifacts (attempt ${groundingRetries}/${maxGroundingRetries})`,
           );
           ephemeralHistory = [
             ...ephemeralHistory,
-            ownThoughtTurn(verdict.correctionThought),
+            ownThoughtTurn(ungroundedUtteranceBlockedNotice(artifacts)),
           ];
           continue;
         }

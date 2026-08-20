@@ -1,4 +1,4 @@
-import { assert, assertFalse } from "@std/assert";
+import { assert, assertEquals, assertFalse } from "@std/assert";
 import { z } from "zod/v4";
 import { runAgent, tool } from "../mod.ts";
 import {
@@ -11,7 +11,12 @@ import {
   toolResultTurn,
   toolUseTurn,
 } from "../src/agent.ts";
-import { ungroundedHostBlockedNotice } from "../src/urlGrounding.ts";
+import {
+  findUngroundedUtteranceArtifacts,
+  isComplexUrl,
+  isLikelyPhoneNumber,
+  ungroundedHostBlockedNotice,
+} from "../src/urlGrounding.ts";
 import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
 
 const unseenHost = "api.neverseen.example";
@@ -354,4 +359,271 @@ Deno.test("url grounding gate ignores prose that merely looks like a domain", as
     }),
   );
   assertExecuted(history, probe.wasExecuted);
+});
+
+Deno.test("isComplexUrl correctly classifies trivial vs complex URLs", () => {
+  assertFalse(isComplexUrl("https://gmail.com"));
+  assertFalse(isComplexUrl("http://google.com/"));
+  assertFalse(isComplexUrl("https://www.youtube.com"));
+  assertFalse(isComplexUrl("https://www.google.co.uk"));
+
+  assert(isComplexUrl("https://tokenharbor.ai/v1"));
+  assert(isComplexUrl("https://form.claude.com"));
+  assert(isComplexUrl("https://docs.google.com/forms/d/123/viewform"));
+  assert(isComplexUrl("https://cinema-events.org/pretty-woman"));
+  assert(isComplexUrl("https://api.openai.com/v1/chat"));
+  assert(isComplexUrl("https://x.com/user/status/123456789"));
+  assert(isComplexUrl("https://service-host.org:8080"));
+});
+
+Deno.test("isLikelyPhoneNumber distinguishes phone numbers from dates, prices, and timestamps", () => {
+  assert(isLikelyPhoneNumber("+380 67 352 2777"));
+  assert(isLikelyPhoneNumber("+380975015774"));
+  assert(isLikelyPhoneNumber("+1 (800) 123-4567"));
+  assert(isLikelyPhoneNumber("050-1234567"));
+  assert(isLikelyPhoneNumber("03-5252144"));
+  assert(isLikelyPhoneNumber("tel:+972526966032"));
+
+  assertFalse(isLikelyPhoneNumber("2026-08-20"));
+  assertFalse(isLikelyPhoneNumber("20/08/2026"));
+  assertFalse(isLikelyPhoneNumber("10:00"));
+  assertFalse(isLikelyPhoneNumber("01:23:45"));
+  assertFalse(isLikelyPhoneNumber("192.168.1.1"));
+  assertFalse(isLikelyPhoneNumber("100"));
+  assertFalse(isLikelyPhoneNumber("1866"));
+});
+
+Deno.test("findUngroundedUtteranceArtifacts extracts ungrounded complex URLs and phones", () => {
+  const groundTruth = [
+    "You are an event guide. Check events at https://example.com/events or call support at 03-5000000.",
+    "User query: Tell me about screenings in Tel Aviv",
+    "Tool result: Found event Movie Night at https://example.com/movie-night with contact +972 50 111 2222",
+  ];
+
+  const cleanReply = [
+    "Here is the event https://example.com/movie-night or you can call +972 50 111 2222. You can also visit https://google.com for more info.",
+  ];
+  const cleanResult = findUngroundedUtteranceArtifacts(groundTruth, cleanReply);
+  assertEquals(cleanResult.ungroundedUrls, []);
+  assertEquals(cleanResult.ungroundedPhones, []);
+
+  const hallucinatedReply = [
+    "I booked your ticket! Details at https://tokenharbor.ai/v1/tickets/999 and notary Bodnarchuk Oksana at +380 67 352 2777.",
+  ];
+  const hallucinatedResult = findUngroundedUtteranceArtifacts(
+    groundTruth,
+    hallucinatedReply,
+  );
+  assertEquals(hallucinatedResult.ungroundedUrls, [
+    "https://tokenharbor.ai/v1/tickets/999",
+  ]);
+  assertEquals(hallucinatedResult.ungroundedPhones, ["+380 67 352 2777"]);
+});
+
+Deno.test("utterance grounding gate blocks ungrounded complex URL in concluding reply", async () => {
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({ name: "user", text: "where is the form?" }),
+  ];
+  let callCount = 0;
+  const seenThoughts: string[] = [];
+
+  await injectCallModel((events: HistoryEvent[]) => {
+    callCount++;
+    const thoughts = events
+      .filter((e) => e.type === "own_thought")
+      .map((e) => ("text" in e ? e.text : ""));
+    seenThoughts.push(...thoughts);
+    if (callCount === 1) {
+      return Promise.resolve([
+        ownUtteranceTurn(
+          "Here is the form: https://form.claude.com/survey/123",
+        ),
+      ]);
+    }
+    return Promise.resolve([
+      ownUtteranceTurn("I do not have the direct form link yet."),
+    ]);
+  })(async () => {
+    await agentDeps(history)(runAgent)({
+      maxIterations: 3,
+      prompt: "You are a helpful assistant.",
+      tools: [],
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  })();
+
+  assert(
+    seenThoughts.some((t) =>
+      t.includes('unverified URL(s): "https://form.claude.com/survey/123"')
+    ),
+    "model should receive ungrounded URL correction thought",
+  );
+  const finalUtterance = history[history.length - 1];
+  assert(
+    finalUtterance.type === "own_utterance" &&
+      finalUtterance.text === "I do not have the direct form link yet.",
+    "final emitted message should be the corrected reply",
+  );
+});
+
+Deno.test("utterance grounding gate blocks ungrounded phone number in concluding reply", async () => {
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({
+      name: "user",
+      text: "what is the notary's number?",
+    }),
+  ];
+  let callCount = 0;
+  const seenThoughts: string[] = [];
+
+  await injectCallModel((events: HistoryEvent[]) => {
+    callCount++;
+    const thoughts = events
+      .filter((e) => e.type === "own_thought")
+      .map((e) => ("text" in e ? e.text : ""));
+    seenThoughts.push(...thoughts);
+    if (callCount === 1) {
+      return Promise.resolve([
+        ownUtteranceTurn(
+          "The notary's direct phone is +380 67 352 2777.",
+        ),
+      ]);
+    }
+    return Promise.resolve([
+      ownUtteranceTurn(
+        "I do not have the verified phone number for the notary.",
+      ),
+    ]);
+  })(async () => {
+    await agentDeps(history)(runAgent)({
+      maxIterations: 3,
+      prompt: "You are a helpful assistant.",
+      tools: [],
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  })();
+
+  assert(
+    seenThoughts.some((t) =>
+      t.includes('unverified phone number(s): "+380 67 352 2777"')
+    ),
+    "model should receive ungrounded phone number correction thought",
+  );
+  const finalUtterance = history[history.length - 1];
+  assert(
+    finalUtterance.type === "own_utterance" &&
+      finalUtterance.text ===
+        "I do not have the verified phone number for the notary.",
+    "final emitted message should be the corrected reply",
+  );
+});
+
+Deno.test("utterance grounding gate does not block example/placeholder domains", async () => {
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({
+      name: "user",
+      text: "how do I configure webhooks?",
+    }),
+  ];
+  let callCount = 0;
+
+  await injectCallModel((_events: HistoryEvent[]) => {
+    callCount++;
+    return Promise.resolve([
+      ownUtteranceTurn(
+        "You can configure your webhook endpoint at https://api.example.com/v1/webhook or https://your-server.example.org/events.",
+      ),
+    ]);
+  })(async () => {
+    await agentDeps(history)(runAgent)({
+      maxIterations: 2,
+      prompt: "You are a developer assistant.",
+      tools: [],
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  })();
+
+  assertEquals(callCount, 1);
+  const finalUtterance = history[history.length - 1];
+  assert(
+    finalUtterance.type === "own_utterance" &&
+      finalUtterance.text.includes("https://api.example.com/v1/webhook"),
+    "example domains must be delivered without blocking",
+  );
+});
+
+Deno.test("utterance grounding gate does not block code snippets containing URLs or sample phones", async () => {
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({
+      name: "user",
+      text: "write python code to call an API",
+    }),
+  ];
+  let callCount = 0;
+
+  await injectCallModel((_events: HistoryEvent[]) => {
+    callCount++;
+    return Promise.resolve([
+      ownUtteranceTurn(
+        "Here is the sample code:\n```python\nimport requests\nresponse = requests.post('https://api.stripe.com/v1/charges', data={'phone': '+1 (555) 019-2834'})\n```",
+      ),
+    ]);
+  })(async () => {
+    await agentDeps(history)(runAgent)({
+      maxIterations: 2,
+      prompt: "You are a coding assistant.",
+      tools: [],
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  })();
+
+  assertEquals(callCount, 1);
+  const finalUtterance = history[history.length - 1];
+  assert(
+    finalUtterance.type === "own_utterance" &&
+      finalUtterance.text.includes("https://api.stripe.com/v1/charges"),
+    "code blocks must be delivered without blocking",
+  );
+});
+
+Deno.test("utterance grounding gate respects model objection in internal thought for illustrative examples", async () => {
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({
+      name: "user",
+      text: "What is an example of a REST endpoint?",
+    }),
+  ];
+  let callCount = 0;
+
+  await injectCallModel((_events: HistoryEvent[]) => {
+    callCount++;
+    return Promise.resolve([
+      ownThoughtTurn(
+        "The user is asking for an educational illustrative example of a REST endpoint. I will cite the public GitHub API as an example, not as a ground-truth factual assertion about our system.",
+      ),
+      ownUtteranceTurn(
+        "For instance, you can query public repositories via https://api.github.com/v3/repos/octocat/hello-world.",
+      ),
+    ]);
+  })(async () => {
+    await agentDeps(history)(runAgent)({
+      maxIterations: 2,
+      prompt: "You are a helpful programming tutor.",
+      tools: [],
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  })();
+
+  assertEquals(callCount, 1);
+  const finalUtterance = history[history.length - 1];
+  assert(
+    finalUtterance.type === "own_utterance" &&
+      finalUtterance.text.includes("https://api.github.com/v3/repos"),
+    "thought-justified illustrative examples must be delivered without blocking",
+  );
 });

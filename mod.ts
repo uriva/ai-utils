@@ -29,9 +29,14 @@ export {
 } from "./src/internalMessageMetadata.ts";
 export { z } from "zod/v4";
 export {
-  checkHallucination,
-  type HallucinationCheckResult,
-} from "./src/hallucination.ts";
+  findUngroundedToolCallHosts,
+  findUngroundedUtteranceArtifacts,
+  isComplexUrl,
+  isLikelyPhoneNumber,
+  ungroundedHostBlockedNotice,
+  type UngroundedUtteranceArtifacts,
+  ungroundedUtteranceBlockedNotice,
+} from "./src/urlGrounding.ts";
 export * from "./src/agent.ts";
 export {
   compactionRetentionRatio,
