@@ -13,6 +13,7 @@ import {
   learnSkillToolName,
   maxUtteranceChars,
   normalizeHistoryForModel,
+  ownThoughtTurn,
   ownUtteranceTurn,
   participantUtteranceTurn,
   resolveToolDescription,
@@ -1525,6 +1526,56 @@ Deno.test("normalizeHistoryForModel: does NOT append a system-notification nudge
       e.text.includes("Respond to the user's latest message")
     ),
     "must not inject the nudge when the user is not waiting on a reply",
+  );
+});
+
+Deno.test("normalizeHistoryForModel: does NOT append nudge when later user message has already been answered", () => {
+  const call = toolUseTurn({ name: "timeout-wakeup", args: { ms: 5000 } });
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({ name: "user", text: "please wait" }),
+    call,
+    participantUtteranceTurn({ name: "user", text: "what is 2 + 2?" }),
+    ownUtteranceTurn("4"),
+  ];
+  const normalized = normalizeHistoryForModel(history);
+  assert(
+    !historyHasPendingDeferredUserWaitingNudge(normalized),
+    "must not detect nudge when the later user message was answered",
+  );
+  assert(
+    !normalized.some((e) =>
+      e.type === "own_thought" &&
+      "text" in e &&
+      e.text.includes("Respond to the user's latest message")
+    ),
+    "must not inject the nudge when the user message has already been answered",
+  );
+});
+
+Deno.test("normalizeHistoryForModel: does NOT append nudge for ancient dangling tool call when subsequent turns are answered and a proactive task runs", () => {
+  const danglingCall = toolUseTurn({
+    name: "run_command",
+    args: { command: "some_old_command" },
+  });
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({ name: "user", text: "hello" }),
+    danglingCall,
+    participantUtteranceTurn({ name: "user", text: "what events are there?" }),
+    ownUtteranceTurn("Here are the events..."),
+    ownThoughtTurn("PROACTIVE TASK: send daily digest"),
+  ];
+  const normalized = normalizeHistoryForModel(history);
+  assert(
+    !historyHasPendingDeferredUserWaitingNudge(normalized),
+    "must not detect nudge during proactive task when all user messages are answered",
+  );
+  assert(
+    !normalized.some((e) =>
+      e.type === "own_thought" &&
+      "text" in e &&
+      e.text.includes("Respond to the user's latest message")
+    ),
+    "must not inject nudge during proactive tasks",
   );
 });
 

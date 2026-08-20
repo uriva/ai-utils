@@ -1930,13 +1930,22 @@ const toolResultsByCallId = (
 const pendingToolResultText =
   "[Tool result pending - still processing in the background]";
 
+export const hasUnansweredUserMessage = (history: HistoryEvent[]): boolean => {
+  const lastUserIndex = history.findLastIndex(
+    (e) =>
+      e.type === "participant_utterance" ||
+      e.type === "participant_edit_message",
+  );
+  if (lastUserIndex === -1) return false;
+  return !history.slice(lastUserIndex + 1).some(
+    (e) => e.type === "own_utterance" || e.type === "own_edit_message",
+  );
+};
+
 const laterUnansweredUserMessage = (
   history: HistoryEvent[],
   toolCallIndex: number,
-): boolean =>
-  history.slice(toolCallIndex + 1).some((e) =>
-    e.type === "participant_utterance" || e.type === "participant_edit_message"
-  );
+): boolean => hasUnansweredUserMessage(history.slice(toolCallIndex + 1));
 
 // System-notification nudge appended at the very end of the normalized history
 // (after the user's latest message) so it is the last thing the model sees and
@@ -2419,18 +2428,6 @@ const maxDoNothingRetries = 2;
 
 export const unansweredUserCorrectionText =
   "[SYSTEM NOTICE]: The user is waiting for a response to their message, but you have not yet sent a reply or taken action. Please proceed to answer the user's request or take the next required action now.";
-
-export const hasUnansweredUserMessage = (history: HistoryEvent[]): boolean => {
-  const lastUserIndex = history.findLastIndex(
-    (e) =>
-      e.type === "participant_utterance" ||
-      e.type === "participant_edit_message",
-  );
-  if (lastUserIndex === -1) return false;
-  return !history.slice(lastUserIndex + 1).some(
-    (e) => e.type === "own_utterance" || e.type === "own_edit_message",
-  );
-};
 
 // Ground truth for the tool-call URL gate: only text the model did NOT author
 // itself counts — instructions, tool documentation, user messages, tool
