@@ -1150,7 +1150,7 @@ const filterUnsupportedGeminiAttachments = (
 // replacements so callers can persist them via `rewriteHistory`. Runs outside
 // the cached `callModel` boundary so side effects fire even on cache hits.
 export const filterAndRewriteUnsupportedGeminiAttachments =
-  (rewriteHistory: AgentSpec["rewriteHistory"]) =>
+  (rewriteHistory?: AgentSpec["rewriteHistory"]) =>
   async (history: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> => {
     const replacements: Record<string, GeminiHistoryEvent> = {};
     const result = history.map((event) => {
@@ -1160,7 +1160,9 @@ export const filterAndRewriteUnsupportedGeminiAttachments =
       if (changed) replacements[event.id] = stripped;
       return stripped;
     });
-    if (!empty(Object.keys(replacements))) await rewriteHistory(replacements);
+    if (rewriteHistory && !empty(Object.keys(replacements))) {
+      await rewriteHistory(replacements);
+    }
     return result;
   };
 
@@ -1301,12 +1303,12 @@ const computeInvalidToolCallReplacements = (
 // has already been awaited outside the cache boundary in
 // `prepareGeminiHistory`.
 export const filterAndRewriteInvalidToolCalls =
-  (rewriteHistory: AgentSpec["rewriteHistory"]) =>
+  (rewriteHistory?: AgentSpec["rewriteHistory"]) =>
   (history: GeminiHistoryEvent[]): GeminiHistoryEvent[] => {
     const { filtered, replacements } = computeInvalidToolCallReplacements(
       history,
     );
-    if (!empty(Object.keys(replacements))) {
+    if (rewriteHistory && !empty(Object.keys(replacements))) {
       rewriteHistory(replacements).catch((err) =>
         console.warn("Failed to rewrite history for invalid tool calls:", err)
       );
@@ -1319,12 +1321,14 @@ export const filterAndRewriteInvalidToolCalls =
 // the rmmbr cache. Production flows through here too; making it await means
 // downstream code can rely on the persisted history being up to date.
 export const filterAndRewriteInvalidToolCallsAsync =
-  (rewriteHistory: AgentSpec["rewriteHistory"]) =>
+  (rewriteHistory?: AgentSpec["rewriteHistory"]) =>
   async (history: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> => {
     const { filtered, replacements } = computeInvalidToolCallReplacements(
       history,
     );
-    if (!empty(Object.keys(replacements))) await rewriteHistory(replacements);
+    if (rewriteHistory && !empty(Object.keys(replacements))) {
+      await rewriteHistory(replacements);
+    }
     return filtered;
   };
 
@@ -1431,7 +1435,7 @@ const stripAllUnsupportedMimeTypes = async (
   initialError: Error,
   events: GeminiHistoryEvent[],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
-  rewriteHistory: AgentSpec["rewriteHistory"],
+  rewriteHistory?: AgentSpec["rewriteHistory"],
   disableStreaming?: boolean,
 ): Promise<GeminiOutput> => {
   let currentEvents = events;
@@ -1454,7 +1458,7 @@ const stripAllUnsupportedMimeTypes = async (
         eventsToRequest(currentEvents),
         disableStreaming,
       );
-      await rewriteHistory(allReplacements);
+      if (rewriteHistory) await rewriteHistory(allReplacements);
       return result;
     } catch (error) {
       const err = normalizeError(error);
@@ -1507,7 +1511,7 @@ const stripAllCorruptedFileAttachmentsAndRetry = async (
   originalError: Error,
   events: GeminiHistoryEvent[],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
-  rewriteHistory: AgentSpec["rewriteHistory"],
+  rewriteHistory?: AgentSpec["rewriteHistory"],
   disableStreaming?: boolean,
 ): Promise<GeminiOutput> => {
   console.warn(
@@ -1522,7 +1526,7 @@ const stripAllCorruptedFileAttachmentsAndRetry = async (
     eventsToRequest(nuclear.updatedHistory),
     disableStreaming,
   );
-  await rewriteHistory(nuclear.replacements);
+  if (rewriteHistory) await rewriteHistory(nuclear.replacements);
   return result;
 };
 
@@ -1560,7 +1564,7 @@ export const stripAllExpiredFiles = async (
   initialError: Error,
   events: GeminiHistoryEvent[],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
-  rewriteHistory: AgentSpec["rewriteHistory"],
+  rewriteHistory?: AgentSpec["rewriteHistory"],
   disableStreaming?: boolean,
 ): Promise<GeminiOutput> => {
   let currentEvents = events;
@@ -1581,7 +1585,7 @@ export const stripAllExpiredFiles = async (
           eventsToRequest(currentEvents),
           disableStreaming,
         );
-        await rewriteHistory(allReplacements);
+        if (rewriteHistory) await rewriteHistory(allReplacements);
         return result;
       } catch (nuclearError) {
         const err = normalizeError(nuclearError);
@@ -1597,22 +1601,21 @@ export const stripAllExpiredFiles = async (
         eventsToRequest(currentEvents),
         disableStreaming,
       );
-      await rewriteHistory(allReplacements);
+      if (rewriteHistory) await rewriteHistory(allReplacements);
       return result;
     } catch (error) {
       const err = normalizeError(error);
-      if (!is403PermissionError(err)) throw err;
+      if (!isFileNotActiveError(err)) throw err;
       currentError = err;
     }
   }
-  throw new Error(
-    `403 persists after 20 attempts to strip expired files: ${currentError.message}`,
-  );
+  return callGemini(eventsToRequest(currentEvents), disableStreaming);
 };
 
-const callGeminiWithFixHistory = (
-  rewriteHistory: AgentSpec["rewriteHistory"],
-  eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
+export const callGeminiWithFixHistory = (
+  rewriteHistory?: AgentSpec["rewriteHistory"],
+  eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters =
+    buildReq(false, "", [], "UTC", undefined),
   disableStreaming?: boolean,
 ) =>
 async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
@@ -1784,17 +1787,18 @@ const resolveAttachments = async (
 };
 
 export const prepareGeminiHistory =
-  (rewriteHistory: AgentSpec["rewriteHistory"]) =>
+  (rewriteHistory?: AgentSpec["rewriteHistory"]) =>
   async (
     events: HistoryEventWithMetadata<GeminiMetadata>[],
   ): Promise<HistoryEventWithMetadata<GeminiMetadata>[]> => {
+    const safeRewrite = rewriteHistory ?? (() => Promise.resolve());
     const enriched = await enrichGeminiEventsWithMetadata(events);
     const filtered = await pipe(
-      filterAndRewriteInvalidToolCallsAsync(rewriteHistory),
-      filterAndRewriteUnsupportedGeminiAttachments(rewriteHistory),
+      filterAndRewriteInvalidToolCallsAsync(safeRewrite),
+      filterAndRewriteUnsupportedGeminiAttachments(safeRewrite),
     )(enriched);
     const { updatedHistory, replacements } = await resolveAttachments(filtered);
-    if (!empty(Object.keys(replacements))) await rewriteHistory(replacements);
+    if (!empty(Object.keys(replacements))) await safeRewrite(replacements);
     return updatedHistory;
   };
 
@@ -1936,7 +1940,7 @@ const geminiAgentCallerInner = ({
   tools,
   skills,
   allSkills,
-  rewriteHistory,
+  rewriteHistory = () => Promise.resolve(),
   timezoneIANA,
   maxOutputTokens,
   disableStreaming,

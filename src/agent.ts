@@ -4,10 +4,17 @@ import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
 import {
   cleanActiveMemoryToolRaw,
+  defaultSegmentGapMs,
+  defaultSettledHistoryTokenThreshold,
   isCompactedSummaryText,
+  projectSettledSessions,
+  segmentHistoryEvents,
   shouldCompactHistory,
 } from "./compaction.ts";
-import { runToolResultCompaction } from "./continuousCompaction.ts";
+import {
+  compactToolResultsInMemory,
+  runToolResultCompaction,
+} from "./continuousCompaction.ts";
 import { cleanActiveMemoryToolName } from "./utils.ts";
 import { accessGeminiToken } from "./gemini.ts";
 import { genJson } from "./genJson.ts";
@@ -2051,6 +2058,73 @@ export const normalizeHistoryForModel = (
   return [...interleaved, ...orphanedResults, ...userWaitingNotification];
 };
 
+export const sanitizeWindowBoundary = (
+  events: HistoryEvent[],
+): HistoryEvent[] => {
+  if (empty(events)) return [];
+  const allToolCallIds = new Set(
+    events.filter((e) => e.type === "tool_call").map((e) => e.id),
+  );
+  let startIndex = 0;
+  while (startIndex < events.length) {
+    const e = events[startIndex];
+    if (
+      e.type === "tool_result" &&
+      (!e.toolCallId || !allToolCallIds.has(e.toolCallId))
+    ) {
+      startIndex++;
+    } else {
+      break;
+    }
+  }
+  return events.slice(startIndex);
+};
+
+export type ProjectHistoryOptions = {
+  rawHistory: HistoryEvent[];
+  timezoneIANA?: string;
+  settledGapMs?: number;
+  settledTokenThreshold?: number;
+  scratchPad?: ToolOutputScratchPad;
+  generateTLDR?: (
+    toolCall: HistoryEvent & { type: "tool_call" },
+    resultText: string,
+  ) => Promise<string>;
+};
+
+export const projectHistoryToModelContext = async ({
+  rawHistory,
+  timezoneIANA = "UTC",
+  settledGapMs = defaultSegmentGapMs,
+  settledTokenThreshold = defaultSettledHistoryTokenThreshold,
+  scratchPad,
+  generateTLDR,
+}: ProjectHistoryOptions): Promise<HistoryEvent[]> => {
+  const sanitized = sanitizeWindowBoundary(rawHistory);
+  if (empty(sanitized)) return [];
+
+  const segments = segmentHistoryEvents(sanitized, settledGapMs);
+  if (empty(segments)) return [];
+
+  let projectedEvents = await projectSettledSessions(
+    segments,
+    settledTokenThreshold,
+    timezoneIANA,
+  );
+
+  if (scratchPad) {
+    projectedEvents = await compactToolResultsInMemory(
+      projectedEvents,
+      {
+        setScratch: (id, content) => scratchPad.set(id, content),
+        generateTLDR,
+      },
+    );
+  }
+
+  return normalizeHistoryForModel(projectedEvents);
+};
+
 // True when the (already-normalized) history contains the system-notification
 // nudge injected by `normalizeHistoryForModel` for a pending deferred tool_call
 // that the user is waiting on. Providers use this to suppress the `[no response]`
@@ -2113,7 +2187,9 @@ export const learnSkillToolName = "learn_skill";
 export const unlearnSkillToolName = "unlearn_skill";
 
 export const cleanActiveMemoryTool = (
-  rewriteHistory: (replacements: Record<string, HistoryEvent>) => Promise<void>,
+  rewriteHistory: (
+    replacements: Record<string, HistoryEvent>,
+  ) => Promise<void> = () => Promise.resolve(),
   // deno-lint-ignore no-explicit-any
 ): Tool<any> => tool(cleanActiveMemoryToolRaw(rewriteHistory, getHistory));
 
@@ -2395,7 +2471,9 @@ export type AgentSpec = AgentInputs & {
   lightModel?: boolean;
   disableStreaming?: boolean;
   provider?: "google" | "moonshot" | "anthropic";
-  rewriteHistory: (replacements: Record<string, HistoryEvent>) => Promise<void>;
+  rewriteHistory?: (
+    replacements: Record<string, HistoryEvent>,
+  ) => Promise<void>;
   compactHistory?: (history: HistoryEvent[]) => Promise<void>;
   historyCompactionTokenThreshold?: number;
   timezoneIANA: string;
@@ -2506,7 +2584,9 @@ export const runAbstractAgent = (
     const allTools = [
       ...tools,
       ...(skills && skills.length > 0 ? createSkillTools(skills) : []),
-      cleanActiveMemoryTool(spec.rewriteHistory),
+      ...(spec.rewriteHistory
+        ? [cleanActiveMemoryTool(spec.rewriteHistory)]
+        : []),
     ];
     const skillsArr = skills ?? [];
     let c = 0;
@@ -2526,7 +2606,11 @@ export const runAbstractAgent = (
       }
       const history = await getHistory();
       let effectiveHistory = [...history, ...ephemeralHistory];
-      let normalizedHistory = normalizeHistoryForModel(effectiveHistory);
+      let normalizedHistory = await projectHistoryToModelContext({
+        rawHistory: effectiveHistory,
+        timezoneIANA: spec.timezoneIANA,
+        scratchPad,
+      });
 
       const shouldCheckProgress =
         (c > 0 && maxIterations > 0 && c % maxIterations === 0) ||
@@ -2554,7 +2638,11 @@ export const runAbstractAgent = (
           await outputEvent(thoughtEvent);
           ephemeralHistory = [...ephemeralHistory, thoughtEvent];
           effectiveHistory = [...history, ...ephemeralHistory];
-          normalizedHistory = normalizeHistoryForModel(effectiveHistory);
+          normalizedHistory = await projectHistoryToModelContext({
+            rawHistory: effectiveHistory,
+            timezoneIANA: spec.timezoneIANA,
+            scratchPad,
+          });
           console.log(
             `[agent-progress-check] soft stop requested. thought injected. c=${c}`,
           );

@@ -12,6 +12,7 @@ import {
 } from "gamla";
 import { z } from "zod/v4";
 import { accessTokenCounter, type HistoryEvent } from "./agent.ts";
+import { makeCache } from "./cacher.ts";
 import { genJson } from "./genJson.ts";
 import { formatInternalSentTimestamp } from "./internalMessageMetadata.ts";
 import { cleanActiveMemoryToolName } from "./utils.ts";
@@ -352,13 +353,8 @@ const formatStructuredSummary = ({
   return parts.join("\n");
 };
 
-export const summarizeEvents = async (
-  events: HistoryEvent[],
-): Promise<string> =>
-  formatStructuredSummary(
-    await genJson(
-      { provider: "google", mini: false },
-      `Summarize the following conversation into structured sections. Write from the assistant's perspective. Be concise but preserve all important details, especially names, numbers, and specific facts that would be needed to continue the conversation.
+const summarizePrompt =
+  `Summarize the following conversation into structured sections. Write from the assistant's perspective. Be concise but preserve all important details, especially names, numbers, and specific facts that would be needed to continue the conversation.
 
 Critical length constraints to prevent response truncation:
 - Every section must be brief, dense, and highly compacted.
@@ -383,10 +379,26 @@ Important rule for Active Skills to Re-Learn:
 Critical Date and Time Grounding Rules:
 - NEVER refer to the timestamps, dates, or days of this conversation segment as "the current simulated date", "the current date", "today", or "now" under Decisions, Context, or any other section.
 - Because this summary is saved as a historical record and will be read in future conversation turns where this segment is in the past, absolute dates from the segment must always be described as past historical events (e.g., "The user inquired about events on Tuesday, May 5, 2026", instead of "Today is Tuesday, May 5, 2026").
-- The assistant runs in real-time in the future, so framing a historical date as "today" or "now" will severely confuse the agent's temporal grounding on its subsequent turns.`,
+- The assistant runs in real-time in the future, so framing a historical date as "today" or "now" will severely confuse the agent's temporal grounding on its subsequent turns.`;
+
+const summarizePlainText = async (text: string): Promise<string> =>
+  formatStructuredSummary(
+    await genJson(
+      { provider: "google", mini: false },
+      summarizePrompt,
       structuredSummarySchema,
-    )(eventsToPlainText(events)),
+    )(text),
   );
+
+export const summarizeEvents = async (
+  events: HistoryEvent[],
+): Promise<string> => {
+  const plainText = eventsToPlainText(events);
+  const cachedSummarize = makeCache("settled-session-summaries-v1")(
+    (text: string) => summarizePlainText(text),
+  );
+  return await cachedSummarize(plainText);
+};
 
 const formatSegmentRange = (start: number, end: number, timezone: string) => {
   const startStr = formatInternalSentTimestamp(start, timezone);
@@ -401,12 +413,43 @@ async (
   const summaryText = await summarizeEvents(segment.events);
   const rangeHeader = formatSegmentRange(segment.start, segment.end, timezone);
   return {
-    id: crypto.randomUUID(),
+    id: `summary-${segment.start}-${segment.end}`,
     type: "own_thought",
     text: `${rangeHeader}\n\n${summaryText}`,
     timestamp: segment.start,
     isOwn: true,
   };
+};
+
+export const projectSettledSessions = async (
+  segments: HistorySegment[],
+  settledTokenThreshold: number = defaultSettledHistoryTokenThreshold,
+  timezone: string = "UTC",
+): Promise<HistoryEvent[]> => {
+  if (empty(segments)) return [];
+  if (segments.length === 1) return segments[0].events;
+
+  const settledSegments = segments.slice(0, -1);
+  const activeSegment = segments[segments.length - 1];
+
+  const pastTokensList = await Promise.all(
+    settledSegments.map((s) => accessTokenCounter(s.events)),
+  );
+  const totalSettledTokens = sum(pastTokensList);
+  const shouldCompactSettled = totalSettledTokens >= settledTokenThreshold;
+
+  const processedSettled = await Promise.all(
+    settledSegments.map(async (seg, idx) => {
+      const segTokens = pastTokensList[idx];
+      if (shouldCompactSettled && segTokens >= 500) {
+        const summary = await summarizeSegmentToHistoryEvent(timezone)(seg);
+        return [summary];
+      }
+      return seg.events;
+    }),
+  );
+
+  return [...processedSettled.flat(), ...activeSegment.events];
 };
 
 export const cleanActiveMemoryToolRaw = (

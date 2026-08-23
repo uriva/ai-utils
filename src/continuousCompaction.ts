@@ -60,11 +60,10 @@ export type CompactionOptions = {
   ) => Promise<string>;
 };
 
-export const runToolResultCompaction = async (
+export const compactToolResultsInMemory = async (
   events: HistoryEvent[],
   { setScratch, generateTLDR }: CompactionOptions,
-  rewriteHistory: (replacements: Record<string, HistoryEvent>) => Promise<void>,
-) => {
+): Promise<HistoryEvent[]> => {
   const pairs = groupToolCallPairs(events);
   const candidates: {
     toolCall: HistoryEvent & { type: "tool_call" };
@@ -98,7 +97,7 @@ export const runToolResultCompaction = async (
     }
   }
 
-  if (candidates.length === 0) return;
+  if (candidates.length === 0) return events;
 
   // Process all candidates in parallel using Promise.all
   const replacementsList = await Promise.all(
@@ -140,11 +139,32 @@ export const runToolResultCompaction = async (
     }),
   );
 
-  const replacements: Record<string, HistoryEvent> = {};
+  const replacements = new Map<string, HistoryEvent>();
   for (const r of replacementsList) {
-    replacements[r.id] = r.event;
+    replacements.set(r.id, r.event);
   }
 
-  // Persist the changes back to Deno KV
-  await rewriteHistory(replacements);
+  return events.map((e) => replacements.get(e.id) ?? e);
+};
+
+export const runToolResultCompaction = async (
+  events: HistoryEvent[],
+  options: CompactionOptions,
+  rewriteHistory?: (
+    replacements: Record<string, HistoryEvent>,
+  ) => Promise<void>,
+): Promise<void> => {
+  const compacted = await compactToolResultsInMemory(events, options);
+  if (rewriteHistory && compacted !== events) {
+    const replacements: Record<string, HistoryEvent> = {};
+    for (const e of compacted) {
+      const orig = events.find((origE) => origE.id === e.id);
+      if (orig && orig !== e) {
+        replacements[e.id] = e;
+      }
+    }
+    if (Object.keys(replacements).length > 0) {
+      await rewriteHistory(replacements);
+    }
+  }
 };

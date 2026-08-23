@@ -1,6 +1,12 @@
 import { assertEquals } from "@std/assert";
+import { pipe } from "gamla";
 import { runAgent } from "../mod.ts";
-import { agentDeps, noopRewriteHistory, someTool } from "../test_helpers.ts";
+import {
+  agentDeps,
+  injectSecrets,
+  noopRewriteHistory,
+  someTool,
+} from "../test_helpers.ts";
 import {
   type HistoryEvent,
   injectCallModel,
@@ -50,40 +56,48 @@ Deno.test(
       timestamp: now,
     });
 
-    let compactionInvokedCount = 0;
+    let receivedHistory: HistoryEvent[] = [];
 
-    const fakeCompactHistory = (
-      _passedHistory: HistoryEvent[],
-    ): Promise<void> => {
-      compactionInvokedCount++;
-      return Promise.resolve();
-    };
-
-    const fakeCallModel = (): Promise<HistoryEvent[]> => {
+    const fakeCallModel = (
+      passedHistory: HistoryEvent[],
+    ): Promise<HistoryEvent[]> => {
+      receivedHistory = passedHistory;
       return Promise.resolve([
         ownUtteranceTurn("Here is the summary based on past records."),
       ]);
     };
 
-    await injectCallModel(fakeCallModel)(async () => {
+    await pipe(
+      injectSecrets,
+      injectCallModel(fakeCallModel),
+    )(async () => {
       await agentDeps(history)(runAgent)({
         maxIterations: 5,
         tools: [someTool],
         prompt: "You are a helpful assistant.",
         rewriteHistory: noopRewriteHistory,
-        compactHistory: fakeCompactHistory,
-        // Notice: even if the threshold is left default or 100k, settled past sessions must trigger compaction
-        historyCompactionTokenThreshold: 100_000,
         timezoneIANA: "UTC",
       });
     })();
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
     assertEquals(
-      compactionInvokedCount > 0,
-      true,
-      "Expected compaction to be triggered for settled past sessions (~20k tokens) even when threshold is 100k",
+      receivedHistory.length,
+      4,
+      "Expected 37 raw events from 3 settled sessions to be dynamically compacted into 3 summaries + 1 active message",
+    );
+    assertEquals(
+      receivedHistory.filter((e) =>
+        e.type === "own_thought" &&
+        typeof e.text === "string" &&
+        e.text.includes("Past conversation history was compacted")
+      ).length,
+      3,
+      "Expected all 3 past settled sessions to have structured summaries in model context",
+    );
+    assertEquals(
+      history.length,
+      38, // 37 input events + 1 emitted response
+      "Expected raw history to remain immutable with all original events preserved",
     );
   },
 );

@@ -41,18 +41,23 @@ export * from "./src/agent.ts";
 export {
   compactionRetentionRatio,
   compactionRetentionTokens,
+  defaultSegmentGapMs,
+  defaultSettledHistoryTokenThreshold,
   eventsToPlainText,
   eventToPlainText,
   groupToolCallPairs,
   type HistorySegment,
   partitionSegments,
+  projectSettledSessions,
   segmentHistoryEvents,
+  shouldCompactHistory,
   summarizeEvents,
   summarizeSegmentToHistoryEvent,
 } from "./src/compaction.ts";
 export { injectCacher } from "./src/cacher.ts";
 export {
   type CompactionOptions,
+  compactToolResultsInMemory,
   getSpillThreshold,
   runToolResultCompaction,
 } from "./src/continuousCompaction.ts";
