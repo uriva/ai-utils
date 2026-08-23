@@ -15,7 +15,7 @@ import {
   compactToolResultsInMemory,
   runToolResultCompaction,
 } from "./continuousCompaction.ts";
-import { cleanActiveMemoryToolName, stripAnsi } from "./utils.ts";
+import { stripAnsi } from "./utils.ts";
 import { accessGeminiToken } from "./gemini.ts";
 import { genJson } from "./genJson.ts";
 import { zodToCompactTypingString, zodToTypingString } from "./toolTyping.ts";
@@ -67,9 +67,6 @@ const mediaAttachmentSchema: z.ZodType<MediaAttachment> = z.union([
 export type ToolReturn = { result: string; attachments?: MediaAttachment[] };
 
 export const maxToolOutputChars = 20_000;
-export const historyWarningTokenThreshold = 40_000;
-export const memoryWarningNotice: string =
-  `\n\n[SYSTEM MEMORY MONITOR: Your active conversation history is at ${historyWarningTokenThreshold} or more tokens, which slows latency and consumes resources. You are authorized to run '${cleanActiveMemoryToolName}' with a 'start_time' and 'end_time' to group and delete/summarize obsolete logs, failed trials, or long outputs into a single summary line. Please perform this cleanup now before taking other actions.]`;
 
 export const truncateToolOutput = (s: string): string => {
   if (s.length <= maxToolOutputChars) return s;
@@ -2900,7 +2897,6 @@ const tokenCounterInjection: Injection<TokenCounter> = context(
 );
 
 export const accessTokenCounter = tokenCounterInjection.access;
-export const injectTokenCounter = tokenCounterInjection.inject;
 
 // Provider metadata (Gemini `thoughtSignature`, Anthropic `thinkingContent`) is
 // re-sent to the model on every call (see geminiAgent/anthropicAgent), so it
@@ -2938,7 +2934,6 @@ const textTokenCounterInjection: Injection<TextTokenCounter> = context(
 );
 
 export const accessTextTokenCounter = textTokenCounterInjection.access;
-export const injectTextTokenCounter = textTokenCounterInjection.inject;
 
 export const estimateTokens = async (e: HistoryEvent): Promise<number> => {
   return await accessTokenCounter([e]);

@@ -20,93 +20,6 @@ import { geminiAgentCaller, prepareGeminiHistory } from "./src/geminiAgent.ts";
 import { validateZodSchema } from "./src/gemini.ts";
 import { inspectMediaUrlTool } from "./src/inspectMediaTool.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
-export { consultToolName } from "./src/consultTool.ts";
-export {
-  appendInternalSentTimestamp,
-  formatInternalSentTimestamp,
-  hasInternalSentTimestampSuffix,
-  stripInternalSentTimestampSuffix,
-} from "./src/internalMessageMetadata.ts";
-export { z } from "zod/v4";
-export {
-  findUngroundedToolCallHosts,
-  findUngroundedUtteranceArtifacts,
-  isComplexUrl,
-  isLikelyPhoneNumber,
-  ungroundedHostBlockedNotice,
-  type UngroundedUtteranceArtifacts,
-  ungroundedUtteranceBlockedNotice,
-} from "./src/urlGrounding.ts";
-export * from "./src/agent.ts";
-export {
-  compactionRetentionRatio,
-  compactionRetentionTokens,
-  defaultSegmentGapMs,
-  defaultSettledHistoryTokenThreshold,
-  eventsToPlainText,
-  eventToPlainText,
-  groupToolCallPairs,
-  type HistorySegment,
-  partitionSegments,
-  projectSettledSessions,
-  segmentHistoryEvents,
-  shouldCompactHistory,
-  summarizeEvents,
-  summarizeSegmentToHistoryEvent,
-} from "./src/compaction.ts";
-export { injectCacher } from "./src/cacher.ts";
-export {
-  type CompactionOptions,
-  compactToolResultsInMemory,
-  getSpillThreshold,
-  runToolResultCompaction,
-} from "./src/continuousCompaction.ts";
-export {
-  countTextTokens,
-  geminiGenText,
-  injectGeminiModelVersions,
-  injectGeminiToken,
-  validateSchema,
-  validateZodSchema,
-  zodToGeminiParameters,
-} from "./src/gemini.ts";
-export {
-  geminiGenJson,
-  genJson,
-  genJsonFromConvo,
-  genJsonOverride,
-  invalidGenJsonMessage,
-} from "./src/genJson.ts";
-export {
-  assertNoScriptDrift,
-  driftingScripts,
-  type ScriptDriftError,
-  scriptsPresent,
-} from "./src/scriptDriftGuard.ts";
-export {
-  injectGeminiErrorLogger,
-  injectGeminiLog,
-  injectGeminiModelCallTimeoutMs,
-  injectPromptBlockedLogger,
-  injectTokenUsage,
-  safetyWarningText,
-  type TokenUsage,
-} from "./src/geminiAgent.ts";
-export { injectKimiToken } from "./src/kimiAgent.ts";
-export { injectAnthropicToken } from "./src/anthropicAgent.ts";
-export { injectOpenAiToken, openAiMatching } from "./src/openai.ts";
-export { catchAiRefusesToAdhereToTyping, type ModelOpts } from "./src/utils.ts";
-export {
-  type AudioSessionConfig,
-  type AudioSessionEvent,
-  createAudioSession,
-  type LiveAudioChunk,
-} from "./src/geminiLiveSession.ts";
-export {
-  createDuplexPair,
-  type DuplexEndpoint,
-  type DuplexMessage,
-} from "./src/duplex.ts";
 
 // deno-lint-ignore no-explicit-any
 const widen = (caller: (events: any) => Promise<any>): CallModel => caller;
@@ -229,6 +142,152 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
     ? runAudioTransportAgent(specWithBuiltins)
     : runAbstractAgent(specWithBuiltins, dynamicCallModel);
 };
+
+export {
+  accessCallModel,
+  accessCallModelWrapper,
+  accessHistory,
+  type AgentInputs,
+  type AgentSpec,
+  type CallModel,
+  type CallModelWrapper,
+  callToResult,
+  compileGrepPattern,
+  createReadScratchFileTool,
+  createSkillTools,
+  type DeferredTool,
+  doNothingEvent,
+  doNothingTool,
+  doNothingToolName,
+  estimateAgentInputTokens,
+  estimateTokens,
+  estimateTokensLocal,
+  externalEventPrefix,
+  externalEventTurn,
+  forcedStopUtterance,
+  formatSkillsPrompt,
+  generateId,
+  getSpecForTurn,
+  getStreamChunk,
+  getStreamThinkingChunk,
+  handleFunctionCalls,
+  type HistoryEvent,
+  historyHasPendingDeferredUserWaitingNudge,
+  injectAccessHistory,
+  injectCallModel,
+  injectCallModelWrapper,
+  injectMetadataStore,
+  injectOutputEvent,
+  injectScratchPad,
+  injectShouldAbort,
+  injectStreamChunk,
+  injectStreamThinkingChunk,
+  injectTimerMs,
+  injectToolNotFound,
+  isRecord,
+  learnSkillToolName,
+  maxToolOutputChars,
+  maxUtteranceChars,
+  type MediaAttachment,
+  noResponseTag,
+  normalizeHistoryForModel,
+  overrideIdGenerator,
+  overrideTime,
+  ownEditMessageTurn,
+  ownThoughtTurn,
+  ownThoughtTurnWithMetadata,
+  ownUtteranceTurn,
+  ownUtteranceTurnWithMetadata,
+  participantEditMessageTurn,
+  participantUtteranceTurn,
+  projectHistoryToModelContext,
+  type Provider,
+  qualifiedToolName,
+  readScratchFileToolName,
+  referenceToolName,
+  type RegularTool,
+  resolveToolDescription,
+  runAbstractAgent,
+  runCommandToolName,
+  sanitizeHistorySkillsForModel,
+  sanitizeModelOutput,
+  sanitizeWindowBoundary,
+  scheduleHistoryCompaction,
+  type Skill,
+  skillAutoLoadMarker,
+  skillLoadedResultText,
+  stopThoughtPrefix,
+  systemNotificationPrefix,
+  thinkingTokenExhaustionWarningText,
+  type Tool,
+  tool,
+  type ToolOutputScratchPad,
+  toolResultTurn,
+  type ToolReturn,
+  toolUseTurn,
+  toolUseTurnWithMetadata,
+  truncateToolOutput,
+  unlearnSkillToolName,
+} from "./src/agent.ts";
+export { injectAnthropicToken } from "./src/anthropicAgent.ts";
+export { injectCacher } from "./src/cacher.ts";
+export {
+  compactionRetentionTokens,
+  eventsToPlainText,
+  eventToPlainText,
+  groupToolCallPairs,
+  type HistorySegment,
+  partitionSegments,
+  segmentHistoryEvents,
+  summarizeEvents,
+  summarizeSegmentToHistoryEvent,
+} from "./src/compaction.ts";
+export { consultToolName } from "./src/consultTool.ts";
+export {
+  getSpillThreshold,
+  runToolResultCompaction,
+} from "./src/continuousCompaction.ts";
+export { createDuplexPair, type DuplexMessage } from "./src/duplex.ts";
+export {
+  geminiGenText,
+  injectGeminiModelVersions,
+  injectGeminiToken,
+  validateSchema,
+  validateZodSchema,
+  zodToGeminiParameters,
+} from "./src/gemini.ts";
+export {
+  injectGeminiErrorLogger,
+  injectGeminiModelCallTimeoutMs,
+  injectPromptBlockedLogger,
+  injectTokenUsage,
+  safetyWarningText,
+  type TokenUsage,
+} from "./src/geminiAgent.ts";
+export { type AudioSessionEvent } from "./src/geminiLiveSession.ts";
+export {
+  geminiGenJson,
+  genJson,
+  genJsonFromConvo,
+  genJsonOverride,
+  invalidGenJsonMessage,
+} from "./src/genJson.ts";
+export { injectKimiToken } from "./src/kimiAgent.ts";
+export { injectOpenAiToken } from "./src/openai.ts";
+export {
+  assertNoScriptDrift,
+  driftingScripts,
+  type ScriptDriftError,
+  scriptsPresent,
+} from "./src/scriptDriftGuard.ts";
+export {
+  findUngroundedUtteranceArtifacts,
+  isComplexUrl,
+  isLikelyPhoneNumber,
+  ungroundedHostBlockedNotice,
+} from "./src/urlGrounding.ts";
+export { catchAiRefusesToAdhereToTyping } from "./src/utils.ts";
+export { z } from "zod/v4";
 
 export const runAgent = (spec: AgentSpec): Promise<void> => {
   // Validate all tools and skills before starting the agent run to catch unsupported schema constructs early

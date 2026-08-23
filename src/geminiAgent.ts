@@ -136,8 +136,6 @@ const geminiLog: Injection<(line: string) => void> = context((line: string) =>
   console.log(line)
 );
 
-export const injectGeminiLog = geminiLog.inject;
-
 const logGemini = geminiLog.access;
 
 export const injectGeminiErrorLogger = geminiError.inject;
