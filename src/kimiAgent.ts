@@ -15,17 +15,16 @@ import {
   doNothingEventWithMetadata,
   estimateTokens,
   externalEventPrefix,
-  formatSkillsPrompt,
   generateId,
   getStreamChunk,
   getStreamThinkingChunk,
   type HistoryEventWithMetadata,
-  invisibleToolUseInstruction,
   type MediaAttachment,
   type MessageId,
   noResponseTag,
   ownThoughtTurn,
   ownUtteranceTurn,
+  systemInstructionTail,
   systemNotificationPrefix,
   type Tool,
   toolUseTurn,
@@ -671,17 +670,13 @@ export const kimiAgentCaller = ({
   maxOutputTokens,
   disableStreaming,
   isConsult,
+  toolOutputScratchPad,
 }: AgentSpec) =>
 async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
   void lightModel;
 
   const enhancedPrompt = [
-    `${prompt}\n\n${invisibleToolUseInstruction}`,
-    ...(skills && skills.length > 0
-      ? [
-        `Available skills:\n${formatSkillsPrompt(skills)}`,
-      ]
-      : []),
+    `${prompt}\n\n${systemInstructionTail(toolOutputScratchPad)}`,
     ...(isConsult ? [] : [
       `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,
     ]),

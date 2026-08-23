@@ -19,15 +19,7 @@ import {
   pipe,
   sum,
 } from "gamla";
-import {
-  collapseDuplicatedText,
-  is403PermissionError,
-  isInvalidArgumentError,
-  isRetryableError,
-  isSyntheticTimeoutError,
-  stripAnsi,
-  syntheticTimeoutMarker,
-} from "./utils.ts";
+import { collapseDuplicatedText } from "./utils.ts";
 import type { ZodType } from "zod/v4";
 import {
   accessMetadataStore,
@@ -36,16 +28,13 @@ import {
   doNothingEventWithMetadata,
   estimateAgentInputTokens,
   estimateTokens,
-  estimateTokensLocal,
   externalEventPrefix,
-  formatSkillsPrompt,
   generateId,
   getStreamChunk,
   getStreamThinkingChunk,
-  type HistoryEvent,
   type HistoryEventWithMetadata,
   historyHasPendingDeferredUserWaitingNudge,
-  invisibleToolUseInstruction,
+  isRecord,
   type MediaAttachment,
   type MessageId,
   noResponseTag,
@@ -55,6 +44,7 @@ import {
   ownUtteranceTurnWithMetadata,
   type ParticipantEditMessage,
   type ParticipantUtterance,
+  systemInstructionTail,
   systemNotificationPrefix,
   thinkingTokenExhaustionWarningText,
   type Tool,
@@ -76,7 +66,20 @@ import {
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
 import { inspectMediaUrlToolName } from "./inspectMediaTool.ts";
-import { extractJsonThought, stripJsonThought } from "./jsonThought.ts";
+import {
+  extractJsonThought,
+  internalThoughtMarker,
+  stripJsonThought,
+} from "./jsonThought.ts";
+import {
+  is403PermissionError,
+  isInvalidArgumentError,
+  isRetryableError,
+  isSyntheticTimeoutError,
+  normalizeError,
+  stripAnsi,
+  syntheticTimeoutMarker,
+} from "./utils.ts";
 import { assertNoScriptDrift } from "./scriptDriftGuard.ts";
 import { isCompactedSummaryText } from "./compaction.ts";
 
@@ -99,10 +102,10 @@ const instrumentedFetch: typeof fetch = (input, init) => {
   if (!isGoogleApi(url)) return originalFetch(input, init);
   const path = fetchPath(url);
   const t0 = Date.now();
-  console.log(`[gemini-fetch] start ${path}`);
+  logGemini(`[gemini-fetch] start ${path}`);
   return originalFetch(input, init).then(
     (res) => {
-      console.log(
+      logGemini(
         `[gemini-fetch] headers ${path} status=${res.status} ttfbMs=${
           Date.now() - t0
         }`,
@@ -123,22 +126,19 @@ const instrumentedFetch: typeof fetch = (input, init) => {
 
 globalThis.fetch = instrumentedFetch;
 
-const normalizeError = (error: unknown): Error => {
-  if (error instanceof Error) return error;
-  if (typeof error === "string") return new Error(error);
-  if (typeof error === "object" && error !== null) {
-    const err = new Error(
-      (error as { message?: string }).message || JSON.stringify(error),
-    );
-    Object.assign(err, error);
-    return err;
-  }
-  return new Error(String(error));
-};
-
 const geminiError: Injection<
   (_1: Error, _2: GenerateContentParameters) => void
 > = context((_1: Error, _2: GenerateContentParameters) => {});
+
+// Verbose [gemini-fetch]/[gemini-step]/[gemini-diag] request logging. On by
+// default; tests and noise-sensitive consumers can silence or redirect it.
+const geminiLog: Injection<(line: string) => void> = context((line: string) =>
+  console.log(line)
+);
+
+export const injectGeminiLog = geminiLog.inject;
+
+const logGemini = geminiLog.access;
 
 export const injectGeminiErrorLogger = geminiError.inject;
 
@@ -218,12 +218,6 @@ const isRecoverableError = (error: Error) =>
   isImageProcessingOrInternalError(error) ||
   is403PermissionError(error) ||
   isTokenLimitExceeded(error);
-
-const _dropOldestHalf = <T extends { type: string }>(events: T[]): T[] => {
-  if (events.length <= 2) return events;
-  const half = Math.floor(events.length / 2);
-  return events.slice(half);
-};
 
 export const capEventsToTokenBudget = (maxTokens: number) =>
 async (
@@ -320,7 +314,7 @@ const withTimeout = <Args extends unknown[], Result>(
       Object.assign(err, { status: 503, [syntheticTimeoutMarker]: true });
       reject(err);
     }, timeoutMs);
-    console.log("[gemini-step] rawCallGemini-start");
+    logGemini("[gemini-step] rawCallGemini-start");
     fn(controller.signal, ...args).then(
       (result) => {
         clearTimeout(timer);
@@ -333,7 +327,7 @@ const withTimeout = <Args extends unknown[], Result>(
         clearTimeout(timer);
         const { status, name, message } = errorDetails(error);
         const logFn = isRecoverableError(normalizeError(error))
-          ? console.log
+          ? logGemini
           : console.warn;
         logFn(
           `[gemini-step] rawCallGemini-error elapsedMs=${
@@ -356,21 +350,24 @@ const requestDiag = (
   const sysInstr = typeof req.config?.systemInstruction === "string"
     ? req.config.systemInstruction
     : "";
-  const reqBytes = JSON.stringify(req).length;
-  const declBytes = JSON.stringify(decls).length;
   const contents = Array.isArray(req.contents) ? req.contents : [];
-  const partsCount = contents.reduce(
+  // Cheap size estimate: summing part payload lengths avoids serializing the
+  // whole request (inline base64 blobs make JSON.stringify cost megabytes per call).
+  const estimatePartChars = (p: Part): number =>
+    (typeof p.text === "string" ? p.text.length : 0) +
+    (p.inlineData?.data?.length ?? 0);
+  const reqChars = contents.reduce(
     (n, c) =>
       n +
       (c && typeof c === "object" && "parts" in c && Array.isArray(c.parts)
-        ? c.parts.length
+        ? c.parts.reduce((m, p) => m + estimatePartChars(p), 0)
         : 0),
     0,
   );
-  console.log(
+  logGemini(
     `[gemini-diag] pre-call model=${req.model} mode=${
       disableStreaming ? "buffered" : "stream"
-    } contents=${contents.length} parts=${partsCount} tools=${decls.length} declBytes=${declBytes} sysInstrLen=${sysInstr.length} reqBytes=${reqBytes}`,
+    } contents=${contents.length} tools=${decls.length} sysInstrLen=${sysInstr.length} reqChars=${reqChars}`,
   );
 };
 
@@ -388,7 +385,7 @@ const usageDiag = (
     .filter((p) => !p.thought && typeof p.text === "string" && !p.functionCall)
     .reduce((n, p) => n + (p.text?.length ?? 0), 0);
   const sigCount = parts.filter((p) => p.thoughtSignature).length;
-  console.log(
+  logGemini(
     `[gemini-diag] post-call mode=${mode} finish=${finishReason} parts=${parts.length} fnCalls=${fnCalls} thoughtChars=${thoughtChars} textChars=${textChars} sigCount=${sigCount} promptTok=${usage?.promptTokenCount} candTok=${usage?.candidatesTokenCount} thoughtTok=${usage?.thoughtsTokenCount} cachedTok=${usage?.cachedContentTokenCount}`,
   );
 };
@@ -473,14 +470,14 @@ const geminiSdkExchange = async (
       accumulatedParts.push(part);
     }
   } else {
-    console.log("[gemini-step] stream-await-start");
+    logGemini("[gemini-step] stream-await-start");
     const responseStream = await sdk.models.generateContentStream(req);
-    console.log("[gemini-step] stream-await-ok");
+    logGemini("[gemini-step] stream-await-ok");
 
     let chunkCount = 0;
     for await (const chunk of responseStream) {
       chunkCount++;
-      if (chunkCount === 1) console.log("[gemini-step] stream-first-chunk");
+      if (chunkCount === 1) logGemini("[gemini-step] stream-first-chunk");
       if (chunk.usageMetadata) {
         finalUsageMetadata = chunk.usageMetadata;
       }
@@ -533,7 +530,7 @@ const geminiSdkExchange = async (
         }
       }
     }
-    console.log(`[gemini-step] stream-done chunks=${chunkCount}`);
+    logGemini(`[gemini-step] stream-done chunks=${chunkCount}`);
     usageDiag(
       "stream",
       finalUsageMetadata,
@@ -563,14 +560,16 @@ const geminiSdkExchangeInjection: Injection<typeof geminiSdkExchange> = context(
 // hitting the API, e.g. to reproduce malformed function-call responses.
 export const injectGeminiSdkExchange = geminiSdkExchangeInjection.inject;
 
-const sanitizePromptTextForGemini = (text: string): string =>
-  text
-    .replace(
-      /give me the (?:video|vidio|clip)(?: of (?:this|thiis) scene)?/gi,
-      "find this scene",
-    )
-    .replace(/give me the (?:video|vidio|clip)/gi, "find scene")
-    .replace(/black dahlia/gi, "black flower");
+// Hook for consumer-specific prompt rewriting before a sanitized retry after
+// a whole-prompt safety block (e.g. rephrasing trigger phrases). Defaults to
+// identity: this open-source library must not carry any bot-specific data.
+const promptSanitizer: Injection<(text: string) => string> = context(
+  (text: string) => text,
+);
+
+export const injectGeminiPromptSanitizer = promptSanitizer.inject;
+
+const sanitizePromptTextForGemini = promptSanitizer.access;
 
 const sanitizeContentsForGemini = (
   contents: Content[],
@@ -725,43 +724,11 @@ const actionToTool = ({ name, description, parameters }: Tool<ZodType>) => ({
   parameters: zodToGeminiParameters(parameters),
 });
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 const optionalThoughtSignature = (sig: string | undefined) =>
   sig ? { thoughtSignature: sig } : {};
 
 const attachmentsToPartsOrEmpty = (attachments?: MediaAttachment[]): Part[] =>
   attachmentsToParts(attachments ?? []);
-
-const _toolResultAttachmentText = (attachments?: MediaAttachment[]) => {
-  if (!attachments || empty(attachments)) return "";
-  const fileAttachments = attachments.filter((attachment) =>
-    attachment.kind === "file"
-  );
-  const inlineAttachments = attachments.filter((attachment) =>
-    attachment.kind === "inline"
-  );
-  const text = [
-    !empty(fileAttachments)
-      ? "Tool returned media URLs. If you need to inspect them visually, call inspect_media_url:\n" +
-        fileAttachments.map((attachment) =>
-          `- ${
-            attachment.caption ?? attachment.mimeType
-          }: ${attachment.fileUri}`
-        ).join("\n")
-      : "",
-    !empty(inlineAttachments)
-      ? "Tool returned raw inline media attached directly. Inspect the attached media visually; do not call inspect_media_url for inline media."
-      : "",
-  ].filter(Boolean).join("\n");
-  return text ? `\n${text}` : "";
-};
-
-const _inlineAttachmentParts = (attachments?: MediaAttachment[]) =>
-  attachmentsToParts(
-    (attachments ?? []).filter((attachment) => attachment.kind === "inline"),
-  );
 
 const referencedMessageText =
   (eventById: (id: string) => GeminiHistoryEvent | undefined) =>
@@ -1169,31 +1136,22 @@ export const filterAndRewriteUnsupportedGeminiAttachments =
 export const filterOrphanedToolResults = (
   history: GeminiHistoryEvent[],
 ): GeminiHistoryEvent[] => {
-  const allCalls = history.filter((e) => e.type === "tool_call");
-  const processedCallIds = new Set<string>();
-
+  const unconsumedCallIds = new Set(
+    history.filter((e) => e.type === "tool_call").map((e) => e.id),
+  );
   return history.filter((e) => {
     if (e.type !== "tool_result") return true;
-
-    if (!e.toolCallId) {
+    if (!e.toolCallId || !unconsumedCallIds.has(e.toolCallId)) {
       console.warn(
-        `Warning: Filtering out orphaned tool_result (id: ${e.id}) with no toolCallId.`,
+        `Warning: Filtering out orphaned tool_result (id: ${e.id}, toolCallId: ${e.toolCallId}). ` +
+          `No unclaimed matching tool_call found with that ID.`,
       );
       return false;
     }
-
-    const call = allCalls.find((c) =>
-      c.id === e.toolCallId && !processedCallIds.has(c.id)
-    );
-    if (call) {
-      processedCallIds.add(call.id);
-      return true;
-    }
-    console.warn(
-      `Warning: Filtering out orphaned tool_result (toolCallId: ${e.toolCallId}). ` +
-        `No matching tool_call found with that ID.`,
-    );
-    return false;
+    // Each tool_call claims exactly one result; extra results for the same
+    // call are orphans.
+    unconsumedCallIds.delete(e.toolCallId);
+    return true;
   });
 };
 
@@ -1680,8 +1638,10 @@ const maxHistoryTokens = 800_000;
 const noResponseInstruction =
   `\n\nWhen you have nothing to say (e.g. the message is irrelevant), respond with exactly ${noResponseTag} and nothing else.`;
 
-const enhancePrompt = (prompt: string) =>
-  `${prompt}\n\n${invisibleToolUseInstruction}`;
+const enhancePrompt = (
+  prompt: string,
+  toolOutputScratchPad?: AgentSpec["toolOutputScratchPad"],
+) => `${prompt}\n\n${systemInstructionTail(toolOutputScratchPad)}`;
 
 // Side-effectful history normalization that MUST run outside the cached
 // `callModel` boundary. Without this, tests replay a populated rmmbr cache
@@ -1945,6 +1905,7 @@ const geminiAgentCallerInner = ({
   maxOutputTokens,
   disableStreaming,
   isConsult,
+  toolOutputScratchPad,
 }: AgentSpec) =>
 (
   events: GeminiHistoryEvent[],
@@ -1968,11 +1929,7 @@ const geminiAgentCallerInner = ({
       rewriteHistory,
       buildReq(
         lightModel,
-        skills && skills.length > 0
-          ? `${enhancePrompt(prompt)}${silenceLicense}\n\nAvailable skills:\n${
-            formatSkillsPrompt(skills)
-          }`
-          : `${enhancePrompt(prompt)}${silenceLicense}`,
+        `${enhancePrompt(prompt, toolOutputScratchPad)}${silenceLicense}`,
         [
           ...tools,
           ...((allSkills ?? skills ?? []).length > 0
@@ -1989,8 +1946,7 @@ const geminiAgentCallerInner = ({
   )(events);
 };
 
-const embeddedThoughtPattern =
-  /\[Internal thought, visible only to you: ([\s\S]*?)\]/g;
+const embeddedThoughtPattern = new RegExp(internalThoughtMarker, "g");
 
 export const stripEmbeddedThoughtPatterns = (text: string): string =>
   stripJsonThought(text.replace(embeddedThoughtPattern, "")).trim();
@@ -2163,39 +2119,4 @@ export const geminiOutputToHistoryEvents = (
     const event = geminiOutputPartToHistoryEvent(responseId)(part);
     return event ? [event] : [];
   });
-};
-
-export const countEventsTokens = async (
-  events: HistoryEvent[],
-): Promise<number> => {
-  if (events.length === 0) return 0;
-  try {
-    const timezoneIANA = "UTC";
-    const geminiEvents = events as GeminiHistoryEvent[];
-    const contents = pipe(
-      groupBy(getOriginalId),
-      Object.values<GeminiHistoryEvent[]>,
-      map(
-        pipe(
-          map(historyEventToContent(indexById(geminiEvents), timezoneIANA)),
-          combineContent,
-        ),
-      ),
-      mergeConsecutiveRoles,
-      fixStart,
-    )(geminiEvents);
-
-    const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
-    const { totalTokens } = await sdk.models.countTokens({
-      model: "gemini-3.7-flash",
-      contents,
-    });
-    return totalTokens ?? 0;
-  } catch (error) {
-    console.warn(
-      "Failed calling countTokens, falling back to local estimation:",
-      error,
-    );
-    return events.reduce((sum, e) => sum + estimateTokensLocal(e), 0);
-  }
 };

@@ -85,7 +85,9 @@ export {
 } from "./src/scriptDriftGuard.ts";
 export {
   injectGeminiErrorLogger,
+  injectGeminiLog,
   injectGeminiModelCallTimeoutMs,
+  injectGeminiPromptSanitizer,
   injectPromptBlockedLogger,
   injectTokenUsage,
   safetyWarningText,

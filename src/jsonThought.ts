@@ -1,3 +1,9 @@
+// The bracketed internal-thought marker the platform renders for
+// metadata-less model-role thoughts. Shared by the agent-loop reclassifier
+// (anchored, whole-text) and the Gemini part converter (global, embedded).
+export const internalThoughtMarker =
+  "\\[Internal thought, visible only to you: ([\\s\\S]*?)\\]";
+
 export const jsonThoughtPattern = /\{\s*"thought"\s*:\s*"([\s\S]*?)"\s*\}\s*/gi;
 
 export const stripJsonThought = (text: string): string =>

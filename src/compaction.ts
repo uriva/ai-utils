@@ -138,6 +138,10 @@ export const segmentHistoryEvents = (
 export const eventToPlainText = (e: HistoryEvent): string =>
   e.type === "participant_utterance" || e.type === "own_utterance"
     ? e.text
+    : e.type === "participant_edit_message" || e.type === "own_edit_message"
+    ? `${
+      e.type === "own_edit_message" ? "You" : e.name
+    } edited a message: ${e.text}`
     : e.type === "tool_call"
     ? `TOOL CALL ${e.name} ${JSON.stringify(e.parameters)}`
     : e.type === "tool_result"
