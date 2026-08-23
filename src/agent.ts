@@ -3014,6 +3014,20 @@ const StopDecisionSchema = z.object({
   ),
 });
 
+// The progress auditor only needs the goals plus recent activity to judge
+// whether the agent is looping; sending full plain-text history would bill a
+// large prompt on every check. Keep the most recent slice when over budget.
+const maxProgressCheckHistoryChars = 30_000;
+
+const recentHistorySlice = (history: HistoryEvent[]): string => {
+  const text = historyToPlainTextLocal(history);
+  return text.length <= maxProgressCheckHistoryChars
+    ? text
+    : `[...older history omitted...]\n${
+      text.slice(-maxProgressCheckHistoryChars)
+    }`;
+};
+
 const checkProgress = async (
   spec: AgentSpec,
   normalizedHistory: HistoryEvent[],
@@ -3036,10 +3050,10 @@ The thoughtInjection MUST start with: "${stopThoughtPrefix} I should instead..."
 ${spec.prompt}
 
 Conversation History (most recent events):
-${historyToPlainTextLocal(normalizedHistory)}`;
+${recentHistorySlice(normalizedHistory)}`;
 
     const decision = await genJson(
-      { provider: "google", mini: false },
+      { provider: "google", mini: true },
       systemPrompt,
       StopDecisionSchema,
     )(userPrompt);
