@@ -1,12 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { pipe } from "gamla";
 import { runAgent } from "../mod.ts";
-import {
-  agentDeps,
-  injectSecrets,
-  noopRewriteHistory,
-  someTool,
-} from "../test_helpers.ts";
+import { agentDeps, noopRewriteHistory, someTool } from "../test_helpers.ts";
 import {
   type HistoryEvent,
   injectCallModel,
@@ -83,7 +78,6 @@ Deno.test(
       };
 
     await pipe(
-      injectSecrets,
       injectCallModel(fakeCallModel),
       genJsonOverride.inject(() => fakeGenJson),
     )(async () => {
