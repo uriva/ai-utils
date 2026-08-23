@@ -90,7 +90,33 @@ const unansweredParticipantEventIds = (events: HistoryEvent[]): Set<string> => {
   );
 };
 
+// Segmentation results are cached per input-array identity (+gap): within one
+// agent iteration several consumers segment the exact same history reference.
+const segmentationCache = new WeakMap<
+  HistoryEvent[],
+  Map<number, HistorySegment[]>
+>();
+
 export const segmentHistoryEvents = (
+  events: HistoryEvent[],
+  gap: number,
+): HistorySegment[] => {
+  let perGap = segmentationCache.get(events);
+  if (!perGap) {
+    perGap = new Map();
+    segmentationCache.set(events, perGap);
+  }
+  const cached = perGap.get(gap);
+  if (cached) return cached;
+  const segments = segmentHistoryEventsUncached(events, gap);
+  perGap.set(gap, segments);
+  return segments;
+};
+
+// O(n): each group is folded into the accumulating segment's unanswered-set
+// only once, instead of recomputing the whole prefix's unanswered participants
+// on every iteration.
+const segmentHistoryEventsUncached = (
   events: HistoryEvent[],
   gap: number,
 ): HistorySegment[] => {
@@ -98,38 +124,35 @@ export const segmentHistoryEvents = (
   const sorted = sortEventsChronologically(events);
   const groups = groupToolCallPairs(sorted);
   const segments: HistorySegment[] = [];
-  let currentGroups: HistoryEvent[][] = [groups[0]];
-
-  const groupTimestamp = (g: HistoryEvent[]): number => head(g).timestamp;
-  const groupEndTimestamp = (g: HistoryEvent[]): number => last(g).timestamp;
-  const flattenGroups = (gs: HistoryEvent[][]): HistoryEvent[] =>
-    gs.flatMap((g) => g);
-
+  const unansweredIds = new Set<string>();
+  const foldIntoUnanswered = (g: HistoryEvent[]) => {
+    for (const e of g) {
+      if (isOwnUtterance(e)) unansweredIds.clear();
+      else if (isParticipantUtterance(e)) unansweredIds.add(e.id);
+    }
+  };
+  let currentEvents = [...groups[0]];
+  foldIntoUnanswered(groups[0]);
   for (let i = 1; i < groups.length; i++) {
-    const prevEnd = groupEndTimestamp(last(currentGroups));
-    const currStart = groupTimestamp(groups[i]);
-    const gapOk = currStart - prevEnd >= gap;
-    const currentEvents = flattenGroups(currentGroups);
-    const hasUnanswered = nonempty(
-      Array.from(unansweredParticipantEventIds(currentEvents)),
-    );
-    if (gapOk && !hasUnanswered && currentEvents.length >= 2) {
+    const group = groups[i];
+    const gapOk = head(group).timestamp - last(currentEvents).timestamp >= gap;
+    if (gapOk && unansweredIds.size === 0 && currentEvents.length >= 2) {
       segments.push({
         events: currentEvents,
         start: head(currentEvents).timestamp,
         end: last(currentEvents).timestamp,
       });
-      currentGroups = [groups[i]];
-    } else {
-      currentGroups.push(groups[i]);
+      currentEvents = [];
+      unansweredIds.clear();
     }
+    currentEvents.push(...group);
+    foldIntoUnanswered(group);
   }
-  const remaining = flattenGroups(currentGroups);
-  if (remaining.length > 0) {
+  if (nonempty(currentEvents)) {
     segments.push({
-      events: remaining,
-      start: head(remaining).timestamp,
-      end: last(remaining).timestamp,
+      events: currentEvents,
+      start: head(currentEvents).timestamp,
+      end: last(currentEvents).timestamp,
     });
   }
   return segments;

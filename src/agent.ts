@@ -2086,7 +2086,9 @@ export const sanitizeWindowBoundary = (
       break;
     }
   }
-  return events.slice(startIndex);
+  // Preserve the input reference when nothing is trimmed so downstream
+  // per-reference caches (segmentation, spec-for-turn) can hit.
+  return startIndex === 0 ? events : events.slice(startIndex);
 };
 
 export type ProjectHistoryOptions = {
@@ -3093,7 +3095,32 @@ export const sanitizeHistorySkillsForModel = (
   return events.map(sanitizeSkillResult(callIds, activeSkillNames(events)));
 };
 
+// The spec-for-turn depends only on the spec identity and the history array
+// contents; within one agent iteration it is requested several times for the
+// exact same references, so cache it (skill sorting + prompt concatenation are
+// proportional to the full skill text).
+const specForTurnCache = new WeakMap<
+  AgentInputs,
+  WeakMap<HistoryEvent[], unknown>
+>();
+
 export const getSpecForTurn = <T extends AgentInputs>(
+  spec: T,
+  history: HistoryEvent[],
+): T => {
+  let perSpec = specForTurnCache.get(spec);
+  if (!perSpec) {
+    perSpec = new WeakMap();
+    specForTurnCache.set(spec, perSpec);
+  }
+  const cached = perSpec.get(history);
+  if (cached !== undefined) return cached as T;
+  const computed = computeSpecForTurn(spec, history);
+  perSpec.set(history, computed);
+  return computed;
+};
+
+const computeSpecForTurn = <T extends AgentInputs>(
   spec: T,
   history: HistoryEvent[],
 ): T => {
