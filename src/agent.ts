@@ -656,13 +656,17 @@ const callModelWrapperInjection: Injection<CallModelWrapper> = context(
 export const injectCallModelWrapper = callModelWrapperInjection.inject;
 export const accessCallModelWrapper = callModelWrapperInjection.access;
 
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 const parseWithCatch = <T extends ZodType>(
   parameters: T,
+  jsonSchema: unknown,
   // deno-lint-ignore no-explicit-any
   args: any,
 ): { ok: false; error: Error } | { ok: true; result: z.infer<T> } => {
   try {
-    const unknownKeysError = rejectUnknownKeys(parameters, args);
+    const unknownKeysError = rejectUnknownKeys(jsonSchema, args);
     if (unknownKeysError) throw unknownKeysError;
     return { ok: true, result: parameters.parse(args) as z.infer<T> };
   } catch (error) {
@@ -670,66 +674,41 @@ const parseWithCatch = <T extends ZodType>(
   }
 };
 
-type ZodShape = Record<string, ZodType>;
-
-type ZodDef = {
-  type?: string;
-  shape?: ZodShape | (() => ZodShape);
-  innerType?: ZodType;
-  element?: ZodType;
-  catchall?: ZodType;
-  options?: ZodType[];
-};
-
-const zodDef = (schema: ZodType): ZodDef | undefined =>
-  (schema as unknown as { def?: ZodDef }).def;
-
-const zodShape = (schema: ZodType): ZodShape | undefined => {
-  const shape = zodDef(schema)?.shape;
-  return typeof shape === "function" ? shape() : shape;
-};
-
-const allowsUnknownKeys = (schema: ZodType): boolean => {
-  const catchall = zodDef(schema)?.catchall;
-  return !!catchall && zodDef(catchall)?.type !== "never";
-};
-
-const unwrapSchema = (schema: ZodType): ZodType => {
-  const inner = zodDef(schema)?.innerType;
-  return inner ? unwrapSchema(inner) : schema;
-};
-
-export const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
+// Strict-key validation walks the JSON Schema projection of the parameter
+// schema (the same one coerceArgs and the error hints consume), so no Zod
+// internals are involved and upgrades can't silently break it.
 const unknownKeyErrors = (
-  schema: ZodType,
+  schemaNode: unknown,
   value: unknown,
   path: string[] = [],
 ): string[] => {
-  const s = unwrapSchema(schema);
-  const def = zodDef(s);
-  if (def?.type === "array" && def.element && Array.isArray(value)) {
+  if (!isRecord(schemaNode)) return [];
+  if (
+    schemaNode.type === "array" &&
+    isRecord(schemaNode.items) &&
+    Array.isArray(value)
+  ) {
     return value.flatMap((item, i) =>
-      unknownKeyErrors(def.element!, item, [...path, String(i)])
+      unknownKeyErrors(schemaNode.items, item, [...path, String(i)])
     );
   }
-  if (def?.type !== "object" || !isRecord(value) || allowsUnknownKeys(s)) {
-    return [];
-  }
-  const shape = zodShape(s) ?? {};
-  const expectedKeys = Object.keys(shape);
-  const knownKeys = new Set(expectedKeys);
+  if (Array.isArray(schemaNode.anyOf)) return [];
+  if (schemaNode.type !== "object" || !isRecord(value)) return [];
+  if (schemaNode.additionalProperties !== false) return [];
+  const properties = isRecord(schemaNode.properties)
+    ? schemaNode.properties
+    : {};
+  const expectedKeys = Object.keys(properties);
   const expectedKeysMessage = empty(expectedKeys)
     ? ""
     : `. Expected keys: ${expectedKeys.join(", ")}`;
   return [
     ...Object.keys(value)
-      .filter((key) => !knownKeys.has(key))
+      .filter((key) => !(key in properties))
       .map((key) =>
         `${[...path, key].join(".")}: Unrecognized key${expectedKeysMessage}`
       ),
-    ...Object.entries(shape).flatMap(([key, childSchema]) =>
+    ...Object.entries(properties).flatMap(([key, childSchema]) =>
       key in value
         ? unknownKeyErrors(childSchema, value[key], [...path, key])
         : []
@@ -738,10 +717,10 @@ const unknownKeyErrors = (
 };
 
 const rejectUnknownKeys = (
-  schema: ZodType,
+  jsonSchema: unknown,
   value: unknown,
 ): Error | undefined => {
-  const errors = unknownKeyErrors(schema, value);
+  const errors = unknownKeyErrors(jsonSchema, value);
   return empty(errors) ? undefined : new Error(errors.join(", "));
 };
 
@@ -1087,7 +1066,7 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
   const jsonSchema = z.toJSONSchema(parameters);
   const coerced = coerceArgs(jsonSchema, effectiveArgs);
   const prefix = correctionPrefix(coerced.corrections);
-  const parseResult = parseWithCatch(parameters, coerced.args);
+  const parseResult = parseWithCatch(parameters, jsonSchema, coerced.args);
   if (!parseResult.ok) {
     return {
       toolCallId,
@@ -1102,21 +1081,19 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
   const resolvedResult = await resolveScratchInParams(parseResult.result);
   const out = await handler(resolvedResult, toolCallId ?? "");
   if (out === undefined) return undefined;
-  const parsed = parseWithCatch(toolReturnSchema, out);
-  if (!parsed.ok) {
+  const parsed = toolReturnSchema.safeParse(out);
+  if (!parsed.success) {
     throw new Error(
       `Tool "${name}" handler returned invalid value (args: ${
         JSON.stringify(args)
       }): ${
-        parsed.error instanceof z.ZodError
-          ? parsed.error.issues.map((i) =>
-            `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
-          ).join(", ")
-          : parsed.error.message
+        parsed.error.issues.map((i) =>
+          `${i.path.length ? i.path.join(".") + ": " : ""}${i.message}`
+        ).join(", ")
       }`,
     );
   }
-  const validated = parsed.result;
+  const validated = parsed.data;
   const rawText = sanitizeToolOutput(
     typeof validated === "string" ? validated : validated.result,
   );
@@ -2371,7 +2348,11 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           ...(misrouted ? [misrouted.correction] : []),
           ...coerced.corrections,
         ]);
-        const parseResult = parseWithCatch(tool.parameters, coerced.args);
+        const parseResult = parseWithCatch(
+          tool.parameters,
+          toolJsonSchema,
+          coerced.args,
+        );
         if (!parseResult.ok) {
           if (
             !isReferenceTool(skill, toolName) &&
