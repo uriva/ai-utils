@@ -560,29 +560,6 @@ const geminiSdkExchangeInjection: Injection<typeof geminiSdkExchange> = context(
 // hitting the API, e.g. to reproduce malformed function-call responses.
 export const injectGeminiSdkExchange = geminiSdkExchangeInjection.inject;
 
-// Hook for consumer-specific prompt rewriting before a sanitized retry after
-// a whole-prompt safety block (e.g. rephrasing trigger phrases). Defaults to
-// identity: this open-source library must not carry any bot-specific data.
-const promptSanitizer: Injection<(text: string) => string> = context(
-  (text: string) => text,
-);
-
-export const injectGeminiPromptSanitizer = promptSanitizer.inject;
-
-const sanitizePromptTextForGemini = promptSanitizer.access;
-
-const sanitizeContentsForGemini = (
-  contents: Content[],
-): Content[] =>
-  contents.map((c: Content) => ({
-    ...c,
-    parts: c.parts?.map((p: Part) =>
-      typeof p.text === "string"
-        ? { ...p, text: sanitizePromptTextForGemini(p.text) }
-        : p
-    ),
-  }));
-
 const rawCallGemini = async (
   signal: AbortSignal,
   args: {
@@ -598,55 +575,11 @@ const rawCallGemini = async (
   }
 
   // A prompt-level block (`promptFeedback.blockReason`) returns zero candidates,
-  // so `finishReason` is undefined and the turn yields no parts. Try a single
-  // sanitized retry if prompt contained heuristic trigger phrases; otherwise
-  // route it through the same sink the candidate `finishReason` uses.
+  // so `finishReason` is undefined and the turn yields no parts. Route it
+  // through the same sink the candidate `finishReason` uses.
   const isPromptBlock = !!promptBlockReason && empty(parts);
-  if (isPromptBlock && Array.isArray(args.req.contents)) {
-    const sanitizedContents = sanitizeContentsForGemini(
-      args.req.contents as Content[],
-    );
-    if (
-      JSON.stringify(sanitizedContents) !== JSON.stringify(args.req.contents)
-    ) {
-      const retryRes = await geminiSdkExchangeInjection.access(signal, {
-        ...args,
-        req: { ...args.req, contents: sanitizedContents },
-      });
-      if (!retryRes.promptBlockReason && !empty(retryRes.parts)) {
-        if (retryRes.usageMetadata) {
-          tokenUsage.access(retryRes.usageMetadata, args.req.model);
-        }
-        if (retryRes.finishReason) {
-          finishReasonSink.access(retryRes.finishReason);
-        }
-        rejectMalformedFunctionCall(retryRes.finishReason, retryRes.parts);
-        return retryRes.parts.flatMap((part: Part): GeminiOutput => {
-          const {
-            text,
-            functionCall,
-            thoughtSignature,
-            inlineData,
-            fileData,
-            thought,
-          } = part;
-          if (functionCall) {
-            return [{ type: "function_call", functionCall, thoughtSignature }];
-          }
-          if (inlineData) {
-            return [{ type: "inline_data", inlineData, thoughtSignature }];
-          }
-          if (fileData) {
-            return [{ type: "file_data", fileData, thoughtSignature }];
-          }
-          if (typeof text === "string") {
-            return [{ type: "text", text, thoughtSignature, thought }];
-          }
-          return [];
-        });
-      }
-    }
-    promptBlocked.access(promptBlockReason!, args.req);
+  if (isPromptBlock) {
+    promptBlocked.access(promptBlockReason, args.req);
   }
   const effectiveFinishReason = finishReason ??
     (isPromptBlock ? promptBlockReasonPrefix + promptBlockReason : undefined);

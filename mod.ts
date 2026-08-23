@@ -87,7 +87,6 @@ export {
   injectGeminiErrorLogger,
   injectGeminiLog,
   injectGeminiModelCallTimeoutMs,
-  injectGeminiPromptSanitizer,
   injectPromptBlockedLogger,
   injectTokenUsage,
   safetyWarningText,
