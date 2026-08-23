@@ -22,6 +22,7 @@ import {
   sanitizeModelOutput,
   type Skill,
   systemNotificationPrefix,
+  toolResultTurn,
   toolUseTurn,
 } from "../src/agent.ts";
 import {
@@ -1549,6 +1550,35 @@ Deno.test("normalizeHistoryForModel: does NOT append nudge when later user messa
       e.text.includes("Respond to the user's latest message")
     ),
     "must not inject the nudge when the user message has already been answered",
+  );
+});
+
+// Anthropic hard-rejects any request where a tool_use id carries more than one
+// tool_result ("each tool_use must have a single result"). Duplicate delivery
+// of a background result can place two results for one call into persisted
+// history; the model view must collapse them to a single result.
+Deno.test("normalizeHistoryForModel: collapses duplicate tool_results for one tool_call into a single result", () => {
+  const call = toolUseTurn({ name: "timeout-wakeup", args: { ms: 5000 } });
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({ name: "user", text: "please wait" }),
+    call,
+    toolResultTurn({ result: "first delivery", toolCallId: call.id }),
+    toolResultTurn({ result: "duplicate delivery", toolCallId: call.id }),
+    participantUtteranceTurn({ name: "user", text: "what happened?" }),
+  ];
+  const normalized = normalizeHistoryForModel(history);
+  const resultsForCall = normalized.filter((e) =>
+    e.type === "tool_result" && "toolCallId" in e && e.toolCallId === call.id
+  );
+  assertEquals(
+    resultsForCall.length,
+    1,
+    `expected exactly one tool_result for ${call.id}, got ${resultsForCall.length}`,
+  );
+  assertEquals(
+    resultsForCall[0].type === "tool_result" && resultsForCall[0].result,
+    "first delivery",
+    "the chronologically first delivered result must win",
   );
 });
 

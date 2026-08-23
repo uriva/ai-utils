@@ -2001,7 +2001,10 @@ export const normalizeHistoryForModel = (
         .filter((result) => !consumedResultIds.has(result.id));
       matchedResults.forEach((result) => consumedResultIds.add(result.id));
       if (nonempty(matchedResults)) {
-        return [...acc, event, ...matchedResults];
+        // Providers forbid multiple results per tool_use (Anthropic answers
+        // 400 "each tool_use must have a single result"), so keep only the
+        // chronologically first delivery; extras stay in persisted history.
+        return [...acc, event, matchedResults[0]];
       }
       if (laterUnansweredUserMessage(filteredHistory, index)) {
         // Drop the tool_call + its (would-be) pending functionResponse from the
