@@ -67,7 +67,7 @@ const initialHistory = (): HistoryEvent[] => {
 };
 
 const failureDisclosure =
-  /error|failed|failure|issue|problem|unable|could not|couldn't|failed to save/i;
+  /error|failed|failure|issue|problem|unable|could not|couldn't|failed to save|only provides|no additional/i;
 
 const unperformedSaveClaim =
   /(?:have|has|were|are|been|I|I've)\s+(?:already\s+|just\s+|successfully\s+)?(?:synced|updated|saved|configured|imported|completed)|successfully\s+(?:synced|updated|saved|configured|imported|completed)/i;
