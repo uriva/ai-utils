@@ -10,6 +10,7 @@ import {
   type Tool,
   type ToolOutputScratchPad,
 } from "../src/agent.ts";
+import { genJsonOverride } from "../src/genJson.ts";
 
 Deno.test(
   "runAgent - protects active coding task working memory while past settled sessions are compacted",
@@ -138,7 +139,22 @@ Deno.test(
       return Promise.resolve();
     };
 
+    const fakeGenJson =
+      (_opts: unknown, _sys: string, _zod: unknown) =>
+      (_userMsg: string): Promise<Record<string, string>> => {
+        return Promise.resolve({
+          entities: "Past discussion",
+          decisions: "None",
+          actions: "None",
+          pendingItems: "None",
+          abandonedItems: "None",
+          context: "None",
+          skillsToReLearn: "None",
+        });
+      };
+
     await pipe(
+      genJsonOverride.inject(() => fakeGenJson),
       injectCallModel(fakeCallModel),
       agentDeps(history),
     )(async () => {

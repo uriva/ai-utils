@@ -390,14 +390,20 @@ const summarizePlainText = async (text: string): Promise<string> =>
     )(text),
   );
 
+const settledSummaryL1Cache = new Map<string, string>();
+
 export const summarizeEvents = async (
   events: HistoryEvent[],
 ): Promise<string> => {
   const plainText = eventsToPlainText(events);
+  const l1Cached = settledSummaryL1Cache.get(plainText);
+  if (l1Cached !== undefined) return l1Cached;
   const cachedSummarize = makeCache("settled-session-summaries-v1")(
     (text: string) => summarizePlainText(text),
   );
-  return await cachedSummarize(plainText);
+  const result = await cachedSummarize(plainText);
+  settledSummaryL1Cache.set(plainText, result);
+  return result;
 };
 
 const formatSegmentRange = (start: number, end: number, timezone: string) => {

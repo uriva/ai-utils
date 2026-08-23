@@ -12,6 +12,7 @@ import {
   injectCallModel,
   ownUtteranceTurn,
 } from "../src/agent.ts";
+import { genJsonOverride } from "../src/genJson.ts";
 
 Deno.test(
   "runAgent - triggers compaction for settled past sessions even when total history is well below 100k",
@@ -67,9 +68,24 @@ Deno.test(
       ]);
     };
 
+    const fakeGenJson =
+      (_opts: unknown, _sys: string, _zod: unknown) =>
+      (_userMsg: string): Promise<Record<string, string>> => {
+        return Promise.resolve({
+          entities: "Past task parameters",
+          decisions: "Agreed on parameters",
+          actions: "Logs processed",
+          pendingItems: "None",
+          abandonedItems: "None",
+          context: "Past session details",
+          skillsToReLearn: "None",
+        });
+      };
+
     await pipe(
       injectSecrets,
       injectCallModel(fakeCallModel),
+      genJsonOverride.inject(() => fakeGenJson),
     )(async () => {
       await agentDeps(history)(runAgent)({
         maxIterations: 5,

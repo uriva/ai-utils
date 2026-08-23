@@ -2921,13 +2921,20 @@ const metadataTextForTokenEstimate = (modelMetadata: unknown): string =>
       .join(" ")
     : "";
 
-export const estimateTokensLocal = (e: HistoryEvent): number =>
-  countTokensLocal(eventToPlainTextLocal(e)) +
-  countTokensLocal(
-    metadataTextForTokenEstimate(
-      "modelMetadata" in e ? e.modelMetadata : undefined,
-    ),
-  );
+const eventTokenCache = new WeakMap<HistoryEvent, number>();
+
+export const estimateTokensLocal = (e: HistoryEvent): number => {
+  const cached = eventTokenCache.get(e);
+  if (cached !== undefined) return cached;
+  const count = countTokensLocal(eventToPlainTextLocal(e)) +
+    countTokensLocal(
+      metadataTextForTokenEstimate(
+        "modelMetadata" in e ? e.modelMetadata : undefined,
+      ),
+    );
+  eventTokenCache.set(e, count);
+  return count;
+};
 
 export type TextTokenCounter = (text: string | undefined) => Promise<number>;
 
