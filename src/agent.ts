@@ -570,6 +570,11 @@ const streamChunkInjection: Injection<(chunk: string) => Promise<void> | void> =
 export const injectStreamChunk = streamChunkInjection.inject;
 export const getStreamChunk = streamChunkInjection.getStore;
 
+const toolCallLog: Injection<(line: string) => void> = context((
+  line: string,
+) => console.log(line));
+export const injectToolCallLog = toolCallLog.inject;
+
 const streamThinkingChunkInjection: Injection<
   (chunk: string) => Promise<void> | void
 > = context((_chunk: string) => {});
@@ -2150,7 +2155,7 @@ async (output: HistoryEvent[]): Promise<boolean> => {
     const startedAt = Date.now();
     const callResult = await callToResult(tools, skills, scratchPad)(fc);
     const durationMs = Date.now() - startedAt;
-    console.log(
+    toolCallLog.access(
       `[tool-call] name=${t.name} durationMs=${durationMs} deferred=${
         callResult === undefined
       }`,
@@ -2890,11 +2895,12 @@ export const scheduleHistoryCompaction = (
   });
 };
 
-const enc = getEncoding("cl100k_base");
+let cachedEncoding: ReturnType<typeof getEncoding> | undefined;
 
 const countTokensLocal = (text: string | undefined): number => {
   if (!text) return 0;
-  return enc.encode(text).length;
+  cachedEncoding ??= getEncoding("cl100k_base");
+  return cachedEncoding.encode(text).length;
 };
 
 // Attachment payloads (base64 blobs) must never enter plain-text projections
