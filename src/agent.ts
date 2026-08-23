@@ -2574,12 +2574,89 @@ const stripTruncatedFlag = (events: HistoryEvent[]): HistoryEvent[] =>
       : e
   );
 
+const projectModelContext = (
+  spec: AgentSpec,
+  events: HistoryEvent[],
+  scratchPad: ToolOutputScratchPad | undefined,
+): Promise<HistoryEvent[]> =>
+  projectHistoryToModelContext({
+    rawHistory: events,
+    timezoneIANA: spec.timezoneIANA,
+    scratchPad,
+  });
+
+// Pre-call meta-cognition gate: every `maxIterations` turns (or while a stop
+// has been advised) the bigger model audits whether the run still makes
+// progress. The first stop verdict softens into an injected thought so the
+// model can course-correct; a second verdict escalates to a forced
+// user-facing utterance that ends the run.
+const maybeRunProgressCheck = async (
+  spec: AgentSpec,
+  state: {
+    c: number;
+    stopAdviceCount: number;
+    normalizedHistory: HistoryEvent[];
+  },
+): Promise<
+  | { kind: "run"; stopAdviceCount: number; injectedThought?: HistoryEvent }
+  | { kind: "force-stop" }
+> => {
+  const { c, stopAdviceCount, normalizedHistory } = state;
+  const due =
+    (c > 0 && spec.maxIterations > 0 && c % spec.maxIterations === 0) ||
+    stopAdviceCount > 0;
+  if (!due) return { kind: "run", stopAdviceCount };
+  console.log(
+    `[agent-progress-check] c=${c} stopAdviceCount=${stopAdviceCount} - running progress check with the bigger model`,
+  );
+  const checkResult = await checkProgress(spec, normalizedHistory);
+  if (checkResult.shouldContinue) {
+    console.log(`[agent-progress-check] judged to be good to continue. c=${c}`);
+    return { kind: "run", stopAdviceCount: 0 };
+  }
+  const escalated = stopAdviceCount + 1 >= 2;
+  if (escalated) {
+    console.log(
+      `[agent-progress-check] stop requested multiple times (${
+        stopAdviceCount + 1
+      }). Escalating to forced user-facing utterance. c=${c}`,
+    );
+    return { kind: "force-stop" };
+  }
+  const stopThought = checkResult.thoughtInjection || stopThoughtDefault;
+  console.log(
+    `[agent-progress-check] soft stop requested. thought injected. c=${c}`,
+  );
+  return {
+    kind: "run",
+    stopAdviceCount: stopAdviceCount + 1,
+    injectedThought: ownThoughtTurn(stopThought),
+  };
+};
+
+const withResolvedToolDescriptions = (
+  // deno-lint-ignore no-explicit-any
+  allTools: Tool<any>[],
+  skillsArr: Skill[],
+  emit: HistoryEvent[],
+): HistoryEvent[] =>
+  emit.map((event) => {
+    if (event.type !== "tool_call") return event;
+    const desc = resolveToolDescription(
+      allTools,
+      event.name,
+      event.parameters,
+      skillsArr,
+    );
+    return desc ? { ...event, description: desc } : event;
+  });
+
 export const runAbstractAgent = (
   spec: AgentSpec,
   callModel: (history: HistoryEvent[]) => Promise<HistoryEvent[]>,
 ): Promise<void> =>
   injectAgentSpec(() => spec)(async () => {
-    const { maxIterations, tools, skills } = spec;
+    const { tools, skills } = spec;
     const scratchPad = spec.toolOutputScratchPad;
     const allTools = [
       ...tools,
@@ -2590,14 +2667,16 @@ export const runAbstractAgent = (
     ];
     const skillsArr = skills ?? [];
     let c = 0;
-    let emojiFloodRetries = 0;
-    let repetitionFloodRetries = 0;
-    let truncationRetries = 0;
     let ephemeralHistory: HistoryEvent[] = [];
     let stopAdviceCount = 0;
-    let groundingRetries = 0;
-    let urlGroundingRetries = 0;
-    let doNothingRetries = 0;
+    const retryCounts = {
+      emojiFlood: 0,
+      repetitionFlood: 0,
+      truncation: 0,
+      grounding: 0,
+      urlGrounding: 0,
+      doNothing: 0,
+    };
     while (true) {
       if (await shouldAbort()) return;
       c++;
@@ -2605,54 +2684,32 @@ export const runAbstractAgent = (
         throw new Error("Agent turn limit safety threshold (200) exceeded.");
       }
       const history = await getHistory();
-      let effectiveHistory = [...history, ...ephemeralHistory];
-      let normalizedHistory = await projectHistoryToModelContext({
-        rawHistory: effectiveHistory,
-        timezoneIANA: spec.timezoneIANA,
+      let normalizedHistory = await projectModelContext(
+        spec,
+        [...history, ...ephemeralHistory],
         scratchPad,
+      );
+
+      const progress = await maybeRunProgressCheck(spec, {
+        c,
+        stopAdviceCount,
+        normalizedHistory,
       });
-
-      const shouldCheckProgress =
-        (c > 0 && maxIterations > 0 && c % maxIterations === 0) ||
-        (stopAdviceCount > 0);
-
-      if (shouldCheckProgress) {
-        console.log(
-          `[agent-progress-check] c=${c} stopAdviceCount=${stopAdviceCount} - running progress check with the bigger model`,
-        );
-        const checkResult = await checkProgress(spec, normalizedHistory);
-        if (!checkResult.shouldContinue) {
-          stopAdviceCount++;
-          if (stopAdviceCount >= 2) {
-            console.log(
-              `[agent-progress-check] stop requested multiple times (${stopAdviceCount}). Escalating to forced user-facing utterance. c=${c}`,
-            );
-            const stopUtterance = forcedStopUtterance;
-            const utteranceEvent = ownUtteranceTurn(stopUtterance);
-            await outputEvent(utteranceEvent);
-            return;
-          }
-          const stopThought = checkResult.thoughtInjection ||
-            stopThoughtDefault;
-          const thoughtEvent = ownThoughtTurn(stopThought);
-          await outputEvent(thoughtEvent);
-          ephemeralHistory = [...ephemeralHistory, thoughtEvent];
-          effectiveHistory = [...history, ...ephemeralHistory];
-          normalizedHistory = await projectHistoryToModelContext({
-            rawHistory: effectiveHistory,
-            timezoneIANA: spec.timezoneIANA,
-            scratchPad,
-          });
-          console.log(
-            `[agent-progress-check] soft stop requested. thought injected. c=${c}`,
-          );
-        } else {
-          console.log(
-            `[agent-progress-check] judged to be good to continue. c=${c}`,
-          );
-          stopAdviceCount = 0;
-        }
+      if (progress.kind === "force-stop") {
+        await outputEvent(ownUtteranceTurn(forcedStopUtterance));
+        return;
       }
+      stopAdviceCount = progress.stopAdviceCount;
+      if (progress.injectedThought) {
+        await outputEvent(progress.injectedThought);
+        ephemeralHistory = [...ephemeralHistory, progress.injectedThought];
+        normalizedHistory = await projectModelContext(
+          spec,
+          [...history, ...ephemeralHistory],
+          scratchPad,
+        );
+      }
+
       console.log(
         `[agent-iter] iter=${c} histLen=${history.length} ephLen=${ephemeralHistory.length} normLen=${normalizedHistory.length}`,
       );
@@ -2661,31 +2718,34 @@ export const runAbstractAgent = (
       const rawModelResponse = await timeit(reportTimeElapsedMs, callModel)(
         normalizedHistory,
       );
+
+      // Ordered post-response gates: each blocked response retries the model
+      // call with a correctional thought (or aborts on persistent flooding).
       if (hasEmojiFlood(rawModelResponse)) {
-        emojiFloodRetries++;
+        retryCounts.emojiFlood++;
         console.warn(
-          `[emoji-flood] detected emoji flood in model response (attempt ${emojiFloodRetries}/${maxEmojiFloodRetries})`,
+          `[emoji-flood] detected emoji flood in model response (attempt ${retryCounts.emojiFlood}/${maxEmojiFloodRetries})`,
         );
-        if (emojiFloodRetries >= maxEmojiFloodRetries) {
+        if (retryCounts.emojiFlood >= maxEmojiFloodRetries) {
           throw new Error("model keeps producing emoji flood responses");
         }
         continue;
       }
       if (hasRepetitionFlood(rawModelResponse)) {
-        repetitionFloodRetries++;
+        retryCounts.repetitionFlood++;
         console.warn(
-          `[repetition-flood] detected repetition flood in model response (attempt ${repetitionFloodRetries}/${maxRepetitionFloodRetries})`,
+          `[repetition-flood] detected repetition flood in model response (attempt ${retryCounts.repetitionFlood}/${maxRepetitionFloodRetries})`,
         );
-        if (repetitionFloodRetries >= maxRepetitionFloodRetries) {
+        if (retryCounts.repetitionFlood >= maxRepetitionFloodRetries) {
           throw new Error("model keeps producing repetition flood responses");
         }
         continue;
       }
       const truncated = findTruncatedUtterance(rawModelResponse);
-      if (truncated && truncationRetries < maxTruncationRetries) {
-        truncationRetries++;
+      if (truncated && retryCounts.truncation < maxTruncationRetries) {
+        retryCounts.truncation++;
         console.warn(
-          `[max-tokens] model response truncated (attempt ${truncationRetries}/${maxTruncationRetries}); retrying with correctional thought`,
+          `[max-tokens] model response truncated (attempt ${retryCounts.truncation}/${maxTruncationRetries}); retrying with correctional thought`,
         );
         ephemeralHistory = [
           ...ephemeralHistory,
@@ -2693,29 +2753,35 @@ export const runAbstractAgent = (
         ];
         continue;
       }
+
       const modelResponse = stripTruncatedFlag(rawModelResponse);
       const { emit, internal } = sanitizeModelOutput(
         normalizedHistory,
         modelResponse,
       );
+      const emitWithDescriptions = withResolvedToolDescriptions(
+        allTools,
+        skillsArr,
+        emit,
+      );
 
-      const utteranceTexts = concludingUtteranceTexts(emit);
-      if (nonempty(utteranceTexts) && groundingRetries < maxGroundingRetries) {
-        const modelThoughts = emit.flatMap((e) =>
-          e.type === "own_thought" ? [e.text] : []
-        );
+      const concludingTexts = concludingUtteranceTexts(emit);
+      if (
+        nonempty(concludingTexts) &&
+        retryCounts.grounding < maxGroundingRetries
+      ) {
         const artifacts = findUngroundedUtteranceArtifacts(
           toolCallGroundTruthTexts(spec, normalizedHistory),
-          utteranceTexts,
-          modelThoughts,
+          concludingTexts,
+          emit.flatMap((e) => (e.type === "own_thought" ? [e.text] : [])),
         );
         if (
           nonempty(artifacts.ungroundedUrls) ||
           nonempty(artifacts.ungroundedPhones)
         ) {
-          groundingRetries++;
+          retryCounts.grounding++;
           console.warn(
-            `[grounding-gate] blocked ungrounded utterance artifacts (attempt ${groundingRetries}/${maxGroundingRetries})`,
+            `[grounding-gate] blocked ungrounded utterance artifacts (attempt ${retryCounts.grounding}/${maxGroundingRetries})`,
           );
           ephemeralHistory = [
             ...ephemeralHistory,
@@ -2724,17 +2790,6 @@ export const runAbstractAgent = (
           continue;
         }
       }
-
-      const emitWithDescriptions = emit.map((event) => {
-        if (event.type !== "tool_call") return event;
-        const desc = resolveToolDescription(
-          allTools,
-          event.name,
-          event.parameters,
-          skillsArr,
-        );
-        return desc ? { ...event, description: desc } : event;
-      });
 
       // CPU-only check; skipped entirely on utterance-only turns.
       const ungroundedHosts = emitWithDescriptions.some((e) =>
@@ -2748,13 +2803,13 @@ export const runAbstractAgent = (
         : [];
       if (
         nonempty(ungroundedHosts) &&
-        urlGroundingRetries < maxUrlGroundingRetries
+        retryCounts.urlGrounding < maxUrlGroundingRetries
       ) {
-        urlGroundingRetries++;
+        retryCounts.urlGrounding++;
         console.warn(
           `[url-grounding-gate] blocked tool call to ungrounded host(s): ${
             ungroundedHosts.join(", ")
-          } (attempt ${urlGroundingRetries}/${maxUrlGroundingRetries})`,
+          } (attempt ${retryCounts.urlGrounding}/${maxUrlGroundingRetries})`,
         );
         ephemeralHistory = [
           ...ephemeralHistory,
@@ -2766,11 +2821,11 @@ export const runAbstractAgent = (
       if (
         emitWithDescriptions.some((e) => e.type === "do_nothing") &&
         hasUnansweredUserMessage(normalizedHistory) &&
-        doNothingRetries < maxDoNothingRetries
+        retryCounts.doNothing < maxDoNothingRetries
       ) {
-        doNothingRetries++;
+        retryCounts.doNothing++;
         console.warn(
-          `[unanswered-user-gate] model chose do_nothing with unanswered user message (attempt ${doNothingRetries}/${maxDoNothingRetries}); retrying with correctional thought`,
+          `[unanswered-user-gate] model chose do_nothing with unanswered user message (attempt ${retryCounts.doNothing}/${maxDoNothingRetries}); retrying with correctional thought`,
         );
         ephemeralHistory = [
           ...ephemeralHistory,
@@ -2793,7 +2848,7 @@ export const runAbstractAgent = (
 
         // We actually yielded things to the outside world, reset ephemeral history
         ephemeralHistory = [];
-        doNothingRetries = 0;
+        retryCounts.doNothing = 0;
 
         const updatedHistory = await getHistory();
         if (scratchPad && spec.rewriteHistory) {
