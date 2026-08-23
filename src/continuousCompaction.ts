@@ -3,7 +3,13 @@ import type { HistoryEvent } from "./agent.ts";
 import { groupToolCallPairs } from "./compaction.ts";
 import { genJson } from "./genJson.ts";
 
-export const getSpillThreshold = (timestamp: number): number => {
+export const getSpillThreshold = (
+  timestamp: number,
+  turnDistance = 0,
+): number => {
+  if (turnDistance >= 2) {
+    return 1500;
+  }
   const ageMs = Date.now() - timestamp;
   const ageMins = ageMs / (60 * 1000);
 
@@ -14,6 +20,14 @@ export const getSpillThreshold = (timestamp: number): number => {
   const decayFactor = Math.exp(-decayConstant * ageMins);
   return Math.round(minThreshold + (maxThreshold - minThreshold) * decayFactor);
 };
+
+const isCompactedToolResult = (text: string | undefined): boolean =>
+  typeof text === "string" &&
+  (text.includes(
+    "Because time has passed, this tool result has been compacted",
+  ) ||
+    text.startsWith("[Because time has passed") ||
+    text.includes("Memory TLDR:"));
 
 const tldrSchema = z.object({
   tldr: z.string().describe(
@@ -57,7 +71,9 @@ export const runToolResultCompaction = async (
     toolResult: HistoryEvent & { type: "tool_result" };
   }[] = [];
 
-  for (const pair of pairs) {
+  for (let i = 0; i < pairs.length; i++) {
+    const pair = pairs[i];
+    const turnDistance = pairs.length - 1 - i;
     const toolCall = pair.find((
       e,
     ): e is Extract<HistoryEvent, { type: "tool_call" }> =>
@@ -70,12 +86,12 @@ export const runToolResultCompaction = async (
     );
 
     if (toolCall && toolResult && toolResult.result) {
-      const threshold = getSpillThreshold(toolResult.timestamp);
+      const threshold = getSpillThreshold(toolResult.timestamp, turnDistance);
 
       // If it exceeds decaying threshold and has not been folded yet
       if (
         toolResult.result.length > threshold &&
-        !toolResult.result.includes("read_scratch_file")
+        !isCompactedToolResult(toolResult.result)
       ) {
         candidates.push({ toolCall, toolResult });
       }

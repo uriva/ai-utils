@@ -2,7 +2,11 @@ import { context, type Injection } from "@uri/inject";
 import { getEncoding } from "js-tiktoken";
 import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
-import { cleanActiveMemoryToolRaw } from "./compaction.ts";
+import {
+  cleanActiveMemoryToolRaw,
+  isCompactedSummaryText,
+  shouldCompactHistory,
+} from "./compaction.ts";
 import { runToolResultCompaction } from "./continuousCompaction.ts";
 import { cleanActiveMemoryToolName } from "./utils.ts";
 import { accessGeminiToken } from "./gemini.ts";
@@ -1985,11 +1989,12 @@ export const normalizeHistoryForModel = (
   const lastParticipantTimestamp = lastParticipantUtterance?.timestamp ?? 0;
 
   const filteredHistory = history.filter((e) => {
-    if (
-      e.type === "own_thought" &&
-      e.text.startsWith(stopThoughtPrefix)
-    ) {
-      return e.timestamp > lastParticipantTimestamp;
+    if (e.type === "own_thought") {
+      if (e.timestamp >= lastParticipantTimestamp) return true;
+      if (typeof e.text === "string" && isCompactedSummaryText(e.text)) {
+        return true;
+      }
+      return false;
     }
     return true;
   });
@@ -2703,6 +2708,13 @@ export const runAbstractAgent = (
         doNothingRetries = 0;
 
         const updatedHistory = await getHistory();
+        if (scratchPad && spec.rewriteHistory) {
+          await runToolResultCompaction(
+            updatedHistory,
+            { setScratch: (id, content) => scratchPad.set(id, content) },
+            spec.rewriteHistory,
+          );
+        }
         if (
           !(emitWithDescriptions.some((ev: HistoryEvent) =>
             ev.type === "tool_call"
@@ -2713,13 +2725,6 @@ export const runAbstractAgent = (
             ev.type === "own_thought"
           )
         ) {
-          if (scratchPad && spec.rewriteHistory) {
-            runToolResultCompaction(
-              updatedHistory,
-              { setScratch: (id, content) => scratchPad.set(id, content) },
-              spec.rewriteHistory,
-            );
-          }
           return;
         }
       } else {
@@ -2739,9 +2744,10 @@ export const scheduleHistoryCompaction = (
   const compactHistory = spec.compactHistory;
   const threshold = spec.historyCompactionTokenThreshold;
   if (!compactHistory || !threshold) return;
-  estimateAgentInputTokens(spec, history).then((totalTokens) => {
-    if (totalTokens <= threshold) return;
-    compactHistory(history);
+  estimateAgentInputTokens(spec, history).then(async (totalTokens) => {
+    if (await shouldCompactHistory(threshold, history, totalTokens)) {
+      compactHistory(history);
+    }
   });
 };
 

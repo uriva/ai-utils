@@ -209,6 +209,26 @@ const trimSegmentToTokenBudget = async (
 // headroom so compaction is infrequent and the per-call input stays small.
 export const compactionRetentionRatio = 0.1;
 
+export const defaultSegmentGapMs = 30 * 60 * 1000;
+export const defaultSettledHistoryTokenThreshold = 6_000;
+
+export const shouldCompactHistory = async (
+  threshold: number,
+  history: HistoryEvent[],
+  totalTokens: number,
+  segmentGapMs: number = defaultSegmentGapMs,
+  settledThreshold: number = defaultSettledHistoryTokenThreshold,
+): Promise<boolean> => {
+  if (totalTokens > threshold) return true;
+  const segments = segmentHistoryEvents(history, segmentGapMs);
+  if (segments.length <= 1) return false;
+  const pastSegments = segments.slice(0, -1);
+  const pastTokensList = await Promise.all(
+    pastSegments.map((s) => accessTokenCounter(s.events)),
+  );
+  return sum(pastTokensList) > settledThreshold;
+};
+
 export const compactionRetentionTokens = (triggerTokens: number): number =>
   Math.floor(triggerTokens * compactionRetentionRatio);
 
