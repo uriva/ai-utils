@@ -384,7 +384,7 @@ Critical Date and Time Grounding Rules:
 const summarizePlainText = async (text: string): Promise<string> =>
   formatStructuredSummary(
     await genJson(
-      { provider: "google", mini: false },
+      { provider: "google", mini: false, disableThinking: true },
       summarizePrompt,
       structuredSummarySchema,
     )(text),

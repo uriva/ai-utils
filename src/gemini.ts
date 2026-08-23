@@ -236,10 +236,18 @@ export const alternateGeminiModelVersion = (model: string) => {
 
 export const geminiThinkingConfig = (
   mini: boolean | undefined,
-): ThinkingConfig => ({
-  includeThoughts: true,
-  ...(mini ? { thinkingLevel: ThinkingLevel.THINKING_LEVEL_UNSPECIFIED } : {}),
-});
+  disableThinking: boolean | undefined = false,
+): ThinkingConfig => {
+  if (disableThinking) {
+    return { thinkingBudget: 0 };
+  }
+  return {
+    includeThoughts: true,
+    ...(mini
+      ? { thinkingLevel: ThinkingLevel.THINKING_LEVEL_UNSPECIFIED }
+      : {}),
+  };
+};
 
 // Parse (and validation-failure) errors must happen INSIDE the cached
 // function: a malformed response body must never be written to the cache,
@@ -266,12 +274,12 @@ const generateContentInjection: Injection<
 export const injectGeminiGenerateContent = generateContentInjection.inject;
 
 export const geminiGenJsonFromConvo: <T extends ZodType>(
-  { mini, maxOutputTokens }: ModelOpts,
+  { mini, maxOutputTokens, disableThinking }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
   attachments?: MediaAttachment[],
 ) => Promise<z.infer<T>> = async <T extends ZodType>(
-  { mini, maxOutputTokens }: ModelOpts,
+  { mini, maxOutputTokens, disableThinking }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
   attachments?: MediaAttachment[],
@@ -306,7 +314,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
       config: {
         responseMimeType: "application/json",
         responseSchema: zodToGeminiParameters(zodType),
-        thinkingConfig: geminiThinkingConfig(mini),
+        thinkingConfig: geminiThinkingConfig(mini, disableThinking),
         ...(maxOutputTokens ? { maxOutputTokens } : {}),
       },
       contents: c,
