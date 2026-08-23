@@ -360,8 +360,6 @@ export type Tool<T extends ZodType> = ToolBase<T> & {
 
 /** @deprecated Use Tool directly — deferred vs regular is determined by handler return value */
 export type RegularTool<T extends ZodType> = Tool<T>;
-/** @deprecated Use Tool directly — deferred vs regular is determined by handler return value */
-export type DeferredTool<T extends ZodType> = Tool<T>;
 
 export type Skill = {
   name: string;
@@ -570,7 +568,6 @@ export const accessOutputEvent = modelOutput.access;
 const streamChunkInjection: Injection<(chunk: string) => Promise<void> | void> =
   context((_chunk: string) => {});
 export const injectStreamChunk = streamChunkInjection.inject;
-export const accessStreamChunk = streamChunkInjection.access;
 export const getStreamChunk = streamChunkInjection.getStore;
 
 const streamThinkingChunkInjection: Injection<

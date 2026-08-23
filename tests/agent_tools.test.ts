@@ -9,12 +9,12 @@ import {
 } from "../mod.ts";
 import { runForAllProviders } from "../test_helpers.ts";
 import {
-  type DeferredTool,
   type HistoryEvent,
   injectCallModel,
   ownThoughtTurnWithMetadata,
   ownUtteranceTurn,
   participantUtteranceTurn,
+  type Tool,
 } from "../src/agent.ts";
 import {
   agentDeps,
@@ -325,7 +325,7 @@ runForAllProviders(
   "deferred tool handler is called with toolCallId and agent exits without emitting tool_result",
   async (runAgentWithProvider) => {
     let capturedToolCallId: string | undefined;
-    const deferredTool: DeferredTool<z.ZodObject<{ ms: z.ZodNumber }>> = {
+    const deferredTool: Tool<z.ZodObject<{ ms: z.ZodNumber }>> = {
       name: "timeout-wakeup",
       description: "Set a timeout to wake up later",
       parameters: z.object({
@@ -444,7 +444,7 @@ runForAllProviders(
 runForAllProviders(
   "stays responsive when a deferred tool_call is still pending and the user sends a new message",
   async (runAgent) => {
-    const deferredTool: DeferredTool<z.ZodObject<{ ms: z.ZodNumber }>> = {
+    const deferredTool: Tool<z.ZodObject<{ ms: z.ZodNumber }>> = {
       name: "timeout-wakeup",
       description: "Set a timeout to wake up later",
       parameters: z.object({ ms: z.number().describe("Milliseconds to wait") }),

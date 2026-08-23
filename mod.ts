@@ -155,7 +155,6 @@ export {
   compileGrepPattern,
   createReadScratchFileTool,
   createSkillTools,
-  type DeferredTool,
   doNothingEvent,
   doNothingTool,
   doNothingToolName,

@@ -124,7 +124,15 @@ const instrumentedFetch: typeof fetch = (input, init) => {
   );
 };
 
-globalThis.fetch = instrumentedFetch;
+// Installed lazily on first Gemini run: patching globalThis.fetch at module
+// import would wrap every consumer's fetch with Gemini logging even when they
+// never touch the Gemini provider.
+let fetchInstrumented = false;
+const instrumentGlobalFetchOnce = () => {
+  if (fetchInstrumented) return;
+  fetchInstrumented = true;
+  globalThis.fetch = instrumentedFetch;
+};
 
 const geminiError: Injection<
   (_1: Error, _2: GenerateContentParameters) => void
@@ -1798,6 +1806,7 @@ const callInnerWithDriftReroll = async (
 export const geminiAgentCaller =
   (spec: AgentSpec) =>
   async (events: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> => {
+    instrumentGlobalFetchOnce();
     const totalTokens = await estimateAgentInputTokens(spec, events);
     if (totalTokens > 1040000) {
       throw new Error(

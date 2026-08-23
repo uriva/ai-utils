@@ -1,16 +1,16 @@
 import { assert } from "@std/assert";
 import { z } from "zod/v4";
 import {
-  type DeferredTool,
   type HistoryEvent,
   ownThoughtTurn,
   ownUtteranceTurn,
   participantUtteranceTurn,
+  type Tool,
   toolResultTurn,
 } from "../src/agent.ts";
 import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
-const downloadVideoTool: DeferredTool<
+const downloadVideoTool: Tool<
   z.ZodObject<{ movie: z.ZodString; time: z.ZodString }>
 > = {
   name: "download_video",
