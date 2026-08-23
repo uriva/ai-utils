@@ -1768,36 +1768,35 @@ const noResponseSuffixPattern = new RegExp(
   "i",
 );
 
+// Shared silence predicates for model-authored text events (utterances and
+// message edits). `stripsToEmpty` matches text made only of brackets, quotes,
+// whitespace and invisible-directional characters; a bare `[no response]` tag
+// or any such empty payload means "I have nothing to say".
 const isOwnTextEvent = (event: HistoryEvent) =>
-  (event.type === "own_utterance" || event.type === "own_edit_message") &&
+  event.type === "own_utterance" || event.type === "own_edit_message";
+
+const stripsToEmpty = (event: HistoryEvent): boolean =>
+  isOwnTextEvent(event) &&
+  !event.text.replace(shellCharsPattern, "") &&
+  empty(event.attachments ?? []);
+
+const isBareNoResponse = (event: HistoryEvent): boolean =>
+  isOwnTextEvent(event) &&
   (noResponsePattern.test(event.text.trim()) ||
-    (event.text.trim() !== "" &&
-      !event.text.replace(shellCharsPattern, "") &&
-      empty(event.attachments ?? [])));
+    (event.text.trim() !== "" && stripsToEmpty(event)));
 
 const cleanNoResponseSuffix = (event: HistoryEvent): HistoryEvent => {
-  if (event.type !== "own_utterance" && event.type !== "own_edit_message") {
-    return event;
-  }
+  if (!isOwnTextEvent(event)) return event;
   return { ...event, text: event.text.replace(noResponseSuffixPattern, "") };
 };
 
 const reclassifyNoResponse = (output: HistoryEvent[]): HistoryEvent[] =>
-  output.map((event) => {
-    if (isOwnTextEvent(event)) return doNothingEvent();
-    return cleanNoResponseSuffix(event);
-  });
-
-const isEmptyUtterance = (event: HistoryEvent) => {
-  if (event.type !== "own_utterance" && event.type !== "own_edit_message") {
-    return false;
-  }
-  const stripped = event.text.replace(shellCharsPattern, "");
-  return !stripped && empty(event.attachments ?? []);
-};
+  output.map((event) =>
+    isBareNoResponse(event) ? doNothingEvent() : cleanNoResponseSuffix(event)
+  );
 
 const reclassifyEmptyUtterances = (output: HistoryEvent[]): HistoryEvent[] =>
-  output.filter((event) => !isEmptyUtterance(event));
+  output.filter((event) => !stripsToEmpty(event));
 
 const participantNamesFromHistory = (history: HistoryEvent[]): Set<string> =>
   new Set(

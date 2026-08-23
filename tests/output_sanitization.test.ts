@@ -1,6 +1,7 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import {
   callToResult,
+  noResponseTag,
   ownUtteranceTurn,
   participantUtteranceTurn,
   sanitizeModelOutput,
@@ -417,4 +418,22 @@ Deno.test("sanitizeModelOutput splits and reclassifies paragraph-level tool narr
   }
   assertEquals(thought.text, narration);
   assertEquals(utterance.text, preamble);
+});
+
+Deno.test("sanitizeModelOutput converts a bare [no response] utterance into do_nothing", () => {
+  const { emit } = sanitizeModelOutput([], [ownUtteranceTurn(noResponseTag)]);
+  assertEquals(emit.length, 1);
+  assertEquals(emit[0].type, "do_nothing");
+});
+
+Deno.test("sanitizeModelOutput drops a whitespace-only own_utterance instead of emitting it", () => {
+  const { emit } = sanitizeModelOutput(
+    [],
+    [ownUtteranceTurn("   \t  ")],
+  );
+  assertEquals(
+    emit.filter((e) => e.type === "own_utterance").length,
+    0,
+    "whitespace-only utterances must not reach the user",
+  );
 });
