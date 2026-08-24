@@ -83,68 +83,17 @@ import {
 import { assertNoScriptDrift } from "./scriptDriftGuard.ts";
 import { isCompactedSummaryText } from "./compaction.ts";
 
-const fetchUrl = (input: RequestInfo | URL): string =>
-  typeof input === "string"
-    ? input
-    : input instanceof URL
-    ? input.href
-    : input.url;
-
-const fetchPath = (url: string): string =>
-  URL.canParse(url) ? new URL(url).pathname : url.slice(0, 80);
-
-const isGoogleApi = (url: string) => url.includes("googleapis.com");
-
-const originalFetch = globalThis.fetch;
-
-const instrumentedFetch: typeof fetch = (input, init) => {
-  const url = fetchUrl(input);
-  if (!isGoogleApi(url)) return originalFetch(input, init);
-  const path = fetchPath(url);
-  const t0 = Date.now();
-  logGemini(`[gemini-fetch] start ${path}`);
-  return originalFetch(input, init).then(
-    (res) => {
-      logGemini(
-        `[gemini-fetch] headers ${path} status=${res.status} ttfbMs=${
-          Date.now() - t0
-        }`,
-      );
-      return res;
-    },
-    (err) => {
-      const { name, message } = errorDetails(err);
-      console.warn(
-        `[gemini-fetch] error ${path} elapsedMs=${
-          Date.now() - t0
-        } name=${name} msg=${message}`,
-      );
-      throw err;
-    },
-  );
-};
-
-// Installed lazily on first Gemini run: patching globalThis.fetch at module
-// import would wrap every consumer's fetch with Gemini logging even when they
-// never touch the Gemini provider.
-let fetchInstrumented = false;
-const instrumentGlobalFetchOnce = () => {
-  if (fetchInstrumented) return;
-  fetchInstrumented = true;
-  globalThis.fetch = instrumentedFetch;
-};
-
-const geminiError: Injection<
-  (_1: Error, _2: GenerateContentParameters) => void
-> = context((_1: Error, _2: GenerateContentParameters) => {});
-
-// Verbose [gemini-fetch]/[gemini-step]/[gemini-diag] request logging. On by
+// Verbose [gemini-step]/[gemini-diag] request logging. On by
 // default; tests and noise-sensitive consumers can silence or redirect it.
 const geminiLog: Injection<(line: string) => void> = context((line: string) =>
   console.log(line)
 );
 
 const logGemini = geminiLog.access;
+
+const geminiError: Injection<
+  (_1: Error, _2: GenerateContentParameters) => void
+> = context((_1: Error, _2: GenerateContentParameters) => {});
 
 export const injectGeminiErrorLogger = geminiError.inject;
 
@@ -1806,7 +1755,6 @@ const callInnerWithDriftReroll = async (
 export const geminiAgentCaller =
   (spec: AgentSpec) =>
   async (events: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> => {
-    instrumentGlobalFetchOnce();
     const totalTokens = await estimateAgentInputTokens(spec, events);
     if (totalTokens > 1040000) {
       throw new Error(
