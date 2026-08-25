@@ -1,10 +1,19 @@
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
+import { empty } from "gamla";
 import type { z, ZodType } from "zod/v4";
 import type { MediaAttachment } from "./agent.ts";
 import { geminiGenJsonFromConvo } from "./gemini.ts";
+import { kimiGenJsonFromConvo } from "./kimiJson.ts";
 import { openAiGenJsonFromConvo, structuredMsgs } from "./openai.ts";
-import type { ModelOpts } from "./utils.ts";
+import {
+  invalidGenJsonMessage,
+  isGeminiBlockedError,
+  type ModelOpts,
+  validateAgainstSchema,
+} from "./utils.ts";
 import { assertNoScriptDrift } from "./scriptDriftGuard.ts";
+
+export { invalidGenJsonMessage };
 
 const messagesToText = (messages: ChatCompletionMessageParam[]): string =>
   messages
@@ -25,19 +34,18 @@ const guardGeminiScriptDrift = async <R>(
 
 const maxScriptDriftRerolls = 2;
 
-export const invalidGenJsonMessage =
-  "genJson result did not match the requested schema";
-
-const validateAgainstSchema = <T extends ZodType>(
+const routeGeminiWithKimiBlockedFallback = <T extends ZodType>(
+  opts: ModelOpts,
+  messages: ChatCompletionMessageParam[],
   zodType: T,
-  result: unknown,
-): z.infer<T> => {
-  const parsed = zodType.safeParse(result);
-  if (!parsed.success) {
-    throw new Error(`${invalidGenJsonMessage}: ${parsed.error.message}`);
-  }
-  return parsed.data;
-};
+  attachments?: MediaAttachment[],
+): Promise<z.infer<T>> =>
+  geminiGenJsonFromConvo(opts, messages, zodType, attachments)
+    .catch((e: unknown): Promise<z.infer<T>> =>
+      empty(attachments ?? []) && isGeminiBlockedError(e)
+        ? kimiGenJsonFromConvo(opts, messages, zodType)
+        : Promise.reject(e)
+    );
 
 export const genJsonFromConvo = async <T extends ZodType>(
   opts: ModelOpts,
@@ -54,7 +62,7 @@ export const genJsonFromConvo = async <T extends ZodType>(
   }
   for (let attempt = 0; attempt <= maxScriptDriftRerolls; attempt++) {
     try {
-      const result = await geminiGenJsonFromConvo(
+      const result = await routeGeminiWithKimiBlockedFallback(
         opts,
         messages,
         zodType,

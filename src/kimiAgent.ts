@@ -1,6 +1,5 @@
-import { context, type Injection, type Injector } from "@uri/inject";
 import { conditionalRetry, empty, map, sum } from "gamla";
-import { OpenAI } from "openai";
+import type { OpenAI } from "openai";
 import type {
   ChatCompletionMessageParam,
   ChatCompletionTool,
@@ -34,6 +33,9 @@ import {
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
 import { isRetryableError, normalizeError } from "./utils.ts";
+import { injectKimiToken, kimiClient, kimiModelVersion } from "./kimiJson.ts";
+
+export { injectKimiToken };
 
 import { encodeBase64 } from "@std/encoding/base64";
 const fetchFileAttachment = async (
@@ -56,15 +58,6 @@ const fetchFileAttachment = async (
     return null;
   }
 };
-
-const kimiApiKeyInjection: Injection<() => string> = context((): string => {
-  throw new Error("no kimi API key injected");
-});
-
-export const injectKimiToken = (token: string): Injector =>
-  kimiApiKeyInjection.inject(() => token);
-
-const kimiModelVersion = "kimi-k2.7-code";
 
 const isTokenLimitExceeded = (error: Error) =>
   "status" in error && (error as { status: number }).status === 400 &&
@@ -426,10 +419,7 @@ const rawCallKimi = async ({
   const handleStreamChunk = getStreamChunk();
   const handleStreamThinkingChunk = getStreamThinkingChunk();
 
-  const client = new OpenAI({
-    apiKey: kimiApiKeyInjection.access(),
-    baseURL: "https://api.moonshot.ai/v1",
-  });
+  const client = kimiClient();
 
   if (disableStreaming) {
     const response = await client.chat.completions.create({

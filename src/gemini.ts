@@ -12,6 +12,7 @@ import { context, type Injection, type Injector } from "@uri/inject";
 import { coerce, conditionalRetry, empty, map, pipe, remove } from "gamla";
 import {
   emptyGeminiCandidateMessage,
+  geminiBlockedMessage,
   is403PermissionError,
   isInvalidArgumentError,
   isRetryableError,
@@ -253,6 +254,10 @@ export const geminiThinkingConfig = (
 // function: a malformed response body must never be written to the cache,
 // or every later call for the same input replays the poisoned payload.
 const parseGenJsonResponse = (response: GenerateContentResponse) => {
+  const blockReason = response.promptFeedback?.blockReason;
+  if (blockReason) {
+    throw new Error(geminiBlockedMessage(blockReason));
+  }
   if (response.candidates?.[0]?.finishReason === "MAX_TOKENS") {
     throw new Error(
       "Gemini response truncated due to MAX_TOKENS limit",

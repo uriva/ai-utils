@@ -1,4 +1,5 @@
 import { type EitherOutput, type Func, throwerCatcher } from "gamla";
+import type { z, ZodType } from "zod/v4";
 
 export type ModelOpts = {
   mini: boolean;
@@ -63,6 +64,28 @@ export const emptyGeminiCandidateMessage =
 
 export const isEmptyGeminiCandidateError = (error: unknown) =>
   normalizeError(error).message.includes(emptyGeminiCandidateMessage);
+
+const geminiBlockedPrefix = "Gemini request blocked with reason:";
+
+export const geminiBlockedMessage = (blockReason: string) =>
+  `${geminiBlockedPrefix} ${blockReason}`;
+
+export const isGeminiBlockedError = (error: unknown) =>
+  normalizeError(error).message.startsWith(geminiBlockedPrefix);
+
+export const invalidGenJsonMessage =
+  "genJson result did not match the requested schema";
+
+export const validateAgainstSchema = <T extends ZodType>(
+  zodType: T,
+  result: unknown,
+): z.infer<T> => {
+  const parsed = zodType.safeParse(result);
+  if (!parsed.success) {
+    throw new Error(`${invalidGenJsonMessage}: ${parsed.error.message}`);
+  }
+  return parsed.data;
+};
 
 export const is403PermissionError = (error: unknown) => {
   const norm = normalizeError(error);

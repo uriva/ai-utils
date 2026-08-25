@@ -271,7 +271,7 @@ export {
   genJsonOverride,
   invalidGenJsonMessage,
 } from "./src/genJson.ts";
-export { injectKimiToken } from "./src/kimiAgent.ts";
+export { injectKimiToken, kimiGenJsonFromConvo } from "./src/kimiJson.ts";
 export { injectOpenAiToken } from "./src/openai.ts";
 export {
   assertNoScriptDrift,
