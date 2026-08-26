@@ -50,7 +50,7 @@ type PendingTurn = {
   timeout: number;
 };
 
-const defaultModel = "models/gemini-2.5-flash-native-audio-latest";
+const defaultModel = "models/gemini-3.1-flash-live-preview";
 const defaultTurnTimeoutMs = 45_000;
 
 const decodeWsData = async (data: string | Blob): Promise<string> =>
@@ -360,7 +360,7 @@ export const createAudioSession = async ({
       const wait = waitForEvents();
       ws.send(JSON.stringify({
         realtimeInput: {
-          mediaChunks: [{ mimeType, data: dataBase64 }],
+          audio: { mimeType, data: dataBase64 },
         },
       }));
       return await wait;
@@ -376,7 +376,7 @@ export const createAudioSession = async ({
       for (const chunk of chunks) {
         ws.send(JSON.stringify({
           realtimeInput: {
-            mediaChunks: [{ mimeType: chunk.mimeType, data: chunk.dataBase64 }],
+            audio: { mimeType: chunk.mimeType, data: chunk.dataBase64 },
           },
         }));
         await new Promise((resolve) => setTimeout(resolve, 40));
@@ -392,7 +392,7 @@ export const createAudioSession = async ({
       for (const chunk of chunks) {
         const payload = {
           realtimeInput: {
-            mediaChunks: [{ mimeType: chunk.mimeType, data: chunk.dataBase64 }],
+            audio: { mimeType: chunk.mimeType, data: chunk.dataBase64 },
           },
         };
         ws.send(JSON.stringify(payload));
