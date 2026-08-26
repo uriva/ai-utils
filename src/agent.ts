@@ -1949,6 +1949,35 @@ const laterUnansweredUserMessage = (
 // renders as a `[System notification: ...]` user-role part, which
 // `invisibleToolUseInstruction` marks as a highly authoritative platform
 // instruction the model must follow immediately.
+// Platform-injected notes (proactive task deliveries, audits, injected
+// context) accumulate in bot-driven conversations where the user rarely
+// replies, because retention is anchored to the last participant message.
+// Past this age a surviving plain thought folds into a one-line digest: what
+// happened and roughly when stay visible, the full text stops being re-sent
+// on every model call. Recent notes keep their full text so active-task
+// instructions survive their execution window; compaction summaries and
+// native model thoughts (signed or not) are never touched.
+export const stalePlainThoughtRetentionMs = 30 * 60 * 1000;
+
+const staleThoughtDigestMaxChars = 120;
+
+export const stalePlainThoughtDigest = (text: string, timestamp: number) =>
+  `[Earlier platform notification (${
+    new Date(timestamp).toISOString().slice(0, 10)
+  }): ${text.replace(/\s+/g, " ").slice(0, staleThoughtDigestMaxChars)}…]`;
+
+const digestStalePlainThought = (
+  lastParticipantTimestamp: number,
+) =>
+(e: HistoryEvent): HistoryEvent => {
+  if (e.type !== "own_thought") return e;
+  if (e.modelMetadata) return e;
+  if (isCompactedSummaryText(e.text)) return e;
+  if (Date.now() - e.timestamp <= stalePlainThoughtRetentionMs) return e;
+  if (e.timestamp < lastParticipantTimestamp) return e;
+  return { ...e, text: stalePlainThoughtDigest(e.text, e.timestamp) };
+};
+
 const pendingDeferredUserWaitingNotification =
   "A background task you started earlier is still pending, but the user has " +
   "sent a new message since then. Respond to the user's latest message now. " +
@@ -1979,7 +2008,11 @@ export const normalizeHistoryForModel = (
   );
   const lastParticipantTimestamp = lastParticipantUtterance?.timestamp ?? 0;
 
-  const filteredHistory = history.filter((e) => {
+  const digestedHistory = history.map(
+    digestStalePlainThought(lastParticipantTimestamp),
+  );
+
+  const filteredHistory = digestedHistory.filter((e) => {
     if (e.type === "own_thought") {
       if (e.timestamp >= lastParticipantTimestamp) return true;
       if (typeof e.text === "string" && isCompactedSummaryText(e.text)) {
