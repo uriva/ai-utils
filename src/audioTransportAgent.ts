@@ -342,7 +342,6 @@ const createSessionConfig = (
     isReconnecting: boolean;
     reconnectTimestamps: number[];
     loggedFirstAudioOut: boolean;
-    vadTimeout: number | undefined;
     session: Awaited<ReturnType<typeof createAudioSession>> | undefined;
     resolveLoop: (() => void) | undefined;
     reconnect: () => void;
@@ -473,7 +472,6 @@ export const runAudioAgentLoop = async (
     isReconnecting: false,
     reconnectTimestamps: [] as number[],
     loggedFirstAudioOut: false,
-    vadTimeout: undefined as number | undefined,
     session: undefined as
       | Awaited<ReturnType<typeof createAudioSession>>
       | undefined,
@@ -493,7 +491,6 @@ export const runAudioAgentLoop = async (
           }s) reached, closing call`,
         );
         state.isClosed = true;
-        clearTimeout(state.vadTimeout);
         void endpoint.sendData({
           type: "close",
           from: typedSpec.transport.participantName,
@@ -504,8 +501,6 @@ export const runAudioAgentLoop = async (
       state.isReconnecting = true;
       state.reconnectTimestamps.push(now);
       state.loggedFirstAudioOut = false;
-      clearTimeout(state.vadTimeout);
-      state.vadTimeout = undefined;
       const attemptsInWindow = state.reconnectTimestamps.length;
       const delay = Math.min(
         reconnectBaseDelayMs * Math.pow(2, attemptsInWindow - 1),
@@ -556,7 +551,6 @@ export const runAudioAgentLoop = async (
       if (message.type === "close") {
         console.log("[audio] session closed");
         state.isClosed = true;
-        clearTimeout(state.vadTimeout);
         state.flushPendingUtterance();
         await state.session?.close();
         resolve();
@@ -590,26 +584,6 @@ export const runAudioAgentLoop = async (
             });
           }
           if (chunksToStream.length > 0) {
-            const testBuf = new Int16Array(
-              base64ToBytes(chunksToStream[0].dataBase64).buffer,
-            );
-            let sumSq = 0;
-            for (let i = 0; i < testBuf.length; i++) {
-              sumSq += testBuf[i] * testBuf[i];
-            }
-            const rms = Math.sqrt(sumSq / testBuf.length);
-
-            if (rms > 250) {
-              clearTimeout(state.vadTimeout);
-              state.vadTimeout = globalThis.setTimeout(() => {
-                state.session?.commitTurn();
-              }, 1500) as unknown as number;
-            } else if (!state.vadTimeout) {
-              state.vadTimeout = globalThis.setTimeout(() => {
-                state.session?.commitTurn();
-              }, 1500) as unknown as number;
-            }
-
             state.session.streamAudioChunks(chunksToStream);
           }
         }

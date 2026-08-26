@@ -50,7 +50,7 @@ type PendingTurn = {
   timeout: number;
 };
 
-const defaultModel = "models/gemini-3.1-flash-live-preview";
+const defaultModel = "models/gemini-2.5-flash-native-audio-latest";
 const defaultTurnTimeoutMs = 45_000;
 
 const decodeWsData = async (data: string | Blob): Promise<string> =>
@@ -135,7 +135,6 @@ export const createAudioSession = async ({
   let bufferedEvents: AudioSessionEvent[] = [];
   let toolCallPending = false;
   let pendingToolCount = 0;
-  const isNative = model.includes("native") || model.includes("gemini-3.1");
   const debug = (message: string) => {
     onDebug?.({ type: "debug", message });
   };
@@ -156,13 +155,11 @@ export const createAudioSession = async ({
           model,
           generationConfig: {
             responseModalities: ["AUDIO"],
-            ...(isNative ? {} : {
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: { voiceName },
-                },
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName },
               },
-            }),
+            },
           },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
@@ -363,7 +360,7 @@ export const createAudioSession = async ({
       const wait = waitForEvents();
       ws.send(JSON.stringify({
         realtimeInput: {
-          audio: { mimeType, data: dataBase64 },
+          mediaChunks: [{ mimeType, data: dataBase64 }],
         },
       }));
       return await wait;
@@ -379,16 +376,14 @@ export const createAudioSession = async ({
       for (const chunk of chunks) {
         ws.send(JSON.stringify({
           realtimeInput: {
-            audio: { mimeType: chunk.mimeType, data: chunk.dataBase64 },
+            mediaChunks: [{ mimeType: chunk.mimeType, data: chunk.dataBase64 }],
           },
         }));
         await new Promise((resolve) => setTimeout(resolve, 40));
       }
-      if (!isNative) {
-        ws.send(JSON.stringify({
-          clientContent: { turns: [], turnComplete: true },
-        }));
-      }
+      ws.send(JSON.stringify({
+        clientContent: { turnComplete: true },
+      }));
       return await wait;
     },
     streamAudioChunks: (chunks: LiveAudioChunk[]) => {
@@ -397,38 +392,14 @@ export const createAudioSession = async ({
       for (const chunk of chunks) {
         const payload = {
           realtimeInput: {
-            audio: { mimeType: chunk.mimeType, data: chunk.dataBase64 },
+            mediaChunks: [{ mimeType: chunk.mimeType, data: chunk.dataBase64 }],
           },
         };
         ws.send(JSON.stringify(payload));
       }
     },
     commitTurn: () => {
-      if (toolCallPending) return;
-      debug("commitTurn manually triggered");
-      if (ws.readyState === WebSocket.OPEN) {
-        if (!isNative) {
-          ws.send(JSON.stringify({
-            clientContent: { turns: [], turnComplete: true },
-          }));
-        } else {
-          // For gemini-3.1 which lacks turnComplete, send 2s of silence to trigger VAD
-          const silentBuf = new Uint8Array(24000 * 2 * 2);
-          let binary = "";
-          const chunk = 8192;
-          for (let i = 0; i < silentBuf.length; i += chunk) {
-            binary += String.fromCharCode.apply(
-              null,
-              silentBuf.subarray(i, i + chunk) as unknown as number[],
-            );
-          }
-          ws.send(JSON.stringify({
-            realtimeInput: {
-              audio: { mimeType: "audio/pcm;rate=24000", data: btoa(binary) },
-            },
-          }));
-        }
-      }
+      // Gemini Live natively detects turn completion via server-side VAD
     },
     continueTurn: async () => {
       if (!activeTurn) return [];
