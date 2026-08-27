@@ -1,7 +1,6 @@
 import {
   accessOutputEvent,
   type AgentSpec,
-  createSkillTools,
   handleFunctionCalls,
   type HistoryEvent,
   invisibleToolUseInstruction,
@@ -333,6 +332,33 @@ const reconnectWindowMs = 60_000;
 const reconnectBaseDelayMs = 500;
 const reconnectMaxDelayMs = 8_000;
 
+const formatAudioSkillsPrompt = (skills?: AgentSpec["skills"]): string => {
+  if (!skills || skills.length === 0) return "";
+  return "\n\nAvailable Skills and Instructions:\n" + skills.map((s) => {
+    const toolsDesc = s.tools.length > 0
+      ? "\n  Tools:\n" +
+        s.tools.map((t) => `    - ${t.name}: ${t.description}`).join("\n")
+      : "";
+    return `### Skill: ${s.name}\n${s.instructions}${toolsDesc}`;
+  }).join("\n\n");
+};
+
+const collectAllAudioTools = (
+  // deno-lint-ignore no-explicit-any
+  specTools: Tool<any>[],
+  skills?: AgentSpec["skills"],
+  // deno-lint-ignore no-explicit-any
+): Tool<any>[] => {
+  const flatSkillTools = (skills ?? []).flatMap((s) => s.tools);
+  const combined = [...specTools, ...flatSkillTools];
+  const seen = new Set<string>();
+  return combined.filter((t) => {
+    if (seen.has(t.name)) return false;
+    seen.add(t.name);
+    return true;
+  });
+};
+
 const createSessionConfig = (
   spec: AgentSpec & { transport: { kind: "audio" } },
   endpoint: DuplexEndpoint,
@@ -402,13 +428,13 @@ const createSessionConfig = (
     },
   });
   state.flushPendingUtterance = sessionHandler.flushPending;
+  const allTools = collectAllAudioTools(spec.tools, spec.skills);
+  const skillsPrompt = formatAudioSkillsPrompt(spec.skills);
   return {
     apiKey: accessGeminiToken(),
-    prompt: `${spec.prompt}\n\n${invisibleToolUseInstruction}`,
+    prompt: `${spec.prompt}${skillsPrompt}\n\n${invisibleToolUseInstruction}`,
     voiceName: spec.transport.voiceName,
-    tools: spec.skills && spec.skills.length > 0
-      ? [...spec.tools, ...createSkillTools(spec.skills)]
-      : spec.tools,
+    tools: allTools,
     onDebug: (msg) => {
       // Only log Bob's debug to see what's happening
       const msgStr = typeof msg === "string" ? msg : JSON.stringify(msg);
@@ -449,9 +475,7 @@ const processTurnOutput = async (
   if (!wasInterrupted) {
     await emitNonUtteranceEvents(outputEvent, sessionOutput);
   }
-  const allTools = spec.skills && spec.skills.length > 0
-    ? [...spec.tools, ...createSkillTools(spec.skills)]
-    : spec.tools;
+  const allTools = collectAllAudioTools(spec.tools, spec.skills);
   await resolveToolCalls(session, allTools, sessionOutput);
 };
 

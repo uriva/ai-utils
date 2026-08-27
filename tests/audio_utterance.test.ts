@@ -179,6 +179,83 @@ Deno.test({
   }),
 });
 
+Deno.test({
+  name: "audio agent uses skill tools via real Gemini session",
+  ignore: !canRunLiveGemini,
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: injectSecrets(async () => {
+    const { left: testEndpoint, right: agentEndpoint } = createDuplexPair();
+    const outputEvents: HistoryEvent[] = [];
+
+    const agentTask = runAgent({
+      prompt:
+        "You are a helpful weather assistant. When asked about weather or temperature in a city, you MUST call check_temp to look it up.",
+      tools: [],
+      skills: [
+        {
+          name: "weather_skill",
+          description: "Weather information skill",
+          instructions:
+            "Use the weather_skill/check_temp tool to look up city temperatures.",
+          tools: [
+            tool({
+              name: "check_temp",
+              description: "Check the temperature of a city in Celsius",
+              parameters: z.object({ city: z.string() }),
+              handler: ({ city }) => Promise.resolve(`25°C in ${city}`),
+            }),
+          ],
+        },
+      ],
+      maxIterations: 3,
+      timezoneIANA: "UTC",
+      transport: {
+        kind: "audio" as const,
+        endpoint: agentEndpoint,
+        voiceName: "Zephyr",
+        participantName: "User",
+      },
+      onOutputEvent: (event) => {
+        outputEvents.push(event);
+        return Promise.resolve();
+      },
+      rewriteHistory: async () => {},
+    });
+
+    await testEndpoint.sendData({
+      type: "text",
+      text: "What is the temperature in Tokyo right now? Look it up.",
+      from: "tester",
+    });
+
+    await waitForCondition(
+      () =>
+        outputEvents.some((e) =>
+          e.type === "tool_call" &&
+          (e.name === "run_command" || e.name === "check_temp")
+        ),
+      60_000,
+    );
+
+    await testEndpoint.sendData({ type: "close", from: "tester" });
+    await agentTask;
+
+    const hasSkillToolCall = outputEvents.some((e) =>
+      e.type === "tool_call" &&
+      (e.name === "run_command" || e.name === "check_temp")
+    );
+    assert(
+      hasSkillToolCall,
+      `Expected skill tool call, got: ${
+        outputEvents.map((e) =>
+          e.type === "tool_call" ? `tool_call:${e.name}` : e.type
+        ).join(", ")
+      }`,
+    );
+  }),
+});
+
 Deno.test("spokenReplyOnly strips reasoning preamble", () => {
   assertEquals(spokenReplyOnly("Hello, how are you?"), "Hello, how are you?");
   assertEquals(
