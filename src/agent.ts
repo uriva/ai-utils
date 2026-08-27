@@ -1030,9 +1030,19 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
     normalizedArgs = { ...rest, skillName: skill };
   }
 
+  const bareName =
+    (normalizedName.includes("/") || normalizedName.includes(":"))
+      ? normalizedName.slice(
+        Math.max(
+          normalizedName.lastIndexOf("/"),
+          normalizedName.lastIndexOf(":"),
+        ) + 1,
+      )
+      : normalizedName;
+
   const directMatch: Tool<T> | undefined = actions.find((
     { name: n },
-  ) => n === normalizedName);
+  ) => n === normalizedName || n === bareName);
   const slashSkillCall = !directMatch &&
     (normalizedName.includes("/") || normalizedName.includes(":"));
   const unambiguousBare = !directMatch && !slashSkillCall

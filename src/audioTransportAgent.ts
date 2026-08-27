@@ -345,7 +345,40 @@ const formatAudioSkillsPrompt = (skills?: AgentSpec["skills"]): string => {
       .join("\n");
 };
 
-const maxAudioTools = 65;
+const primaryAudioSkillNames = new Set([
+  "gmail",
+  "web",
+  "task_management",
+  "todo",
+  "scheduling",
+  "google-docs",
+  "google-drive",
+  "agentdocs",
+  "secrets_and_variables",
+  "github",
+  "composio",
+]);
+
+const isInternalScriptHelper = (name: string): boolean =>
+  name.startsWith("view_script") ||
+  name.startsWith("loadIdentity") ||
+  name.startsWith("buildAuth") ||
+  name.startsWith("buildGrant") ||
+  name.startsWith("signed") ||
+  name.startsWith("decrypt") ||
+  name.startsWith("authHeader") ||
+  name.startsWith("githubHeaders") ||
+  name.startsWith("repoPath") ||
+  name.startsWith("branchRef") ||
+  name.startsWith("instructionFile") ||
+  name.startsWith("repoInstructions") ||
+  name.startsWith("patchText") ||
+  name.startsWith("denoDeployHeaders") ||
+  name.startsWith("appPath") ||
+  name.startsWith("encodeRfc") ||
+  name.startsWith("buildMime");
+
+const maxAudioTools = 75;
 
 const collectAllAudioTools = (
   // deno-lint-ignore no-explicit-any
@@ -353,11 +386,17 @@ const collectAllAudioTools = (
   skills?: AgentSpec["skills"],
   // deno-lint-ignore no-explicit-any
 ): Tool<any>[] => {
-  const flatSkillTools = (skills ?? []).flatMap((s) => s.tools);
-  const combined = [...specTools, ...flatSkillTools];
+  const allSkills = skills ?? [];
+  const primaryTools = allSkills
+    .filter((s) => primaryAudioSkillNames.has(s.name.replace(/@.*/, "")))
+    .flatMap((s) => s.tools);
+  const otherTools = allSkills
+    .filter((s) => !primaryAudioSkillNames.has(s.name.replace(/@.*/, "")))
+    .flatMap((s) => s.tools);
+  const combined = [...specTools, ...primaryTools, ...otherTools];
   const seen = new Set<string>();
   const deduped = combined.filter((t) => {
-    if (seen.has(t.name)) return false;
+    if (seen.has(t.name) || isInternalScriptHelper(t.name)) return false;
     seen.add(t.name);
     return true;
   });
