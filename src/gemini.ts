@@ -56,6 +56,8 @@ const removeAdditionalProperties = <T>(obj: Record<string, any>) => {
     delete newObj.additionalProperties;
     delete newObj.default;
     delete newObj.$schema;
+    delete newObj.propertyNames;
+    delete newObj.patternProperties;
 
     if (newObj.const !== undefined) {
       newObj.enum = [newObj.const];
