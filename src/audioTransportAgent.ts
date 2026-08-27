@@ -344,6 +344,8 @@ const formatAudioSkillsPrompt = (skills?: AgentSpec["skills"]): string => {
     }).join("\n\n");
 };
 
+const maxAudioTools = 100;
+
 const collectAllAudioTools = (
   // deno-lint-ignore no-explicit-any
   specTools: Tool<any>[],
@@ -353,11 +355,12 @@ const collectAllAudioTools = (
   const flatSkillTools = (skills ?? []).flatMap((s) => s.tools);
   const combined = [...specTools, ...flatSkillTools];
   const seen = new Set<string>();
-  return combined.filter((t) => {
+  const deduped = combined.filter((t) => {
     if (seen.has(t.name)) return false;
     seen.add(t.name);
     return true;
   });
+  return deduped.slice(0, maxAudioTools);
 };
 
 const createSessionConfig = (
