@@ -351,20 +351,20 @@ const formatAudioSkillsPrompt = (skills?: AgentSpec["skills"]): string => {
       .join("\n");
 };
 
-const primaryAudioSkillNames = new Set([
+const primaryAudioSkillOrder = [
   "gmail",
   "web",
-  "safescript",
   "task_management",
   "todo",
   "scheduling",
+  "safescript",
   "google-docs",
   "google-drive",
   "agentdocs",
   "secrets_and_variables",
   "github",
   "composio",
-]);
+];
 
 const isInternalScriptHelper = (name: string): boolean =>
   name.startsWith("view_script") ||
@@ -385,7 +385,7 @@ const isInternalScriptHelper = (name: string): boolean =>
   name.startsWith("encodeRfc") ||
   name.startsWith("buildMime");
 
-const maxAudioTools = 75;
+const maxAudioTools = 55;
 
 const collectAllAudioTools = (
   // deno-lint-ignore no-explicit-any
@@ -394,13 +394,20 @@ const collectAllAudioTools = (
   // deno-lint-ignore no-explicit-any
 ): Tool<any>[] => {
   const allSkills = skills ?? [];
-  const primaryTools = allSkills
-    .filter((s) => primaryAudioSkillNames.has(s.name.replace(/@.*/, "")))
+  const skillMap = new Map(
+    allSkills.map((s) => [s.name.replace(/@.*/, ""), s]),
+  );
+  const orderedPrimaryTools = primaryAudioSkillOrder.flatMap(
+    (name) => skillMap.get(name)?.tools ?? [],
+  );
+  const remainingSkillTools = allSkills
+    .filter((s) => !primaryAudioSkillOrder.includes(s.name.replace(/@.*/, "")))
     .flatMap((s) => s.tools);
-  const otherTools = allSkills
-    .filter((s) => !primaryAudioSkillNames.has(s.name.replace(/@.*/, "")))
-    .flatMap((s) => s.tools);
-  const combined = [...specTools, ...primaryTools, ...otherTools];
+  const combined = [
+    ...specTools,
+    ...orderedPrimaryTools,
+    ...remainingSkillTools,
+  ];
   const seen = new Set<string>();
   const deduped = combined.filter((t) => {
     if (seen.has(t.name) || isInternalScriptHelper(t.name)) return false;
