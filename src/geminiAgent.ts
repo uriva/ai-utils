@@ -2,6 +2,7 @@ import {
   type Content,
   type FunctionCall,
   FunctionCallingConfigMode,
+  type FunctionDeclaration,
   type GenerateContentParameters,
   type GenerateContentResponseUsageMetadata,
   GoogleGenAI,
@@ -82,6 +83,11 @@ import {
 } from "./utils.ts";
 import { assertNoScriptDrift } from "./scriptDriftGuard.ts";
 import { isCompactedSummaryText } from "./compaction.ts";
+import {
+  getOrCreateGeminiContextCache,
+  invalidateGeminiContextCache,
+  isGeminiContextCachingEnabled,
+} from "./geminiContextCache.ts";
 
 // Verbose [gemini-step]/[gemini-diag] request logging. On by
 // default; tests and noise-sensitive consumers can silence or redirect it.
@@ -396,107 +402,167 @@ const geminiSdkExchange = async (
   const handleStreamChunk = getStreamChunk();
   const handleStreamThinkingChunk = getStreamThinkingChunk();
   const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
+
+  const rawSysInstr = req.config?.systemInstruction;
+  const rawTools = req.config?.tools as {
+    functionDeclarations?: FunctionDeclaration[];
+  }[] | undefined;
+  const rawToolConfig = req.config?.toolConfig;
+  let executionReq = req;
+  let usedCacheName: string | null = null;
+
+  if (
+    isGeminiContextCachingEnabled() &&
+    typeof rawSysInstr === "string" &&
+    !req.config?.cachedContent
+  ) {
+    const cacheName = await getOrCreateGeminiContextCache(
+      sdk,
+      req.model,
+      rawSysInstr,
+      rawTools,
+      rawToolConfig,
+    );
+    if (cacheName) {
+      usedCacheName = cacheName;
+      const {
+        systemInstruction: _removedSys,
+        tools: _removedTools,
+        toolConfig: _removedToolConfig,
+        ...restConfig
+      } = req.config ?? {};
+      executionReq = {
+        ...req,
+        config: {
+          ...restConfig,
+          cachedContent: cacheName,
+        },
+      };
+    }
+  }
+
   let finalUsageMetadata: TokenUsage | undefined;
   let finalFinishReason: string | undefined;
   let promptBlockReason: string | undefined;
   const accumulatedParts: Part[] = [];
 
-  if (disableStreaming) {
-    const response = await sdk.models.generateContent(req);
-    finalUsageMetadata = response.usageMetadata;
-    finalFinishReason = response.candidates?.[0]?.finishReason;
-    promptBlockReason = response.promptFeedback?.blockReason;
-    const parts = response.candidates?.[0]?.content?.parts ?? [];
-    usageDiag("buffered", finalUsageMetadata, finalFinishReason, parts);
-    logFunctionCallsMissingThoughtSignature(
-      req.model,
-      finalFinishReason,
-      parts,
-    );
-    for (const part of parts) {
-      if (
-        typeof part.text === "string" && !part.thought
-      ) {
-        await handleStreamChunk(part.text);
-      }
-      if (typeof part.text === "string" && part.thought) {
-        await handleStreamThinkingChunk(part.text);
-      }
-      accumulatedParts.push(part);
-    }
-  } else {
-    logGemini("[gemini-step] stream-await-start");
-    const responseStream = await sdk.models.generateContentStream(req);
-    logGemini("[gemini-step] stream-await-ok");
-
-    let chunkCount = 0;
-    for await (const chunk of responseStream) {
-      chunkCount++;
-      if (chunkCount === 1) logGemini("[gemini-step] stream-first-chunk");
-      if (chunk.usageMetadata) {
-        finalUsageMetadata = chunk.usageMetadata;
-      }
-      if (chunk.promptFeedback?.blockReason) {
-        promptBlockReason = chunk.promptFeedback.blockReason;
-      }
-      const chunkFinishReason = chunk.candidates?.[0]?.finishReason;
-      if (chunkFinishReason) finalFinishReason = chunkFinishReason;
-      const parts = chunk.candidates?.[0]?.content?.parts ?? [];
+  try {
+    if (disableStreaming) {
+      const response = await sdk.models.generateContent(executionReq);
+      finalUsageMetadata = response.usageMetadata;
+      finalFinishReason = response.candidates?.[0]?.finishReason;
+      promptBlockReason = response.promptFeedback?.blockReason;
+      const parts = response.candidates?.[0]?.content?.parts ?? [];
+      usageDiag("buffered", finalUsageMetadata, finalFinishReason, parts);
+      logFunctionCallsMissingThoughtSignature(
+        req.model,
+        finalFinishReason,
+        parts,
+      );
       for (const part of parts) {
         if (
-          typeof part.text === "string" && !part.thought &&
-          !part.thoughtSignature
+          typeof part.text === "string" && !part.thought
         ) {
           await handleStreamChunk(part.text);
         }
         if (typeof part.text === "string" && part.thought) {
           await handleStreamThinkingChunk(part.text);
         }
+        accumulatedParts.push(part);
+      }
+    } else {
+      logGemini("[gemini-step] stream-await-start");
+      const responseStream = await sdk.models.generateContentStream(
+        executionReq,
+      );
+      logGemini("[gemini-step] stream-await-ok");
 
-        if (typeof part.text === "string") {
-          const lastPart = accumulatedParts[accumulatedParts.length - 1];
+      let chunkCount = 0;
+      for await (const chunk of responseStream) {
+        chunkCount++;
+        if (chunkCount === 1) logGemini("[gemini-step] stream-first-chunk");
+        if (chunk.usageMetadata) {
+          finalUsageMetadata = chunk.usageMetadata;
+        }
+        if (chunk.promptFeedback?.blockReason) {
+          promptBlockReason = chunk.promptFeedback.blockReason;
+        }
+        const chunkFinishReason = chunk.candidates?.[0]?.finishReason;
+        if (chunkFinishReason) finalFinishReason = chunkFinishReason;
+        const parts = chunk.candidates?.[0]?.content?.parts ?? [];
+        for (const part of parts) {
           if (
-            lastPart &&
-            typeof lastPart.text === "string" &&
-            lastPart.thought === part.thought &&
-            lastPart.thoughtSignature === part.thoughtSignature
+            typeof part.text === "string" && !part.thought &&
+            !part.thoughtSignature
           ) {
-            lastPart.text += part.text;
-          } else {
-            accumulatedParts.push({ ...part });
+            await handleStreamChunk(part.text);
           }
-        } else if (part.functionCall) {
-          // Assume functionCalls are fully formed or overwrite previous partial ones of the same name
-          const lastPart = accumulatedParts[accumulatedParts.length - 1];
-          if (
-            lastPart && lastPart.functionCall &&
-            lastPart.functionCall.name === part.functionCall.name
-          ) {
-            // If the SDK streams function calls by updating the object, we just replace it
-            lastPart.functionCall = part.functionCall;
-            if (part.thoughtSignature) {
-              lastPart.thoughtSignature = part.thoughtSignature;
+          if (typeof part.text === "string" && part.thought) {
+            await handleStreamThinkingChunk(part.text);
+          }
+
+          if (typeof part.text === "string") {
+            const lastPart = accumulatedParts[accumulatedParts.length - 1];
+            if (
+              lastPart &&
+              typeof lastPart.text === "string" &&
+              lastPart.thought === part.thought &&
+              lastPart.thoughtSignature === part.thoughtSignature
+            ) {
+              lastPart.text += part.text;
+            } else {
+              accumulatedParts.push({ ...part });
+            }
+          } else if (part.functionCall) {
+            // Assume functionCalls are fully formed or overwrite previous partial ones of the same name
+            const lastPart = accumulatedParts[accumulatedParts.length - 1];
+            if (
+              lastPart && lastPart.functionCall &&
+              lastPart.functionCall.name === part.functionCall.name
+            ) {
+              // If the SDK streams function calls by updating the object, we just replace it
+              lastPart.functionCall = part.functionCall;
+              if (part.thoughtSignature) {
+                lastPart.thoughtSignature = part.thoughtSignature;
+              }
+            } else {
+              accumulatedParts.push({ ...part });
             }
           } else {
-            accumulatedParts.push({ ...part });
+            accumulatedParts.push(part);
           }
-        } else {
-          accumulatedParts.push(part);
         }
       }
+      logGemini(`[gemini-step] stream-done chunks=${chunkCount}`);
+      usageDiag(
+        "stream",
+        finalUsageMetadata,
+        finalFinishReason,
+        accumulatedParts,
+      );
+      logFunctionCallsMissingThoughtSignature(
+        req.model,
+        finalFinishReason,
+        accumulatedParts,
+      );
     }
-    logGemini(`[gemini-step] stream-done chunks=${chunkCount}`);
-    usageDiag(
-      "stream",
-      finalUsageMetadata,
-      finalFinishReason,
-      accumulatedParts,
-    );
-    logFunctionCallsMissingThoughtSignature(
-      req.model,
-      finalFinishReason,
-      accumulatedParts,
-    );
+  } catch (err: unknown) {
+    if (usedCacheName && typeof rawSysInstr === "string") {
+      const errorMsg = String(err);
+      if (
+        errorMsg.includes("NOT_FOUND") ||
+        errorMsg.includes("404") ||
+        errorMsg.includes("cachedContent") ||
+        errorMsg.includes("Cached content")
+      ) {
+        await invalidateGeminiContextCache(req.model, rawSysInstr, rawTools);
+        return await geminiSdkExchange(signal, {
+          req: rawReq,
+          disableStreaming,
+        });
+      }
+    }
+    throw err;
   }
 
   return {

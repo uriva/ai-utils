@@ -256,6 +256,11 @@ export {
   zodToGeminiParameters,
 } from "./src/gemini.ts";
 export {
+  clearGeminiContextCacheMap,
+  injectGeminiContextCachingEnabled,
+  invalidateGeminiContextCache,
+} from "./src/geminiContextCache.ts";
+export {
   injectGeminiErrorLogger,
   injectGeminiModelCallTimeoutMs,
   injectPromptBlockedLogger,
