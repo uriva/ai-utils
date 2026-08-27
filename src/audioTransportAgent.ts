@@ -334,17 +334,18 @@ const reconnectMaxDelayMs = 8_000;
 
 const formatAudioSkillsPrompt = (skills?: AgentSpec["skills"]): string => {
   if (!skills || skills.length === 0) return "";
-  return "\n\nAll tools and skills are already active and fully loaded in this live audio session. Call the relevant tools directly without calling learn_skill.\n\nAvailable Skills and Instructions:\n" +
-    skills.map((s) => {
-      const toolsDesc = s.tools.length > 0
-        ? "\n  Tools:\n" +
-          s.tools.map((t) => `    - ${t.name}: ${t.description}`).join("\n")
-        : "";
-      return `### Skill: ${s.name}\n${s.instructions}${toolsDesc}`;
-    }).join("\n\n");
+  return "\n\nAll tools and capabilities are already active and fully loaded in this live audio session. Call the relevant tools directly without calling learn_skill.\n\nAvailable Skills and Capabilities:\n" +
+    skills
+      .map((s) => {
+        const tools = s.tools.map((t) => t.name).join(", ");
+        return `- ${s.name}: ${s.description}${
+          tools ? ` (Tools: ${tools})` : ""
+        }`;
+      })
+      .join("\n");
 };
 
-const maxAudioTools = 100;
+const maxAudioTools = 65;
 
 const collectAllAudioTools = (
   // deno-lint-ignore no-explicit-any
