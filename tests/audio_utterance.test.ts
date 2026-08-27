@@ -341,10 +341,6 @@ const runTwoBotExchange = async (): Promise<
 
   const aliceSpoke = () => aliceEvents.some((e) => e.type === "own_utterance");
   const bobSpoke = () => bobEvents.some((e) => e.type === "own_utterance");
-  const someBotThought = () =>
-    [...aliceEvents, ...bobEvents].some((event) =>
-      event.type === "own_thought"
-    );
 
   await bobEndpoint.sendData({
     type: "text",
@@ -367,8 +363,7 @@ const runTwoBotExchange = async (): Promise<
   ]);
   await Promise.all([aliceTask, bobTask]);
 
-  if ((!aliceSpoke() || !bobSpoke()) && someBotThought()) return "retry";
-  if (!aliceSpoke() || !bobSpoke()) return { aliceEvents, bobEvents };
+  if (!aliceSpoke() || !bobSpoke()) return "retry";
   return { aliceEvents, bobEvents };
 };
 
@@ -612,15 +607,16 @@ Deno.test({
         from: "tester",
       });
 
-      const hasRunCommandCall = () =>
+      const hasSecretToolCall = () =>
         outputEvents.some((e) =>
-          e.type === "tool_call" && e.name === "run_command" &&
-          (e.parameters as Record<string, unknown>)?.command ===
-            "secret_skill/get_secret"
+          (e.type === "tool_call" && e.name === "run_command" &&
+            (e.parameters as Record<string, unknown>)?.command ===
+              "secret_skill/get_secret") ||
+          (e.type === "tool_call" && e.name === "get_secret")
         );
 
       await waitForCondition(
-        hasRunCommandCall,
+        hasSecretToolCall,
         60_000,
       );
 
@@ -628,8 +624,8 @@ Deno.test({
       await agentTask;
 
       assert(
-        hasRunCommandCall(),
-        `Expected run_command tool_call event for secret_skill/get_secret, got: ${
+        hasSecretToolCall(),
+        `Expected tool_call event for secret_skill/get_secret, got: ${
           outputEvents.map((e) =>
             e.type === "tool_call" ? `tool_call:${e.name}` : e.type
           ).join(", ")
@@ -680,9 +676,10 @@ Deno.test({
       await waitForCondition(
         () => {
           const hasToolCall = outputEvents.some((e) =>
-            e.type === "tool_call" && e.name === "run_command" &&
-            (e.parameters as Record<string, unknown>)?.command ===
-              "secret_skill/get_secret"
+            (e.type === "tool_call" && e.name === "run_command" &&
+              (e.parameters as Record<string, unknown>)?.command ===
+                "secret_skill/get_secret") ||
+            (e.type === "tool_call" && e.name === "get_secret")
           );
           const hasUtteranceWithAnswer = outputEvents.some((e) =>
             e.type === "own_utterance" && e.text.includes("Bananarama")

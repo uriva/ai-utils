@@ -348,8 +348,14 @@ export const createAudioSession = async ({
       activeTurn = true;
       const wait = waitForEvents();
       ws.send(JSON.stringify({
-        realtimeInput: {
-          text,
+        clientContent: {
+          turns: [
+            {
+              role: "user",
+              parts: [{ text }],
+            },
+          ],
+          turnComplete: true,
         },
       }));
       return await wait;
