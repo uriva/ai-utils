@@ -367,6 +367,8 @@ const primaryAudioSkillOrder = [
 ];
 
 const isInternalScriptHelper = (name: string): boolean =>
+  name === "timeout-wakeup" ||
+  name.startsWith("timeout") ||
   name.startsWith("view_script") ||
   name.startsWith("loadIdentity") ||
   name.startsWith("buildAuth") ||
