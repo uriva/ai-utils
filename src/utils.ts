@@ -96,6 +96,9 @@ export const is403PermissionError = (error: unknown) => {
     norm.message.includes("PERMISSION_DENIED");
 };
 
+export const isMaxTokensError = (error: unknown) =>
+  normalizeError(error).message.includes("MAX_TOKENS");
+
 export const isRetryableError = (error: unknown) => {
   const norm = normalizeError(error);
   return (

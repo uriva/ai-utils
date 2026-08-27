@@ -15,6 +15,7 @@ import {
   geminiBlockedMessage,
   is403PermissionError,
   isInvalidArgumentError,
+  isMaxTokensError,
   isRetryableError,
   isRetryableUploadError,
   type ModelOpts,
@@ -299,7 +300,11 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
       (r: GenerateContentParameters) =>
         generateContentInjection.access(r).then(parseGenJsonResponse),
     )(req).catch((err: unknown) => {
-      if (!isRetryableError(err) && !isInvalidArgumentError(err)) throw err;
+      if (
+        !isRetryableError(err) &&
+        !isInvalidArgumentError(err) &&
+        !isMaxTokensError(err)
+      ) throw err;
       return conditionalRetry(isRetryableError)(
         1000,
         3,
@@ -397,7 +402,11 @@ export const geminiGenText = async (
 
   const primaryModel = geminiModelVersion(mini);
   const result = await execGen(primaryModel).catch((err: unknown) => {
-    if (!isRetryableError(err) && !isInvalidArgumentError(err)) throw err;
+    if (
+      !isRetryableError(err) &&
+      !isInvalidArgumentError(err) &&
+      !isMaxTokensError(err)
+    ) throw err;
     return execGen(alternateGeminiModelVersion(primaryModel));
   });
   return result.text ?? "";
