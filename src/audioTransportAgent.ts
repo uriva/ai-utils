@@ -340,15 +340,33 @@ const reconnectMaxDelayMs = 8_000;
 
 const formatAudioSkillsPrompt = (skills?: AgentSpec["skills"]): string => {
   if (!skills || skills.length === 0) return "";
-  return "\n\nAll tools and capabilities are already active and fully loaded in this live audio session. Call the relevant tools directly without calling learn_skill.\n\nAvailable Skills and Capabilities:\n" +
-    skills
-      .map((s) => {
-        const tools = s.tools.map((t) => t.name).join(", ");
-        return `- ${s.name}: ${s.description}${
-          tools ? ` (Tools: ${tools})` : ""
-        }`;
-      })
-      .join("\n");
+  const allSkills = skills ?? [];
+  const primarySkills = allSkills.filter((s) =>
+    primaryAudioSkillOrder.includes(s.name.replace(/@.*/, ""))
+  );
+  const otherSkills = allSkills.filter((s) =>
+    !primaryAudioSkillOrder.includes(s.name.replace(/@.*/, ""))
+  );
+  const primarySection = primarySkills.length > 0
+    ? "\n\nPrimary Skills and Instructions:\n" +
+      primarySkills
+        .map((s) => `### Skill: ${s.name}\n${s.instructions}`)
+        .join("\n\n")
+    : "";
+  const otherSection = otherSkills.length > 0
+    ? "\n\nOther Available Capabilities:\n" +
+      otherSkills
+        .map((s) => {
+          const tools = s.tools.map((t) => t.name).join(", ");
+          return `- ${s.name}: ${s.description}${
+            tools ? ` (Tools: ${tools})` : ""
+          }`;
+        })
+        .join("\n")
+    : "";
+  return "\n\nAll tools and capabilities are already active and fully loaded in this live audio session. Call the relevant tools directly without calling learn_skill." +
+    primarySection +
+    otherSection;
 };
 
 const primaryAudioSkillOrder = [
