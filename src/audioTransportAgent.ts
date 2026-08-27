@@ -7,6 +7,7 @@ import {
   ownThoughtTurn,
   ownUtteranceTurn,
   participantEditMessageTurn,
+  type Skill,
   type Tool,
   toolUseTurnWithMetadata,
 } from "./agent.ts";
@@ -234,6 +235,7 @@ const resolveToolCalls = async (
   // deno-lint-ignore no-explicit-any
   tools: Tool<any>[],
   sessionOutput: AudioSessionEvent[],
+  skills: Skill[] = [],
 ) => {
   const geminiIdByHistoryId = new Map<string, string>();
   const respondedGeminiIds = new Set<string>();
@@ -263,29 +265,33 @@ const resolveToolCalls = async (
   const startTime = Date.now();
   try {
     await Promise.race([
-      handleFunctionCalls(tools, (event) => {
-        if (event.type === "tool_result") {
-          const geminiId = geminiIdByHistoryId.get(event.toolCallId!);
-          const id = geminiId ?? event.toolCallId!;
-          respondedGeminiIds.add(id);
-          const toolCall = sessionOutput.find((e) =>
-            e.type === "tool_call" && e.id === id
-          );
-          const name = toolCall && "name" in toolCall
-            ? toolCall.name
-            : "unknown";
-          console.log(
-            `[audio-tool] tool result for ${name} after ${
-              Date.now() - startTime
-            }ms, responding to Gemini`,
-          );
-          session.respondToToolCall({
-            id,
-            name,
-            response: { result: event.result },
-          });
-        }
-      })(toolCallEvents),
+      handleFunctionCalls(
+        tools,
+        (event) => {
+          if (event.type === "tool_result") {
+            const geminiId = geminiIdByHistoryId.get(event.toolCallId!);
+            const id = geminiId ?? event.toolCallId!;
+            respondedGeminiIds.add(id);
+            const toolCall = sessionOutput.find((e) =>
+              e.type === "tool_call" && e.id === id
+            );
+            const name = toolCall && "name" in toolCall
+              ? toolCall.name
+              : "unknown";
+            console.log(
+              `[audio-tool] tool result for ${name} after ${
+                Date.now() - startTime
+              }ms, responding to Gemini`,
+            );
+            session.respondToToolCall({
+              id,
+              name,
+              response: { result: event.result },
+            });
+          }
+        },
+        skills,
+      )(toolCallEvents),
       new Promise<never>((_, reject) =>
         setTimeout(
           () => reject(new Error("Tool execution timed out")),
@@ -348,6 +354,7 @@ const formatAudioSkillsPrompt = (skills?: AgentSpec["skills"]): string => {
 const primaryAudioSkillNames = new Set([
   "gmail",
   "web",
+  "safescript",
   "task_management",
   "todo",
   "scheduling",
@@ -520,7 +527,7 @@ const processTurnOutput = async (
     await emitNonUtteranceEvents(outputEvent, sessionOutput);
   }
   const allTools = collectAllAudioTools(spec.tools, spec.skills);
-  await resolveToolCalls(session, allTools, sessionOutput);
+  await resolveToolCalls(session, allTools, sessionOutput, spec.skills ?? []);
 };
 
 export const runAudioAgentLoop = async (
