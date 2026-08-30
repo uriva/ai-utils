@@ -4,6 +4,8 @@ import { runAgent } from "../mod.ts";
 import {
   type CallModel,
   callToResult,
+  commandRewrittenCorrection,
+  correctionPrefix,
   createSkillTools,
   formatSkillsPrompt,
   getSpecForTurn,
@@ -54,6 +56,9 @@ const dbSkill: Skill = {
   tools: [sharedDelete],
 };
 
+const canonicalCommand = qualifiedToolName(todoSkill.name, todoWrite.name);
+const misroutedCommand = `file/${todoWrite.name}`;
+
 Deno.test("bare unambiguous skill tool name is auto-routed via run_command", async () => {
   const skillTools = createSkillTools([todoSkill]);
   const out = await callToResult(skillTools, [todoSkill])({
@@ -65,6 +70,121 @@ Deno.test("bare unambiguous skill tool name is auto-routed via run_command", asy
   if (!out.result.includes("wrote 2 todos")) {
     throw new Error(`expected handler output, got: ${out.result}`);
   }
+});
+
+const bareCorrection = correctionPrefix([
+  commandRewrittenCorrection("todo_write", canonicalCommand),
+]);
+const colonCorrection = correctionPrefix([
+  commandRewrittenCorrection("todo:todo_write", canonicalCommand),
+]);
+
+Deno.test("bare direct skill tool call surfaces a canonical-name correction", async () => {
+  const skillTools = createSkillTools([todoSkill]);
+  const out = await callToResult(skillTools, [todoSkill])({
+    name: "todo_write",
+    args: { todos: ["a", "b"] },
+    id: "call-bare-note",
+  });
+  if (!out) throw new Error("expected a result");
+  assertEquals(out.result.startsWith(bareCorrection), true);
+  assertEquals(out.result.includes("wrote 2 todos"), true);
+});
+
+Deno.test("colon-form direct skill tool call surfaces a canonical-name correction", async () => {
+  const skillTools = createSkillTools([todoSkill]);
+  const out = await callToResult(skillTools, [todoSkill])({
+    name: "todo:todo_write",
+    args: { todos: ["a", "b"] },
+    id: "call-colon-note",
+  });
+  if (!out) throw new Error("expected a result");
+  assertEquals(out.result.startsWith(colonCorrection), true);
+  assertEquals(out.result.includes("wrote 2 todos"), true);
+});
+
+Deno.test("canonical skill tool call produces no correction prefix", async () => {
+  const skillTools = createSkillTools([todoSkill]);
+  const out = await callToResult(skillTools, [todoSkill])({
+    name: canonicalCommand,
+    args: { todos: ["a", "b"] },
+    id: "call-canonical-note",
+  });
+  if (!out) throw new Error("expected a result");
+  assertEquals(out.result.startsWith("[arguments auto-corrected:"), false);
+  assertEquals(out.result, "wrote 2 todos");
+});
+
+Deno.test("nested run_command colon-form command surfaces a canonical-name correction", async () => {
+  const skillTools = createSkillTools([todoSkill]);
+  const runCommand = skillTools.find((t) => t.name === runCommandToolName);
+  if (!runCommand) throw new Error("run_command missing");
+  const out = await runCommand.handler(
+    {
+      command: "todo:todo_write",
+      params: { todos: ["a", "b"] },
+      spinnerText: "writing",
+    },
+    "call-id",
+  );
+  if (typeof out !== "string") throw new Error("expected string result");
+  assertEquals(out.startsWith(colonCorrection), true);
+  assertEquals(out.includes("wrote 2 todos"), true);
+});
+
+Deno.test("agent-level: a bare skill tool call surfaces the canonical command correction", async () => {
+  const executed: string[][] = [];
+  const recordingTodoSkill: Skill = {
+    ...todoSkill,
+    tools: [{
+      ...todoWrite,
+      handler: ({ todos }) => {
+        executed.push(todos);
+        return Promise.resolve(`wrote ${todos.length} todos`);
+      },
+    }],
+  };
+  const bareCall = (): HistoryEvent => ({
+    type: "tool_call",
+    isOwn: true,
+    id: "bare-1",
+    timestamp: Date.now(),
+    name: todoWrite.name,
+    parameters: { todos: ["a", "b"] },
+  });
+  const fakeModel: CallModel = () =>
+    Promise.resolve(
+      executed.length > 0 ? [ownUtteranceTurn("done")] : [bareCall()],
+    );
+  const history: HistoryEvent[] = [participantUtteranceTurn({
+    name: "user",
+    text: "Write the todos a and b.",
+  })];
+  await injectCallModel(fakeModel)(() =>
+    agentDeps(history)(runAgent)({
+      maxIterations: 4,
+      tools: [],
+      skills: [recordingTodoSkill],
+      prompt: "You help users manage todos.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    })
+  )();
+  assertEquals(
+    executed.length,
+    1,
+    `bare call should still execute the target tool once. History: ${
+      JSON.stringify(history, null, 2)
+    }`,
+  );
+  const toolResult = history.find(
+    (e): e is Extract<HistoryEvent, { type: "tool_result" }> =>
+      e.type === "tool_result" && e.toolCallId === "bare-1",
+  );
+  assert(
+    toolResult?.result.startsWith(bareCorrection),
+    `tool result should surface the canonical command correction, got: ${toolResult?.result}`,
+  );
 });
 
 Deno.test("bare ambiguous skill tool name still returns not-found", async () => {
@@ -160,13 +280,11 @@ Deno.test("formatSkillsPrompt outputs fully-qualified tool names", () => {
   assertEquals(prompt.includes("- todo_write:"), false);
 });
 
-// A model that read about a tool inside another skill's instructions may
+// A model that read about a tool inside another skill's instructions can
 // attribute it to the wrong skill (e.g. a travel-guide skill telling the model
 // to "use geocode" when geocode lives in the geo skill). When the tool name
 // exists in exactly one other skill, run_command must retarget the call there
 // and surface the canonical command, instead of failing with "not found".
-const misroutedCommand = `file/${todoWrite.name}`;
-const canonicalCommand = qualifiedToolName(todoSkill.name, todoWrite.name);
 
 Deno.test("run_command retargets a tool misrouted to another existing skill", async () => {
   const skillTools = createSkillTools([fileSkill, todoSkill]);

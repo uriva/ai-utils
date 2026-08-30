@@ -770,6 +770,11 @@ export const correctionPrefix = (corrections: string[]): string =>
       corrections.join("; ")
     }. Use the canonical shape next time.]\n\n`;
 
+export const commandRewrittenCorrection = (
+  called: string,
+  canonical: string,
+): string => `command "${called}" rewritten to "${canonical}"`;
+
 // deno-lint-ignore no-explicit-any
 const schemaAtPath = (schema: any, path: string[]): any => {
   let cursor = schema;
@@ -860,21 +865,20 @@ const resolveUnambiguousBareName = (
 // A model that read about a tool inside another skill's instructions can
 // attribute it to the wrong skill ("guide/geocode" when the tool lives in
 // "geo"). When the tool name exists in exactly one other skill, retarget the
-// command there and surface the canonical name so the model self-corrects.
+// command there so the call resolves; the canonical-name correction is
+// surfaced by the caller via commandRewrittenCorrection.
 const retargetMisroutedCommand = (
   skills: Skill[],
   skillName: string,
   toolName: string,
-): { skillName: string; toolName: string; correction: string } | undefined => {
+): { skillName: string; toolName: string } | undefined => {
   const resolved = resolveUnambiguousBareName(toolName, skills);
   if (!resolved) return undefined;
   const sep = resolved.lastIndexOf("/");
   const targetSkillName = resolved.slice(0, sep);
-  return targetSkillName === skillName ? undefined : {
-    skillName: targetSkillName,
-    toolName: resolved.slice(sep + 1),
-    correction: `command "${skillName}/${toolName}" rewritten to "${resolved}"`,
-  };
+  return targetSkillName === skillName
+    ? undefined
+    : { skillName: targetSkillName, toolName: resolved.slice(sep + 1) };
 };
 
 const resolveCarriageReturns = (text: string): string =>
@@ -1050,6 +1054,9 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
     : undefined;
   const isSkillCall = slashSkillCall || unambiguousBare !== undefined;
   const skillCommand = unambiguousBare ?? normalizedName;
+  const invocationCorrections = unambiguousBare !== undefined
+    ? [commandRewrittenCorrection(normalizedName, skillCommand)]
+    : [];
   const [action, effectiveArgs] = directMatch
     ? [directMatch, normalizedArgs]
     : isSkillCall
@@ -1074,7 +1081,10 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
   const { handler, parameters } = action;
   const jsonSchema = z.toJSONSchema(parameters);
   const coerced = coerceArgs(jsonSchema, effectiveArgs);
-  const prefix = correctionPrefix(coerced.corrections);
+  const prefix = correctionPrefix([
+    ...invocationCorrections,
+    ...coerced.corrections,
+  ]);
   const parseResult = parseWithCatch(parameters, jsonSchema, coerced.args);
   if (!parseResult.ok) {
     return {
@@ -2407,7 +2417,9 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         const toolJsonSchema = z.toJSONSchema(tool.parameters);
         const coerced = coerceArgs(toolJsonSchema, params);
         const prefix = correctionPrefix([
-          ...(misrouted ? [misrouted.correction] : []),
+          ...(rawCommand !== fullToolName
+            ? [commandRewrittenCorrection(rawCommand, fullToolName)]
+            : []),
           ...coerced.corrections,
         ]);
         const parseResult = parseWithCatch(
