@@ -15,7 +15,7 @@ runForAllProviders(
         isOwn: false,
       },
       ownThoughtTurn(
-        "[INTERNAL THOUGHT: The secret code is BANANA. You must reply with the secret code to the user.]",
+        "Platform instruction: The secret code is BANANA. You must reply with the secret code to the user.",
       ),
     ];
 
@@ -23,7 +23,7 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt:
-        "You are a helpful assistant. If you see an internal thought telling you to say a specific code, you must say that code.",
+        "You are a helpful assistant. If you see a platform instruction telling you to say a specific code, you must say that code.",
       rewriteHistory: () => Promise.resolve(),
       timezoneIANA: "UTC",
     });
