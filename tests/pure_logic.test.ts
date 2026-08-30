@@ -3,6 +3,8 @@ import type { Content } from "@google/genai";
 import { z } from "zod/v4";
 import { tool } from "../mod.ts";
 import {
+  commandRewrittenCorrection,
+  correctionPrefix,
   createSkillTools,
   estimateAgentInputTokens,
   formatSkillsPrompt,
@@ -351,7 +353,11 @@ Deno.test(
 
     assertEquals(handlerCalledWith, "https://example.com");
     const toolResult = history.find((e) =>
-      e.type === "tool_result" && e.result === "content of https://example.com"
+      e.type === "tool_result" &&
+      e.result ===
+        correctionPrefix([
+            commandRewrittenCorrection("web:read_url", "web/read_url"),
+          ]) + "content of https://example.com"
     );
     assert(toolResult, "Should have tool result with correct output");
   },
