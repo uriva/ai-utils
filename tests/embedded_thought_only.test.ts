@@ -3,6 +3,7 @@ import {
   geminiOutputToHistoryEvents,
   type GeminiPartOfInterest,
 } from "../src/geminiAgent.ts";
+import { formatInternalThought } from "../src/jsonThought.ts";
 
 // Repro for silent loop exit observed in production: when a Gemini text part
 // contains only embedded `[Internal thought, visible only to you: ...]`
@@ -16,8 +17,7 @@ Deno.test("text part with embedded thought followed by whitespace-only content b
   const parts: GeminiPartOfInterest[] = [
     {
       type: "text",
-      text:
-        "  [Internal thought, visible only to you: I have all three scenes.]  ",
+      text: `  ${formatInternalThought("I have all three scenes.")}  `,
       thoughtSignature: "sig-abc",
     },
   ];
@@ -33,7 +33,7 @@ Deno.test("text part with embedded thought plus trailing whitespace becomes own_
   const parts: GeminiPartOfInterest[] = [
     {
       type: "text",
-      text: "[Internal thought, visible only to you: ok done] \n",
+      text: `${formatInternalThought("ok done")} \n`,
       thoughtSignature: "sig-xyz",
     },
   ];

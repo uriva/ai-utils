@@ -1,6 +1,7 @@
 import { assert } from "@std/assert";
 import { buildReq } from "../src/geminiAgent.ts";
-import { ownThoughtTurn } from "../src/agent.ts";
+import { ownThoughtTurn, systemNotificationPrefix } from "../src/agent.ts";
+import { internalThoughtPrefix } from "../src/jsonThought.ts";
 
 Deno.test(
   "own_thought with modelMetadata should not render as visible text in buildReq",
@@ -51,7 +52,7 @@ Deno.test(
 
     // The thought text should NOT appear as "[Internal thought, visible only to you: ...]"
     assert(
-      !allText.includes("Internal thought, visible only to you"),
+      !allText.includes(internalThoughtPrefix),
       `Model-generated thought should not be rendered as [Internal thought] text, but found in contents:\n${
         JSON.stringify(req.contents, null, 2)
       }`,
@@ -106,7 +107,7 @@ Deno.test(
     const allText = JSON.stringify(req.contents);
 
     assert(
-      !allText.includes("Internal thought, visible only to you"),
+      !allText.includes(internalThoughtPrefix),
       `Reclassified leaked thought should not be rendered as [Internal thought] text, but found in contents:\n${
         JSON.stringify(req.contents, null, 2)
       }`,
@@ -138,7 +139,7 @@ Deno.test(
     const allText = JSON.stringify(req.contents);
 
     assert(
-      allText.includes("System notification"),
+      allText.includes(systemNotificationPrefix),
       `Synthetic thought should render as [System notification], but got:\n${
         JSON.stringify(req.contents, null, 2)
       }`,

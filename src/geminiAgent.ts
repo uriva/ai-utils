@@ -29,7 +29,8 @@ import {
   doNothingEventWithMetadata,
   estimateAgentInputTokens,
   estimateTokens,
-  externalEventPrefix,
+  formatExternalEvent,
+  formatSystemNotification,
   generateId,
   getStreamChunk,
   getStreamThinkingChunk,
@@ -46,7 +47,6 @@ import {
   type ParticipantEditMessage,
   type ParticipantUtterance,
   systemInstructionTail,
-  systemNotificationPrefix,
   thinkingTokenExhaustionWarningText,
   type Tool,
   type ToolResult,
@@ -796,14 +796,14 @@ const historyEventToContent = (
         {
           text: isCompactedSummaryText(e.text)
             ? stampText(e.text)
-            : stampText(`${systemNotificationPrefix} ${e.text}]`),
+            : stampText(formatSystemNotification(e.text)),
         },
         ...attachmentsToPartsOrEmpty(e.attachments),
       ]);
   }
   if (e.type === "external_event") {
     return wrapUserContent([
-      { text: stampText(`${externalEventPrefix} ${e.text}]`) },
+      { text: stampText(formatExternalEvent(e.text)) },
       ...attachmentsToPartsOrEmpty(e.attachments),
     ]);
   }

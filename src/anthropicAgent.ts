@@ -10,7 +10,8 @@ import {
   createSkillTools,
   doNothingEventWithMetadata,
   estimateTokens,
-  externalEventPrefix,
+  formatExternalEvent,
+  formatSystemNotification,
   generateId,
   getStreamChunk,
   getStreamThinkingChunk,
@@ -21,10 +22,11 @@ import {
   ownThoughtTurn,
   ownUtteranceTurn,
   systemInstructionTail,
-  systemNotificationPrefix,
+  systemNotificationRegex,
   type Tool,
   toolUseTurn,
 } from "./agent.ts";
+import { internalThoughtRegex } from "./jsonThought.ts";
 import {
   appendInternalSentTimestamp,
   stripInternalSentTimestampSuffix,
@@ -276,7 +278,7 @@ async (
       type: "text",
       text: isCompactedSummaryText(e.text)
         ? e.text
-        : `${systemNotificationPrefix} ${e.text}]`,
+        : formatSystemNotification(e.text),
     };
     return [{
       role: "user",
@@ -290,7 +292,7 @@ async (
     const contentBlocks = await attachmentsToContentBlocks(e.attachments);
     const textBlock: Anthropic.Messages.TextBlockParam = {
       type: "text",
-      text: stampText(`${externalEventPrefix} ${e.text}]`),
+      text: stampText(formatExternalEvent(e.text)),
     };
     return [{
       role: "user",
@@ -785,9 +787,7 @@ const anthropicOutputPartToHistoryEvents =
       const text = p.text || "";
       const stripped = stripInternalSentTimestampSuffix(text);
 
-      const thoughtRegex =
-        /^\[Internal thought, visible only to you: ([\s\S]*?)\]$/;
-      const match = stripped.match(thoughtRegex);
+      const match = stripped.match(internalThoughtRegex);
 
       if (match) {
         const event = ownThoughtTurn(match[1]) as AnthropicHistoryEvent;
@@ -796,14 +796,7 @@ const anthropicOutputPartToHistoryEvents =
         return events;
       }
 
-      const escapedPrefix = systemNotificationPrefix.replace(
-        /[.*+?^${}()|[\]\\]/g,
-        "\\$&",
-      );
-      const notificationRegex = new RegExp(
-        "^" + escapedPrefix + " ([\\s\\S]*?)\\]$",
-      );
-      const notificationMatch = stripped.match(notificationRegex);
+      const notificationMatch = stripped.match(systemNotificationRegex);
 
       if (notificationMatch) {
         const event = ownThoughtTurn(

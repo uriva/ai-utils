@@ -1502,6 +1502,24 @@ export const systemNotificationPrefix = "[System notification:";
 
 export const externalEventPrefix = "[External event:";
 
+export const formatSystemNotification = (text: string): string =>
+  `${systemNotificationPrefix} ${text}]`;
+
+export const formatExternalEvent = (text: string): string =>
+  `${externalEventPrefix} ${text}]`;
+
+export const systemNotificationRegex: RegExp = new RegExp(
+  "^" +
+    systemNotificationPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+    " ([\\s\\S]*?)\\]$",
+);
+
+export const externalEventRegex: RegExp = new RegExp(
+  "^" +
+    externalEventPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+    " ([\\s\\S]*?)\\]$",
+);
+
 export const systemNotificationPattern: RegExp = new RegExp(
   systemNotificationPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
     " [\\s\\S]*?\\]+",
