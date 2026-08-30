@@ -2448,7 +2448,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
     tool({
       name: learnSkillToolName,
       description:
-        "Activate a skill: loads its instructions and tools into your system prompt. Reference documents (if any) are separate tools you call via run_command once the skill is active.",
+        "Activate a skill: loads its instructions and tools into your system prompt. Reference documents (if any) are separate tools you call directly by their qualified name once the skill is active.",
       parameters: z.object({
         skillName: z.string().describe("The name of the skill to learn about"),
         spinnerText: z.string().describe(
@@ -3274,7 +3274,7 @@ const computeSpecForTurn = <T extends AgentInputs>(
     if (skills.length === 0) return "";
     const list = skills.map((skill) => {
       const refsPart = skill.references && skill.references.length > 0
-        ? `\n  Reference documents (call via run_command, e.g. ${skill.name}/${
+        ? `\n  Reference documents (call directly by qualified name, e.g. ${skill.name}/${
           referenceToolName(skill.references[0].name)
         }):\n${
           skill.references.map((r) =>
