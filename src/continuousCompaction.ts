@@ -1,5 +1,10 @@
 import { z } from "zod/v4";
-import type { HistoryEvent } from "./agent.ts";
+import {
+  type HistoryEvent,
+  learnSkillToolName,
+  readScratchFileToolName,
+  unlearnSkillToolName,
+} from "./agent.ts";
 import { groupToolCallPairs } from "./compaction.ts";
 import { genJson } from "./genJson.ts";
 
@@ -28,6 +33,9 @@ const isCompactedToolResult = (text: string | undefined): boolean =>
   ) ||
     text.startsWith("[Because time has passed") ||
     text.includes("Memory TLDR:"));
+
+const isSpillNotice = (text: string | undefined): boolean =>
+  typeof text === "string" && text.includes("[Tool output was truncated");
 
 const tldrSchema = z.object({
   tldr: z.string().describe(
@@ -89,6 +97,9 @@ export const compactToolResultsInMemory = async (
 
       // If it exceeds decaying threshold and has not been folded yet
       if (
+        toolCall.name !== readScratchFileToolName &&
+        toolCall.name !== learnSkillToolName &&
+        toolCall.name !== unlearnSkillToolName &&
         toolResult.result.length > threshold &&
         !isCompactedToolResult(toolResult.result)
       ) {
@@ -103,10 +114,15 @@ export const compactToolResultsInMemory = async (
   const replacementsList = await Promise.all(
     candidates.map(async ({ toolCall, toolResult }) => {
       const originalResult = toolResult.result;
-      const lineCount = originalResult.split("\n").length;
+      const isAlreadySpilled = isSpillNotice(originalResult);
+      const scratchId = isAlreadySpilled && toolResult.toolCallId
+        ? toolResult.toolCallId
+        : toolResult.id;
 
-      // Save original to scratchpad
-      await setScratch(toolResult.id, originalResult);
+      // If not already spilled to scratchpad on turn 0, save original full text to scratchpad
+      if (!isAlreadySpilled) {
+        await setScratch(toolResult.id, originalResult);
+      }
 
       // Generate 1-sentence technical TLDR with call context
       let tldr = "Command completed.";
@@ -125,11 +141,13 @@ export const compactToolResultsInMemory = async (
         // Fallback if TLDR generation fails
       }
 
+      const lineCount = originalResult.split("\n").length;
+
       // Informative memory replacement text
       const replacementText = [
         `[Because time has passed, this tool result has been compacted to save space. This is what you remember from this execution:`,
         `Memory TLDR: ${tldr}`,
-        `To refresh your memory on the full, raw output of this tool call, you can always read the scratchpad file by invoking \`read_scratch_file\` with the ID: "${toolResult.id}" (${lineCount} lines, ${originalResult.length} characters)]`,
+        `To refresh your memory on the full, raw output of this tool call, you can always read the scratchpad file by invoking \`read_scratch_file\` with the ID: "${scratchId}" (${lineCount} lines, ${originalResult.length} characters)]`,
       ].join("\n\n");
 
       return {
