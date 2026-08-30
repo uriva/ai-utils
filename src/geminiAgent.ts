@@ -705,6 +705,32 @@ const isInspectMediaToolResult = (
     toolCall.name === inspectMediaUrlToolName;
 };
 
+const isRenderableToolAttachment = (att: MediaAttachment): boolean =>
+  att.kind === "inline" ||
+  (att.kind === "file" && isGeminiFileUri(att.fileUri));
+
+type ExternalFileAttachment = Extract<MediaAttachment, { kind: "file" }>;
+
+const isExternalFileAttachment = (
+  att: MediaAttachment,
+): att is ExternalFileAttachment =>
+  att.kind === "file" && !isGeminiFileUri(att.fileUri);
+
+const toolResultMediaParts = (attachments?: MediaAttachment[]): Part[] =>
+  attachmentsToParts((attachments ?? []).filter(isRenderableToolAttachment));
+
+const toolResultExternalMediaText = (
+  attachments?: MediaAttachment[],
+): string => {
+  const external = (attachments ?? []).filter(isExternalFileAttachment);
+  return empty(external)
+    ? ""
+    : `\nTool returned media URLs. If you need to inspect them visually, call ${inspectMediaUrlToolName}:\n${
+      external.map((att) => `- ${att.caption ?? att.mimeType}: ${att.fileUri}`)
+        .join("\n")
+    }`;
+};
+
 const historyEventToContent = (
   eventById: (id: string) => GeminiHistoryEvent | undefined,
   timezoneIANA: string,
@@ -776,10 +802,13 @@ const historyEventToContent = (
           id: e.toolCallId,
           name,
           response: {
-            result: stampText(stripAnsi(e.result)),
+            result: stampText(
+              stripAnsi(e.result + toolResultExternalMediaText(e.attachments)),
+            ),
           },
         },
       },
+      ...toolResultMediaParts(e.attachments),
     ];
     return wrapUserContent(parts);
   }

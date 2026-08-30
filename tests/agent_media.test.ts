@@ -1,6 +1,13 @@
 import { assert, assertEquals } from "@std/assert";
+import type { Content, Part } from "@google/genai";
 import { z } from "zod/v4";
-import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
+import {
+  type HistoryEvent,
+  participantUtteranceTurn,
+  toolResultTurn,
+  toolUseTurn,
+} from "../src/agent.ts";
+import { buildReq } from "../src/geminiAgent.ts";
 import {
   agentDeps,
   b64,
@@ -16,13 +23,13 @@ runForAllProviders(
       participantUtteranceTurn({
         name: "user",
         text:
-          "Please call returnRawDogImageForVisualChoiceTest and describe the attached animal directly.",
+          "Please call returnRawImageForVisualChoiceTest and describe the attached animal directly.",
       }),
     ];
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 3,
       tools: [{
-        name: "returnRawDogImageForVisualChoiceTest",
+        name: "returnRawImageForVisualChoiceTest",
         description: "Returns raw image bytes as an inline attachment",
         parameters: z.object({}),
         handler: () =>
@@ -186,7 +193,7 @@ runForAllProviders(
     const ac = new AbortController();
     const server = Deno.serve({ port: 0, signal: ac.signal }, async (req) => {
       const url = new URL(req.url);
-      if (url.pathname === "/dog.jpg") {
+      if (url.pathname === "/photo-a.jpg") {
         const data = await Deno.readFile("./dog.jpg");
         return new Response(data, {
           headers: { "content-type": "image/jpeg" },
@@ -195,7 +202,7 @@ runForAllProviders(
       return new Response("Not found", { status: 404 });
     });
     const addr = server.addr as Deno.NetAddr;
-    const imageUrl = `http://localhost:${addr.port}/dog.jpg`;
+    const imageUrl = `http://localhost:${addr.port}/photo-a.jpg`;
 
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
@@ -218,7 +225,7 @@ runForAllProviders(
               kind: "file" as const,
               mimeType: "image/jpeg",
               fileUri: imageUrl,
-              caption: "dog photo",
+              caption: "photo",
             }],
           }),
       }],
@@ -255,6 +262,56 @@ runForAllProviders(
   true,
   false,
 );
+
+Deno.test("tool_result attachments are rendered as media parts in the gemini request", () => {
+  const events: HistoryEvent[] = [
+    participantUtteranceTurn({ name: "user", text: "go" }),
+    toolUseTurn({ id: "call-1", name: "some_tool", args: {} }),
+    toolResultTurn({
+      result: "Done.",
+      toolCallId: "call-1",
+      attachments: [
+        { kind: "inline", mimeType: "video/mp4", dataBase64: "QUFB" },
+        {
+          kind: "file",
+          mimeType: "image/jpeg",
+          fileUri: "https://generativelanguage.googleapis.com/v1beta/files/abc",
+        },
+        {
+          kind: "file",
+          mimeType: "image/png",
+          fileUri: "https://example.com/external.png",
+          caption: "screenshot",
+        },
+      ],
+    }),
+  ];
+  const req = buildReq(true, "p", [], "UTC", undefined)(
+    // deno-lint-ignore no-explicit-any
+    events as any[],
+  );
+  const contents = req.contents as unknown as Content[];
+  const parts = (contents[2].parts ?? []) as Part[];
+  const responseText = JSON.stringify(
+    parts.find((p) => "functionResponse" in p),
+  );
+  const mediaParts = parts.filter((p) => "inlineData" in p || "fileData" in p);
+  assertEquals(mediaParts.length, 2);
+  assert(
+    mediaParts.some((p) =>
+      "inlineData" in p && p.inlineData?.mimeType === "video/mp4"
+    ),
+  );
+  assert(
+    mediaParts.some((p) =>
+      "fileData" in p &&
+      p.fileData?.fileUri ===
+        "https://generativelanguage.googleapis.com/v1beta/files/abc"
+    ),
+  );
+  assert(responseText.includes("inspect_media_url"));
+  assert(responseText.includes("screenshot"));
+});
 
 import { normalizeMimeType } from "../src/gemini.ts";
 
