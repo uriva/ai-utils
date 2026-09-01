@@ -2579,14 +2579,36 @@ const maxDoNothingRetries = 2;
 export const unansweredUserCorrectionText =
   "[SYSTEM NOTICE]: The user is waiting for a response to their message, but you have not yet sent a reply or taken action. Please proceed to answer the user's request or take the next required action now.";
 
+export const isPlatformInjectedThoughtText = (text: string): boolean =>
+  isCompactedSummaryText(text) ||
+  text.startsWith("PROACTIVE TASK:") ||
+  text.startsWith("[thought]: PROACTIVE TASK:") ||
+  text.startsWith(systemNotificationPrefix) ||
+  text.startsWith("[Earlier platform notification") ||
+  text.startsWith("[SYSTEM NOTICE]:") ||
+  text.startsWith("[SYSTEM SUMMARY");
+
 // Ground truth for the tool-call URL gate: only text the model did NOT author
 // itself counts — instructions, tool documentation, user messages, tool
-// results, external events. The model's own thoughts/utterances are excluded
-// so it cannot launder a fabricated host through its own reasoning.
+// results, external events, and platform-injected thoughts (proactive tasks,
+// system notifications, compaction summaries). The model's own reasoning thoughts
+// and utterances are excluded so it cannot launder a fabricated host through its own reasoning.
 const groundTruthEventText = (e: HistoryEvent): string[] => {
-  if (e.type === "participant_utterance") return [e.text];
+  if (
+    e.type === "participant_utterance" ||
+    e.type === "participant_edit_message"
+  ) {
+    return [e.text];
+  }
   if (e.type === "tool_result") return [e.result];
   if (e.type === "external_event") return [e.text];
+  if (
+    e.type === "own_thought" &&
+    typeof e.text === "string" &&
+    isPlatformInjectedThoughtText(e.text)
+  ) {
+    return [e.text];
+  }
   return [];
 };
 

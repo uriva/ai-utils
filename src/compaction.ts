@@ -73,7 +73,9 @@ export const groupToolCallPairs = (
 
 export const isCompactedSummaryText = (text: string): boolean =>
   text.startsWith("[This summary covers") ||
-  text.startsWith("Past conversation history was compacted");
+  text.startsWith("Past conversation history was compacted") ||
+  text.startsWith("History compacted:") ||
+  text.startsWith("[SYSTEM SUMMARY");
 
 const isOwnUtterance = (e: HistoryEvent): boolean =>
   e.type === "own_utterance" || e.type === "own_edit_message";

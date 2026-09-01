@@ -627,3 +627,91 @@ Deno.test("utterance grounding gate respects model objection in internal thought
     "thought-justified illustrative examples must be delivered without blocking",
   );
 });
+
+Deno.test("utterance grounding gate allows URLs provided in proactive task notification thought", async () => {
+  const taskUrl =
+    "https://app.dashboard.example.org/threads?id=461a0a99-3377-49b3-90fd-13d7145c4e45";
+  const history: HistoryEvent[] = [
+    ownThoughtTurn(
+      `PROACTIVE TASK: You have a task to complete: New thread matched\n\nLink: ${taskUrl}`,
+    ),
+  ];
+  let callCount = 0;
+
+  await injectCallModel((_events: HistoryEvent[]) => {
+    callCount++;
+    return Promise.resolve([
+      ownUtteranceTurn(
+        `New match detected! Review it here: ${taskUrl}`,
+      ),
+    ]);
+  })(async () => {
+    await agentDeps(history)(runAgent)({
+      maxIterations: 2,
+      prompt: "You are a helpful notification bot.",
+      tools: [],
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  })();
+
+  assertEquals(callCount, 1);
+  const finalUtterance = history[history.length - 1];
+  assert(
+    finalUtterance.type === "own_utterance" &&
+      finalUtterance.text.includes(taskUrl),
+    "URLs from proactive task notification must be delivered without blocking",
+  );
+});
+
+Deno.test("utterance grounding gate allows URLs from compacted conversation summary", async () => {
+  const summaryUrl = "https://dashboard.service.net/records/12345";
+  const history: HistoryEvent[] = [
+    ownThoughtTurn(
+      `History compacted: 80 events → 14 summaries\n\nSummary 1:\n[This summary covers the period from May 1 to May 10]\nUser requested review for ${summaryUrl}.`,
+    ),
+    participantUtteranceTurn({
+      name: "user",
+      text: "what was the record link from earlier?",
+    }),
+  ];
+  let callCount = 0;
+
+  await injectCallModel((_events: HistoryEvent[]) => {
+    callCount++;
+    return Promise.resolve([
+      ownUtteranceTurn(`Here is the link from earlier: ${summaryUrl}`),
+    ]);
+  })(async () => {
+    await agentDeps(history)(runAgent)({
+      maxIterations: 2,
+      prompt: "You are a helpful assistant.",
+      tools: [],
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  })();
+
+  assertEquals(callCount, 1);
+  const finalUtterance = history[history.length - 1];
+  assert(
+    finalUtterance.type === "own_utterance" &&
+      finalUtterance.text.includes(summaryUrl),
+    "URLs from compacted summary must be delivered without blocking",
+  );
+});
+
+Deno.test("url grounding gate allows tool calls targeting a host provided in proactive task notification", async () => {
+  const taskHost = "dashboard.target-service.net";
+  const probe = probeTool("fetch_data", "Fetch data from a URL", "url");
+  const history: HistoryEvent[] = [
+    ownThoughtTurn(
+      `PROACTIVE TASK: You have a task to complete: New item at https://${taskHost}/items/123`,
+    ),
+  ];
+  await runWithScriptedModel(
+    { tools: [probe.tool], history },
+    callOnceThenReply("fetch_data", { url: `https://${taskHost}/items/123` }),
+  );
+  assertExecuted(history, probe.wasExecuted);
+});
