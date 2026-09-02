@@ -68,8 +68,8 @@ Deno.test("progress audit runs on the mini model over a bounded recent-history s
   );
   for (const call of captured) {
     assert(
-      (call.opts as { mini?: boolean }).mini === true,
-      "progress audit must use the mini model, not the full-size one",
+      (call.opts as { tier?: string }).tier === "flash",
+      "progress audit must use the flash model tier, not the full-size one",
     );
     assert(
       call.userMsgLength < 35_000,
