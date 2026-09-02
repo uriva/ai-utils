@@ -214,7 +214,7 @@ type GeminiModelVersions = {
 
 const defaultGeminiModelVersions: GeminiModelVersions = {
   pro: "gemini-3.7-flash",
-  flash: "gemini-3.7-flash",
+  flash: "gemini-3.8-flash",
   lite: "gemini-3.5-flash-lite",
   fallback: "gemini-3.5-flash-lite",
 };
