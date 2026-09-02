@@ -106,7 +106,22 @@ llmTest(
         `${genericSystemPadding}\n\nLanguage rule: Match the user's language. If they ask in Nepali or Romanized Nepali, reply in Nepali.\nUser query: Namaste, tapai ko kasto chha?`;
       await assertNoScriptDrift(
         longInput,
-        "नमस्ते, म सञ्चै छु। तपाइँलाई कसरी सहयोग गर्न सक्छु?",
+        "नमस्ते, म सञ्चै छु। तपाइँलाई कसרי सहयोग गर्न सक्छु?",
+      );
+    })(),
+);
+
+llmTest(
+  "assertNoScriptDrift allows script switch when instruction is in middle of large 50k+ input",
+  () =>
+    injectSecrets(async () => {
+      const padding = "Standard agent instructions and tool specifications. "
+        .repeat(1000);
+      const longInputWithMiddleInstruction =
+        `${padding}\n\nTask instructions: Write in clean, natural, and concise Hebrew.\n\n${padding}`;
+      await assertNoScriptDrift(
+        longInputWithMiddleInstruction,
+        "שלום לכולם, להלן עדכון מערכת חשוב.",
       );
     })(),
 );

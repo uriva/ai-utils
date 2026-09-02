@@ -111,7 +111,7 @@ const makeScriptDriftError = (
   return err;
 };
 
-const formatInputForVerifier = (input: string, maxChars = 8000): string => {
+const formatInputForVerifier = (input: string, maxChars = 250_000): string => {
   if (input.length <= maxChars) return input;
   const half = Math.floor(maxChars / 2);
   return `${input.slice(0, half)}\n\n[... ${
