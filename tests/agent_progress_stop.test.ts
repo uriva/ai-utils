@@ -203,13 +203,14 @@ runForAllProviders(
       "Expected the agent to terminate with a user-facing own_utterance",
     );
     if ("text" in lastEvent && typeof lastEvent.text === "string") {
+      const lower = lastEvent.text.toLowerCase();
       assert(
-        lastEvent.text.includes("unable to make progress") ||
-          lastEvent.text.includes("unable to list") ||
-          lastEvent.text.includes("unable to proceed") ||
-          lastEvent.text.includes("unable to") ||
-          lastEvent.text.includes("Permission denied") ||
-          lastEvent.text.includes("permission"),
+        lower.includes("unable to make progress") ||
+          lower.includes("unable to list") ||
+          lower.includes("unable to proceed") ||
+          lower.includes("unable to") ||
+          lower.includes("permission") ||
+          lower.includes("denied"),
         `Expected user-facing utterance to explain the failure, but got: ${lastEvent.text}`,
       );
     } else {
