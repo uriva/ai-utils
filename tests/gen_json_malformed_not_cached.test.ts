@@ -30,7 +30,7 @@ const fakeResponse = (text: string) =>
 const schema = z.object({ answer: z.string() });
 
 const runGenJson = () =>
-  genJson({ provider: "google", mini: false }, "sys", schema)("user");
+  genJson({ provider: "google", tier: "pro" }, "sys", schema)("user");
 
 Deno.test("genJson recovers from a one-off malformed response and never caches it", async () => {
   const validJson = JSON.stringify({ answer: "ok" });

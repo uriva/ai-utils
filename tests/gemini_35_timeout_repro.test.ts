@@ -103,6 +103,7 @@ Deno.test({
     injectGeminiModelVersions(() => ({
       pro: reproModel,
       flash: reproModel,
+      lite: reproModel,
       fallback: reproModel,
     })),
     injectGeminiModelCallTimeoutMs(() => reproTimeoutMs),

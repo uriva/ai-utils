@@ -1,8 +1,10 @@
 import { type EitherOutput, type Func, throwerCatcher } from "gamla";
 import type { z, ZodType } from "zod/v4";
 
+export type ModelTier = "lite" | "flash" | "pro";
+
 export type ModelOpts = {
-  mini: boolean;
+  tier?: ModelTier;
   maxOutputTokens?: number;
   provider?: "google" | "openai" | "gemini";
   disableThinking?: boolean;

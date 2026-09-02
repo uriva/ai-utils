@@ -19,6 +19,7 @@ import {
   isRetryableError,
   isRetryableUploadError,
   type ModelOpts,
+  type ModelTier,
   normalizeError,
 } from "./utils.ts";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
@@ -207,12 +208,14 @@ const openAiToGeminiMessage = pipe(
 type GeminiModelVersions = {
   pro: string;
   flash: string;
+  lite: string;
   fallback: string;
 };
 
 const defaultGeminiModelVersions: GeminiModelVersions = {
   pro: "gemini-3.7-flash",
   flash: "gemini-3.7-flash",
+  lite: "gemini-3.5-flash-lite",
   fallback: "gemini-3.5-flash-lite",
 };
 
@@ -224,11 +227,16 @@ export const injectGeminiModelVersions = geminiModelVersions.inject;
 
 export const geminiProVersion = defaultGeminiModelVersions.pro;
 export const geminiFlashVersion = defaultGeminiModelVersions.flash;
+export const geminiLiteVersion = defaultGeminiModelVersions.lite;
 export const geminiFallbackVersion = defaultGeminiModelVersions.fallback;
 
-export const geminiModelVersion = (mini: boolean | undefined) => {
+export const geminiModelVersion = (
+  tierOrLight: ModelTier | boolean | undefined = "flash",
+) => {
   const versions = geminiModelVersions.access();
-  return mini ? versions.flash : versions.pro;
+  if (tierOrLight === "lite") return versions.lite;
+  if (tierOrLight === "pro" || tierOrLight === false) return versions.pro;
+  return versions.flash;
 };
 
 export const alternateGeminiModelVersion = (model: string) => {
@@ -239,15 +247,19 @@ export const alternateGeminiModelVersion = (model: string) => {
 };
 
 export const geminiThinkingConfig = (
-  mini: boolean | undefined,
+  tierOrLight: ModelTier | boolean | undefined = "flash",
   disableThinking: boolean | undefined = false,
 ): ThinkingConfig => {
   if (disableThinking) {
-    return { thinkingBudget: 0 };
+    return tierOrLight === "lite"
+      ? { thinkingBudget: 1 }
+      : { thinkingBudget: 0 };
   }
+  const isLight = tierOrLight === "flash" || tierOrLight === "lite" ||
+    tierOrLight === true;
   return {
     includeThoughts: true,
-    ...(mini
+    ...(isLight
       ? { thinkingLevel: ThinkingLevel.THINKING_LEVEL_UNSPECIFIED }
       : {}),
   };
@@ -282,12 +294,12 @@ const generateContentInjection: Injection<
 export const injectGeminiGenerateContent = generateContentInjection.inject;
 
 export const geminiGenJsonFromConvo: <T extends ZodType>(
-  { mini, maxOutputTokens, disableThinking }: ModelOpts,
+  opts: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
   attachments?: MediaAttachment[],
 ) => Promise<z.infer<T>> = async <T extends ZodType>(
-  { mini, maxOutputTokens, disableThinking }: ModelOpts,
+  { tier = "flash", maxOutputTokens, disableThinking }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
   attachments?: MediaAttachment[],
@@ -322,11 +334,11 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
   }
   const callWithReq = (c: Content[]) =>
     cachedCall({
-      model: geminiModelVersion(mini),
+      model: geminiModelVersion(tier),
       config: {
         responseMimeType: "application/json",
         responseSchema: zodToGeminiParameters(zodType),
-        thinkingConfig: geminiThinkingConfig(mini, disableThinking),
+        thinkingConfig: geminiThinkingConfig(tier, disableThinking),
         ...(maxOutputTokens ? { maxOutputTokens } : {}),
       },
       contents: c,
@@ -375,14 +387,14 @@ export const attachmentsToParts = (
   });
 
 export const geminiGenText = async (
-  { mini, maxOutputTokens }: ModelOpts,
+  { tier = "flash", maxOutputTokens, disableThinking }: ModelOpts,
   prompt: string,
   attachments: MediaAttachment[],
 ): Promise<string> => {
   const req = (model: string) => ({
     model,
     config: {
-      thinkingConfig: geminiThinkingConfig(mini),
+      thinkingConfig: geminiThinkingConfig(tier, disableThinking),
       ...(maxOutputTokens ? { maxOutputTokens } : {}),
     },
     contents: [{
@@ -400,7 +412,7 @@ export const geminiGenText = async (
         }).models.generateContent(req(model)),
     )();
 
-  const primaryModel = geminiModelVersion(mini);
+  const primaryModel = geminiModelVersion(tier);
   const result = await execGen(primaryModel).catch((err: unknown) => {
     if (
       !isRetryableError(err) &&

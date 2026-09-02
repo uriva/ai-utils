@@ -52,7 +52,7 @@ import { genJson, injectGeminiToken } from "@uri/ai-utils";
 import { z } from "@uri/ai-utils";
 
 const extract = genJson(
-  { provider: "google", mini: true },
+  { provider: "google", tier: "flash" },
   "Extract the person's name and age from the text.",
   z.object({ name: z.string(), age: z.number() }),
 );

@@ -65,7 +65,7 @@ const runGenJson = (
   // deno-lint-ignore no-explicit-any
   attachments?: any[],
 ): Promise<z.infer<typeof schema>> =>
-  genJson({ provider: "google", mini: false }, "sys", schema)(
+  genJson({ provider: "google", tier: "pro" }, "sys", schema)(
     "user",
     attachments,
   );

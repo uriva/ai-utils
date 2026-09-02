@@ -119,7 +119,7 @@ llmTest(
     injectSecrets(async () => {
       const schema = z.object({ response: z.string() });
       const result = await genJsonFromConvo(
-        { provider: "google", mini: true },
+        { provider: "google", tier: "flash" },
         [
           { role: "system", content: "ענה בעברית בלבד כ-JSON." },
           {

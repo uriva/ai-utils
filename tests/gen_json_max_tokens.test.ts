@@ -32,7 +32,7 @@ llmTest(
     await assertRejects(
       () =>
         genJson(
-          { provider: "google", mini: false, maxOutputTokens: 5 },
+          { provider: "google", tier: "pro", maxOutputTokens: 5 },
           "Please output an extremely long and detailed response conforming to the schema. V2",
           schema,
         )("Write a 500-word introduction about the history of computing."),
@@ -68,7 +68,7 @@ Deno.test(
         injectGeminiGenerateContent(maxTokensOnPrimaryThenValidOnFallback)(
           async () => {
             const result = await genJson(
-              { provider: "google", mini: false },
+              { provider: "google", tier: "pro" },
               "sys",
               simpleSchema,
             )("user");

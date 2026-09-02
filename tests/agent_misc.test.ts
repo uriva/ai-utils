@@ -23,14 +23,14 @@ runForAllProviders(
       { role: "user", content: "hello" },
     ];
     await each((provider) =>
-      each(async (mini) => {
+      each(async (tier: "lite" | "flash" | "pro") => {
         const result = await genJsonFromConvo(
-          { provider, mini },
+          { provider, tier },
           messages,
           schema,
         );
         assertEquals(result, { hello: result.hello });
-      })([true, false])
+      })(["lite", "flash", "pro" as const])
     )(["openai", "google"]);
   },
 );

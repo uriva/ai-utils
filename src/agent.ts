@@ -3184,7 +3184,7 @@ Conversation History (most recent events):
 ${recentHistorySlice(normalizedHistory)}`;
 
     const decision = await genJson(
-      { provider: "google", mini: true },
+      { provider: "google", tier: "flash" },
       systemPrompt,
       StopDecisionSchema,
     )(userPrompt);

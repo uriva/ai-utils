@@ -50,7 +50,7 @@ Deno.test("genJson throws instead of returning a schema-violating empty object",
     injectCacher(poisonedTextCacher("{}"))(async () => {
       await assertRejects(
         () =>
-          genJson({ provider: "google", mini: false }, "split it", schema)(
+          genJson({ provider: "google", tier: "pro" }, "split it", schema)(
             "some long prompt",
           ),
         Error,
@@ -75,7 +75,7 @@ Deno.test("genJson recovers from a one-off empty candidate response via retry", 
     injectCacher(memoryCacher({}))(
       injectGeminiGenerateContent(emptyThenValid)(async () => {
         const result = await genJson(
-          { provider: "google", mini: false },
+          { provider: "google", tier: "pro" },
           "sys",
           simpleSchema,
         )("user");
@@ -106,7 +106,7 @@ Deno.test("genJson falls back to alternate model when primary model persistently
       injectGeminiGenerateContent(emptyOnPrimaryThenValidOnFallback as any)(
         async () => {
           const result = await genJson(
-            { provider: "google", mini: false },
+            { provider: "google", tier: "pro" },
             "sys",
             simpleSchema,
           )("user");

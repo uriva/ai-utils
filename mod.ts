@@ -248,7 +248,11 @@ export {
 } from "./src/continuousCompaction.ts";
 export { createDuplexPair, type DuplexMessage } from "./src/duplex.ts";
 export {
+  geminiFallbackVersion,
+  geminiFlashVersion,
   geminiGenText,
+  geminiLiteVersion,
+  geminiProVersion,
   injectGeminiModelVersions,
   injectGeminiToken,
   validateSchema,
@@ -290,7 +294,11 @@ export {
   isLikelyPhoneNumber,
   ungroundedHostBlockedNotice,
 } from "./src/urlGrounding.ts";
-export { catchAiRefusesToAdhereToTyping } from "./src/utils.ts";
+export {
+  catchAiRefusesToAdhereToTyping,
+  type ModelOpts,
+  type ModelTier,
+} from "./src/utils.ts";
 export { z } from "zod/v4";
 
 export const runAgent = (spec: AgentSpec): Promise<void> => {

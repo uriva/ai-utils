@@ -19,7 +19,7 @@ export const injectOpenAiToken = (token: string): Injector =>
 
 // deno-lint-ignore no-explicit-any
 export const openAiGenJsonFromConvo = async <T extends ZodType<any, any, any>>(
-  { mini }: ModelOpts,
+  { tier = "flash" }: ModelOpts,
   messages: ChatCompletionMessageParam[],
   zodType: T,
 ): Promise<z.infer<T>> => {
@@ -30,7 +30,7 @@ export const openAiGenJsonFromConvo = async <T extends ZodType<any, any, any>>(
       .parse(opts)
   );
   const { choices } = await cachedCall({
-    model: mini ? "gpt-5-mini" : "gpt-5",
+    model: tier === "pro" ? "gpt-5" : "gpt-5-mini",
     messages,
     response_format: {
       type: "json_schema",

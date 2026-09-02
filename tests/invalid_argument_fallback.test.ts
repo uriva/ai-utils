@@ -122,7 +122,7 @@ Deno.test("geminiGenJsonFromConvo falls back to alternate model on 400 INVALID_A
     injectGeminiGenerateContent(fakeGenerateContent),
   )(() =>
     geminiGenJsonFromConvo(
-      { mini: true },
+      { tier: "flash" },
       [{ role: "user", content: "hello" }],
       z.object({ ok: z.boolean() }),
     )

@@ -137,7 +137,7 @@ export const assertNoScriptDrift = async (
   const formattedInput = formatInputForVerifier(input);
 
   const { legitimate, reason } = await genJson(
-    { provider: "google", mini: true },
+    { provider: "google", tier: "flash" },
     verifierSystemPrompt,
     verdictSchema,
   )(

@@ -131,7 +131,7 @@ export const compactToolResultsInMemory = async (
           tldr = await generateTLDR(toolCall, originalResult);
         } else {
           const res = await genJson(
-            { provider: "google", mini: true, disableThinking: true },
+            { provider: "google", tier: "lite", disableThinking: true },
             makeTldrPrompt(toolCall, originalResult),
             tldrSchema,
           )("");
