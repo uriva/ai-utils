@@ -119,7 +119,7 @@ const resolveScratchInParams = async <T>(params: T): Promise<T> => {
 
 export const readScratchFileToolName = "read_scratch_file";
 
-const defaultScratchPadThreshold = 2000;
+const defaultScratchPadThreshold = 15000;
 const maxScratchReadLines = 200;
 
 const scratchPadSpillNotice = (

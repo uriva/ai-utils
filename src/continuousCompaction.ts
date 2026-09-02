@@ -12,7 +12,7 @@ export const getSpillThreshold = (
   timestamp: number,
   turnDistance = 0,
 ): number => {
-  if (turnDistance >= 2) {
+  if (turnDistance >= 3) {
     return 1500;
   }
   const ageMs = Date.now() - timestamp;
