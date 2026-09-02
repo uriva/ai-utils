@@ -34,7 +34,7 @@ const runOnce = async (
     participantUtteranceTurn({ name: "User", text: IRRELEVANT_MESSAGE }),
   ];
   await agentDeps(history)(runAgentWithProvider)({
-    maxIterations: 3,
+    maxIterations: 5,
     tools: [],
     prompt: SOCCER_BOT_PROMPT,
     lightModel: true,
