@@ -30,6 +30,22 @@ const trackedScripts = [
   "Georgian",
 ] as const;
 
+const scriptKeywords: Record<string, RegExp> = {
+  Hebrew: /\b(hebrew|ivrit)\b/i,
+  Armenian: /\barmenian\b/i,
+  Arabic: /\barabic\b/i,
+  Cyrillic:
+    /\b(cyrillic|russian|ukrainian|bulgarian|belarusian|serbian|macedonian)\b/i,
+  Greek: /\bgreek\b/i,
+  Han: /\b(chinese|mandarin|cantonese|hanzi|kanji)\b/i,
+  Hiragana: /\b(japanese|hiragana|nihongo)\b/i,
+  Katakana: /\b(japanese|katakana|nihongo)\b/i,
+  Hangul: /\b(korean|hangul)\b/i,
+  Thai: /\bthai\b/i,
+  Devanagari: /\b(hindi|sanskrit|marathi|nepali|devanagari)\b/i,
+  Georgian: /\bgeorgian\b/i,
+};
+
 const scriptCounts = (text: string): Record<string, number> => {
   const counts: Record<string, number> = {};
   for (const script of trackedScripts) {
@@ -39,8 +55,13 @@ const scriptCounts = (text: string): Record<string, number> => {
   return counts;
 };
 
-export const scriptsPresent = (text: string): Set<string> =>
-  new Set(Object.keys(scriptCounts(text)));
+export const scriptsPresent = (text: string): Set<string> => {
+  const present = new Set(Object.keys(scriptCounts(text)));
+  for (const [script, pattern] of Object.entries(scriptKeywords)) {
+    if (pattern.test(text)) present.add(script);
+  }
+  return present;
+};
 
 // Scripts that appear in `output` but not in `input`, with how many chars.
 export const driftingScripts = (

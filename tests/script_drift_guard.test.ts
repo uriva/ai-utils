@@ -128,6 +128,22 @@ llmTest(
 
 import { genJsonFromConvo } from "../src/genJson.ts";
 
+Deno.test("scriptsPresent recognizes language keywords in Latin script", () => {
+  const present = scriptsPresent(
+    "Please write the response in Hebrew without markdown",
+  );
+  assert(present.has("Hebrew"));
+  assertEquals(present.has("Armenian"), false);
+});
+
+Deno.test("driftingScripts is empty when language is mentioned in English prompt", () => {
+  const englishPrompt =
+    "Post a product update to our Hebrew community. Write in clean, natural Hebrew.";
+  const hebrewOutput = "היי חברים, עדכון חדש זמין כעת!";
+  const drift = driftingScripts(englishPrompt, hebrewOutput);
+  assertEquals(Object.keys(drift).length, 0);
+});
+
 llmTest(
   "genJsonFromConvo completes successfully on clean Hebrew input",
   () =>
