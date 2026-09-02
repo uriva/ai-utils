@@ -283,12 +283,6 @@ export {
 export { injectKimiToken, kimiGenJsonFromConvo } from "./src/kimiJson.ts";
 export { injectOpenAiToken } from "./src/openai.ts";
 export {
-  assertNoScriptDrift,
-  driftingScripts,
-  type ScriptDriftError,
-  scriptsPresent,
-} from "./src/scriptDriftGuard.ts";
-export {
   findUngroundedUtteranceArtifacts,
   isComplexUrl,
   isLikelyPhoneNumber,

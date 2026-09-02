@@ -81,7 +81,6 @@ import {
   stripAnsi,
   syntheticTimeoutMarker,
 } from "./utils.ts";
-import { assertNoScriptDrift } from "./scriptDriftGuard.ts";
 import { isCompactedSummaryText } from "./compaction.ts";
 import {
   getOrCreateGeminiContextCache,
@@ -1791,62 +1790,6 @@ export const isSafetyBlockReason = (reason: string | undefined): boolean => {
   );
 };
 
-const eventText = (event: GeminiHistoryEvent): string =>
-  "text" in event && typeof event.text === "string"
-    ? event.text
-    : "result" in event && typeof event.result === "string"
-    ? event.result
-    : "";
-
-// Gemini-specific: reject a model turn that rewrote the conversation's language
-// into a different writing system (homoglyph corruption). The reference is the
-// system prompt plus all prior turn text; the checked output is the text this
-// turn produced.
-const guardResultScriptDrift = async (
-  prompt: string,
-  inputEvents: GeminiHistoryEvent[],
-  result: GeminiHistoryEvent[],
-): Promise<void> => {
-  const producedText = result.map(eventText).join("\n").trim();
-  if (!producedText) return;
-  const reference = [prompt, ...inputEvents.map(eventText)].join("\n");
-  await assertNoScriptDrift(reference, producedText);
-};
-
-const isScriptDriftError = (e: unknown): boolean =>
-  e instanceof Error && "scriptDrift" in e;
-
-// Homoglyph corruption is a transient, low-frequency model glitch: the same
-// prompt almost always produces clean text on the next attempt. So re-roll the
-// model a bounded number of times when the guard flags drift, and only surface
-// the error if it persists — otherwise a one-off glitch becomes a user-facing
-// failure even though a plain retry would have fixed it.
-const maxScriptDriftRerolls = 2;
-
-const callInnerWithDriftReroll = async (
-  spec: AgentSpec,
-  events: GeminiHistoryEvent[],
-  box: { reason?: string },
-): Promise<GeminiHistoryEvent[]> => {
-  for (let attempt = 0; attempt <= maxScriptDriftRerolls; attempt++) {
-    const result = await finishReasonSink.inject((r: string) => {
-      box.reason = r;
-    })(() => geminiAgentCallerInner(spec)(events))();
-    try {
-      await guardResultScriptDrift(spec.prompt, events, result);
-      return result;
-    } catch (e) {
-      if (!isScriptDriftError(e) || attempt === maxScriptDriftRerolls) throw e;
-      console.warn(
-        `[script-drift] detected drift in model response (attempt ${
-          attempt + 1
-        }/${maxScriptDriftRerolls + 1}); re-rolling`,
-      );
-    }
-  }
-  throw new Error("unreachable: script drift re-roll loop exited");
-};
-
 export const geminiAgentCaller =
   (spec: AgentSpec) =>
   async (events: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> => {
@@ -1858,7 +1801,9 @@ export const geminiAgentCaller =
     }
 
     const box: { reason?: string } = {};
-    const result = await callInnerWithDriftReroll(spec, events, box);
+    const result = await finishReasonSink.inject((r: string) => {
+      box.reason = r;
+    })(() => geminiAgentCallerInner(spec)(events))();
     if (isSafetyBlockReason(box.reason)) {
       const responseId = generateId();
       return [

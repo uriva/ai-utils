@@ -11,28 +11,8 @@ import {
   type ModelOpts,
   validateAgainstSchema,
 } from "./utils.ts";
-import { assertNoScriptDrift } from "./scriptDriftGuard.ts";
 
 export { invalidGenJsonMessage };
-
-const messagesToText = (messages: ChatCompletionMessageParam[]): string =>
-  messages
-    .map(({ content }) => typeof content === "string" ? content : "")
-    .join("\n");
-
-// Gemini-specific: guard against the model rewriting the input's language into
-// a different writing system (homoglyph corruption) inside structured output.
-// Throws so the caller's retry produces a clean generation instead of caching
-// or surfacing corrupted text.
-const guardGeminiScriptDrift = async <R>(
-  inputText: string,
-  result: R,
-): Promise<R> => {
-  await assertNoScriptDrift(inputText, JSON.stringify(result));
-  return result;
-};
-
-const maxScriptDriftRerolls = 2;
 
 const routeGeminiWithKimiBlockedFallback = <T extends ZodType>(
   opts: ModelOpts,
@@ -60,33 +40,13 @@ export const genJsonFromConvo = async <T extends ZodType>(
       await openAiGenJsonFromConvo(opts, messages, zodType),
     );
   }
-  for (let attempt = 0; attempt <= maxScriptDriftRerolls; attempt++) {
-    try {
-      const result = await routeGeminiWithKimiBlockedFallback(
-        opts,
-        messages,
-        zodType,
-        attachments,
-      );
-      return await guardGeminiScriptDrift(
-        messagesToText(messages),
-        validateAgainstSchema(zodType, result),
-      );
-    } catch (e) {
-      if (
-        e instanceof Error &&
-        "scriptDrift" in e &&
-        attempt < maxScriptDriftRerolls
-      ) {
-        console.warn(
-          `Script drift detected in genJson (homoglyph corruption) on attempt ${attempt}. Retrying...`,
-        );
-        continue;
-      }
-      throw e;
-    }
-  }
-  throw new Error("Unreachable");
+  const result = await routeGeminiWithKimiBlockedFallback(
+    opts,
+    messages,
+    zodType,
+    attachments,
+  );
+  return validateAgainstSchema(zodType, result);
 };
 
 import { context, type Injection } from "@uri/inject";
