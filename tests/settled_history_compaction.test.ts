@@ -111,3 +111,76 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "runAgent - respects historyCompactionTokenThreshold if specified and does not compact settled sessions when below threshold",
+  async () => {
+    const baseTime = Date.now() - 24 * 60 * 60 * 1000; // 24 hours ago
+    const hourMs = 60 * 60 * 1000;
+    const fillerText =
+      "detailed discussion about previous task parameters and logs ".repeat(50); // ~500 tokens per message
+
+    // Create 3 distinct past sessions totaling ~20k tokens
+    const history: HistoryEvent[] = [];
+    for (let session = 0; session < 3; session++) {
+      const sessionTime = baseTime + session * 2 * hourMs;
+      for (let turn = 0; turn < 6; turn++) {
+        history.push({
+          id: `p-${session}-${turn}`,
+          type: "participant_utterance",
+          isOwn: false,
+          name: "user",
+          text: `User message session ${session} turn ${turn}: ${fillerText}`,
+          timestamp: sessionTime + turn * 1000,
+        });
+        history.push({
+          id: `o-${session}-${turn}`,
+          type: "own_utterance",
+          isOwn: true,
+          text:
+            `Assistant response session ${session} turn ${turn}: ${fillerText}`,
+          timestamp: sessionTime + turn * 1000 + 500,
+        });
+      }
+    }
+
+    history.push({
+      id: "p-active",
+      type: "participant_utterance",
+      isOwn: false,
+      name: "user",
+      text: "What is the status?",
+      timestamp: Date.now(),
+    });
+
+    let receivedHistory: HistoryEvent[] = [];
+
+    const fakeCallModel = (
+      passedHistory: HistoryEvent[],
+    ): Promise<HistoryEvent[]> => {
+      receivedHistory = passedHistory;
+      return Promise.resolve([
+        ownUtteranceTurn("Status is normal."),
+      ]);
+    };
+
+    await pipe(
+      injectCallModel(fakeCallModel),
+    )(async () => {
+      await agentDeps(history)(runAgent)({
+        maxIterations: 5,
+        tools: [someTool],
+        prompt: "You are a helpful assistant.",
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+        historyCompactionTokenThreshold: 50_000, // Explicitly higher than the ~20k tokens in history
+      });
+    })();
+
+    assertEquals(
+      receivedHistory.length,
+      37,
+      "Expected all 37 raw events to be preserved in model context because history is under 50k threshold",
+    );
+  },
+);

@@ -1,4 +1,3 @@
-import { z } from "zod/v4";
 import {
   type HistoryEvent,
   learnSkillToolName,
@@ -6,7 +5,6 @@ import {
   unlearnSkillToolName,
 } from "./agent.ts";
 import { groupToolCallPairs } from "./compaction.ts";
-import { genJson } from "./genJson.ts";
 
 export const getSpillThreshold = (
   timestamp: number,
@@ -37,28 +35,32 @@ const isCompactedToolResult = (text: string | undefined): boolean =>
 const isSpillNotice = (text: string | undefined): boolean =>
   typeof text === "string" && text.includes("[Tool output was truncated");
 
-const tldrSchema = z.object({
-  tldr: z.string().describe(
-    "A concise one-sentence technical summary of the command outcome (max 25 words).",
-  ),
-});
-
-const makeTldrPrompt = (
+export const defaultDeterministicTLDR = (
   toolCall: HistoryEvent & { type: "tool_call" },
   resultText: string,
-) => `
-You are a technical logging utility.
-Summarize the output of this technical command/tool call in exactly one concise sentence (maximum 25 words).
-Focus strictly on what the tool was trying to achieve, and its final outcome, error status, or result.
-Do not include any conversational preamble.
-
-Tool Called:
-Name: ${toolCall.name}
-Parameters: ${JSON.stringify(toolCall.parameters, null, 2)}
-
-Tool Output:
-${resultText.slice(0, 8000)}
-`;
+): string => {
+  const lineCount = resultText.split("\n").length;
+  const paramEntries =
+    toolCall.parameters && typeof toolCall.parameters === "object"
+      ? Object.entries(toolCall.parameters)
+      : [];
+  const paramSummary = paramEntries.length > 0
+    ? paramEntries
+      .map(([k, v]) =>
+        `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`
+      )
+      .join(", ")
+      .slice(0, 100)
+    : "";
+  const firstNonEmptyLine = resultText
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0)
+    ?.slice(0, 120) ?? "";
+  const paramPart = paramSummary ? ` (${paramSummary})` : "";
+  const outputPart = firstNonEmptyLine ? ` Result: "${firstNonEmptyLine}"` : "";
+  return `Command "${toolCall.name}"${paramPart} completed.${outputPart} (${lineCount} lines, ${resultText.length} chars).`;
+};
 
 export type CompactionOptions = {
   setScratch: (id: string, content: string) => Promise<void>;
@@ -124,21 +126,13 @@ export const compactToolResultsInMemory = async (
         await setScratch(toolResult.id, originalResult);
       }
 
-      // Generate 1-sentence technical TLDR with call context
-      let tldr = "Command completed.";
-      try {
-        if (generateTLDR) {
+      let tldr = defaultDeterministicTLDR(toolCall, originalResult);
+      if (generateTLDR) {
+        try {
           tldr = await generateTLDR(toolCall, originalResult);
-        } else {
-          const res = await genJson(
-            { provider: "google", tier: "lite", disableThinking: true },
-            makeTldrPrompt(toolCall, originalResult),
-            tldrSchema,
-          )("");
-          tldr = res.tldr;
+        } catch (_e) {
+          // Fallback to deterministic TLDR if custom generateTLDR fails
         }
-      } catch (_e) {
-        // Fallback if TLDR generation fails
       }
 
       const lineCount = originalResult.split("\n").length;

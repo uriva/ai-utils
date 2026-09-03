@@ -133,3 +133,75 @@ Deno.test("continuousCompaction - runToolResultCompaction retroactively compacts
     (history[3] as Extract<HistoryEvent, { type: "tool_result" }>).result,
   );
 });
+
+Deno.test("continuousCompaction - produces rich deterministic technical TLDR when generateTLDR is omitted without calling LLM", async () => {
+  const now = Date.now();
+  const scratchStore = new Map<string, string>();
+  const replacements: Record<string, HistoryEvent> = {};
+
+  const setScratch = (id: string, content: string): Promise<void> => {
+    scratchStore.set(id, content);
+    return Promise.resolve();
+  };
+
+  const rewriteHistory = (
+    reps: Record<string, HistoryEvent>,
+  ): Promise<void> => {
+    Object.assign(replacements, reps);
+    return Promise.resolve();
+  };
+
+  const oldToolCallId = "call-inspect-1";
+  const history: HistoryEvent[] = [
+    {
+      id: oldToolCallId,
+      type: "tool_call",
+      name: "inspect_module",
+      parameters: { module: "Database", depth: 2 },
+      timestamp: now - 30 * 60 * 1000,
+      isOwn: true,
+    },
+    {
+      id: "old-inspect-res",
+      type: "tool_result",
+      toolCallId: oldToolCallId,
+      result:
+        "Found 24 schema definitions and 3 migrations.\nDetails: all migrations valid.\n" +
+        "x".repeat(8000),
+      timestamp: now - 29 * 60 * 1000,
+      isOwn: true,
+    },
+  ];
+
+  // Run compaction WITHOUT passing generateTLDR
+  await runToolResultCompaction(
+    history,
+    { setScratch },
+    rewriteHistory,
+  );
+
+  const updatedResult = replacements["old-inspect-res"] as Extract<
+    HistoryEvent,
+    { type: "tool_result" }
+  >;
+  assertNotEquals(updatedResult, undefined);
+
+  // Must include rich deterministic info (tool name, parameters, first line of output)
+  assertStringIncludes(
+    updatedResult.result,
+    'Memory TLDR: Command "inspect_module"',
+  );
+  assertStringIncludes(
+    updatedResult.result,
+    "module: Database",
+  );
+  assertStringIncludes(
+    updatedResult.result,
+    "Found 24 schema definitions and 3 migrations.",
+  );
+  // Must NOT fall back to dummy uninformative "Command completed."
+  assertEquals(
+    updatedResult.result.includes("Memory TLDR: Command completed."),
+    false,
+  );
+});

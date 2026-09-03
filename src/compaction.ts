@@ -419,14 +419,21 @@ const summarizePlainText = async (text: string): Promise<string> =>
     )(text),
   );
 
-export const summarizeEvents = async (
+const inMemorySummaryCache = new Map<string, Promise<string>>();
+
+export const summarizeEvents = (
   events: HistoryEvent[],
 ): Promise<string> => {
   const plainText = eventsToPlainText(events);
+  const existing = inMemorySummaryCache.get(plainText);
+  if (existing) return existing;
+
   const cachedSummarize = makeCache("settled-session-summaries-v1")(
     (text: string) => summarizePlainText(text),
   );
-  return await cachedSummarize(plainText);
+  const promise = cachedSummarize(plainText);
+  inMemorySummaryCache.set(plainText, promise);
+  return promise;
 };
 
 const formatSegmentRange = (start: number, end: number, timezone: string) => {

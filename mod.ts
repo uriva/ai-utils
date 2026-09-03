@@ -243,6 +243,7 @@ export {
 } from "./src/compaction.ts";
 export { consultToolName } from "./src/consultTool.ts";
 export {
+  defaultDeterministicTLDR,
   getSpillThreshold,
   runToolResultCompaction,
 } from "./src/continuousCompaction.ts";

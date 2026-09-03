@@ -2679,6 +2679,7 @@ const projectModelContext = (
     rawHistory: events,
     timezoneIANA: spec.timezoneIANA,
     scratchPad,
+    settledTokenThreshold: spec.historyCompactionTokenThreshold,
   });
 
 // Pre-call meta-cognition gate: every `maxIterations` turns (or while a stop
