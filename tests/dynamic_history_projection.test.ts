@@ -191,7 +191,7 @@ Deno.test(
       },
     };
 
-    const longToolResult = "Server log line: error occurred\n".repeat(100); // ~3,000 chars
+    const longToolResult = "Server log line: error occurred\n".repeat(600);
 
     const rawHistory: HistoryEvent[] = [
       {
