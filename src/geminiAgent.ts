@@ -513,13 +513,14 @@ const geminiSdkExchange = async (
               accumulatedParts.push({ ...part });
             }
           } else if (part.functionCall) {
-            // Assume functionCalls are fully formed or overwrite previous partial ones of the same name
             const lastPart = accumulatedParts[accumulatedParts.length - 1];
-            if (
-              lastPart && lastPart.functionCall &&
-              lastPart.functionCall.name === part.functionCall.name
-            ) {
-              // If the SDK streams function calls by updating the object, we just replace it
+            const isSameCall = Boolean(
+              lastPart?.functionCall &&
+                (part.functionCall.id && lastPart.functionCall.id
+                  ? part.functionCall.id === lastPart.functionCall.id
+                  : lastPart.functionCall.name === part.functionCall.name),
+            );
+            if (isSameCall && lastPart) {
               lastPart.functionCall = part.functionCall;
               if (part.thoughtSignature) {
                 lastPart.thoughtSignature = part.thoughtSignature;
