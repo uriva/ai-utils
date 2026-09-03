@@ -338,6 +338,8 @@ const reconnectWindowMs = 60_000;
 const reconnectBaseDelayMs = 500;
 const reconnectMaxDelayMs = 8_000;
 
+const maxSkillInstructionChars = 800;
+
 const formatAudioSkillsPrompt = (skills?: AgentSpec["skills"]): string => {
   if (!skills || skills.length === 0) return "";
   const allSkills = skills ?? [];
@@ -350,7 +352,12 @@ const formatAudioSkillsPrompt = (skills?: AgentSpec["skills"]): string => {
   const primarySection = primarySkills.length > 0
     ? "\n\nPrimary Skills and Instructions:\n" +
       primarySkills
-        .map((s) => `### Skill: ${s.name}\n${s.instructions}`)
+        .map((s) => {
+          const inst = s.instructions.length > maxSkillInstructionChars
+            ? `${s.instructions.slice(0, maxSkillInstructionChars)}...`
+            : s.instructions;
+          return `### Skill: ${s.name}\n${inst}`;
+        })
         .join("\n\n")
     : "";
   const otherSection = otherSkills.length > 0
@@ -405,7 +412,7 @@ const isInternalScriptHelper = (name: string): boolean =>
   name.startsWith("encodeRfc") ||
   name.startsWith("buildMime");
 
-const maxAudioTools = 55;
+const maxAudioTools = 35;
 
 const collectAllAudioTools = (
   // deno-lint-ignore no-explicit-any

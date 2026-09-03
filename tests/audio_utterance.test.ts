@@ -12,6 +12,10 @@ import {
   spokenReplyOnly,
   transcriptOf,
 } from "../src/audioTransportAgent.ts";
+import {
+  buildLiveSetupMessage,
+  maxLiveSetupBytes,
+} from "../src/geminiLiveSession.ts";
 import { injectSecrets, withRetries } from "../test_helpers.ts";
 import { z } from "zod/v4";
 
@@ -704,4 +708,50 @@ Deno.test({
       );
     }),
   ),
+});
+
+Deno.test("buildLiveSetupMessage strictly budgets setup payload under maxLiveSetupBytes", () => {
+  const dummyDeclarations = Array.from({ length: 60 }, (_, i) => ({
+    name: `tool_${i}`,
+    description:
+      `Detailed description of tool number ${i} which performs complex tasks.`,
+    parameters: {
+      type: "object",
+      properties: {
+        arg1: { type: "string", description: "A string argument" },
+        arg2: { type: "number", description: "A number argument" },
+        nested: {
+          type: "object",
+          properties: {
+            subArg: { type: "string", description: "Nested sub argument" },
+          },
+        },
+      },
+      required: ["arg1"],
+    },
+  }));
+
+  const massivePrompt = "You are an assistant. ".repeat(4000); // ~92,000 characters
+  const setupMsg = buildLiveSetupMessage({
+    model: "models/gemini-3.1-flash-live-preview",
+    voiceName: "Aoede",
+    prompt: massivePrompt,
+    declarations: dummyDeclarations,
+  });
+
+  const byteLength = new TextEncoder().encode(setupMsg).length;
+  assert(
+    byteLength <= maxLiveSetupBytes,
+    `Expected setupMsg byteLength ${byteLength} <= ${maxLiveSetupBytes}`,
+  );
+
+  const parsed = JSON.parse(setupMsg);
+  assertEquals(parsed.setup.model, "models/gemini-3.1-flash-live-preview");
+  assertEquals(
+    parsed.setup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig
+      .voiceName,
+    "Aoede",
+  );
+  assert(parsed.setup.systemInstruction.parts[0].text.length > 0);
+  assert(parsed.setup.tools[0].functionDeclarations.length > 0);
 });

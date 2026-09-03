@@ -116,6 +116,71 @@ export type AudioSession = {
   close: () => Promise<void>;
 };
 
+export const maxLiveSetupBytes = 65_000;
+
+export const buildLiveSetupMessage = ({
+  model,
+  voiceName,
+  prompt,
+  declarations,
+  maxBytes = maxLiveSetupBytes,
+}: {
+  model: string;
+  voiceName: string;
+  prompt?: string;
+  declarations?: LiveFunctionDeclaration[];
+  maxBytes?: number;
+}): string => {
+  const buildPayload = (p?: string, decls?: LiveFunctionDeclaration[]) => ({
+    setup: {
+      model,
+      generationConfig: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName },
+          },
+        },
+      },
+      inputAudioTranscription: {},
+      outputAudioTranscription: {},
+      ...(p ? { systemInstruction: { parts: [{ text: p }] } } : {}),
+      ...(decls && decls.length > 0
+        ? { tools: [{ functionDeclarations: decls }] }
+        : {}),
+    },
+  });
+
+  const currentDecls = declarations ? [...declarations] : [];
+  let currentPrompt = prompt;
+  let setupMsg = JSON.stringify(buildPayload(currentPrompt, currentDecls));
+  let byteLength = new TextEncoder().encode(setupMsg).length;
+
+  while (byteLength > maxBytes && currentDecls.length > 5) {
+    currentDecls.pop();
+    setupMsg = JSON.stringify(buildPayload(currentPrompt, currentDecls));
+    byteLength = new TextEncoder().encode(setupMsg).length;
+  }
+
+  if (byteLength > maxBytes && currentPrompt) {
+    const excess = byteLength - maxBytes + 100;
+    currentPrompt = currentPrompt.slice(
+      0,
+      Math.max(500, currentPrompt.length - excess),
+    );
+    setupMsg = JSON.stringify(buildPayload(currentPrompt, currentDecls));
+    byteLength = new TextEncoder().encode(setupMsg).length;
+  }
+
+  while (byteLength > maxBytes && currentDecls.length > 0) {
+    currentDecls.pop();
+    setupMsg = JSON.stringify(buildPayload(currentPrompt, currentDecls));
+    byteLength = new TextEncoder().encode(setupMsg).length;
+  }
+
+  return setupMsg;
+};
+
 export const createAudioSession = async ({
   apiKey,
   prompt,
@@ -146,33 +211,20 @@ export const createAudioSession = async ({
 
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error("Gemini Live setup timed out"));
+      reject(new Error(`Gemini Live setup timed out after ${turnTimeoutMs}ms`));
     }, turnTimeoutMs);
     ws.onopen = () => {
       debug("websocket open");
-      const setupMsg = JSON.stringify({
-        setup: {
-          model,
-          generationConfig: {
-            responseModalities: ["AUDIO"],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName },
-              },
-            },
-          },
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-          ...(prompt
-            ? { systemInstruction: { parts: [{ text: prompt }] } }
-            : {}),
-          ...(tools && tools.length > 0
-            ? { tools: toolsToDeclarations(tools) }
-            : {}),
-        },
+      const declarations = tools && tools.length > 0
+        ? toolsToDeclarations(tools)[0]?.functionDeclarations
+        : undefined;
+      const setupMsg = buildLiveSetupMessage({
+        model,
+        voiceName,
+        prompt,
+        declarations,
       });
       ws.send(setupMsg);
-      //
     };
     ws.onerror = (error) => {
       clearTimeout(timeout);
@@ -181,7 +233,11 @@ export const createAudioSession = async ({
     ws.onclose = (e) => {
       debug(`close: code=${e.code} reason=${e.reason}`);
       clearTimeout(timeout);
-      reject(new Error("Gemini Live closed before setupComplete"));
+      reject(
+        new Error(
+          `Gemini Live closed before setupComplete: code=${e.code} reason=${e.reason}`,
+        ),
+      );
     };
     ws.onmessage = async (event) => {
       const msg = JSON.parse(await decodeWsData(event.data));
