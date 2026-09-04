@@ -82,7 +82,7 @@ const toolsToDeclarations = (
     })),
   }];
 
-const consumeTranscriptEvent = (
+export const consumeTranscriptEvent = (
   events: AudioSessionEvent[],
   type: "input_transcript" | "output_transcript",
   text: string,
@@ -256,12 +256,14 @@ export const createAudioSession = async ({
   });
 
   const flushEvents = () => {
-    if (!pendingTurn || bufferedEvents.length === 0) return;
-    clearTimeout(pendingTurn.timeout);
+    if (bufferedEvents.length === 0) return;
     const events = bufferedEvents;
     bufferedEvents = [];
-    pendingTurn.resolve(events);
-    pendingTurn = undefined;
+    if (pendingTurn) {
+      clearTimeout(pendingTurn.timeout);
+      pendingTurn.resolve(events);
+      pendingTurn = undefined;
+    }
   };
 
   const rejectPendingTurn = (error: Error) => {

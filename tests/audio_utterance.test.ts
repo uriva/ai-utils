@@ -14,6 +14,7 @@ import {
 } from "../src/audioTransportAgent.ts";
 import {
   buildLiveSetupMessage,
+  consumeTranscriptEvent,
   maxLiveSetupBytes,
 } from "../src/geminiLiveSession.ts";
 import { injectSecrets, withRetries } from "../test_helpers.ts";
@@ -558,6 +559,136 @@ Deno.test("emitSpokenUtteranceIfOpen ignores pending transcript after close", ()
   );
 
   assertEquals(emitted, []);
+});
+
+Deno.test(
+  "consumeTranscriptEvent merges chunks within turn but separates turns when buffer is flushed",
+  () => {
+    const events: AudioSessionEvent[] = [];
+    const emittedTurn1: string[] = [];
+    consumeTranscriptEvent(
+      events,
+      "output_transcript",
+      "Hello",
+      false,
+      (e) => {
+        if (e.type === "output_transcript") emittedTurn1.push(e.text);
+      },
+    );
+    consumeTranscriptEvent(
+      events,
+      "output_transcript",
+      " world",
+      true,
+      (e) => {
+        if (e.type === "output_transcript") emittedTurn1.push(e.text);
+      },
+    );
+
+    assertEquals(events.length, 1);
+    assertEquals(events[0], {
+      type: "output_transcript",
+      text: "Hello world",
+      finished: true,
+    });
+    assertEquals(emittedTurn1, ["Hello", "Hello world"]);
+
+    events.length = 0;
+
+    const emittedTurn2: string[] = [];
+    consumeTranscriptEvent(
+      events,
+      "output_transcript",
+      "How are you?",
+      true,
+      (e) => {
+        if (e.type === "output_transcript") emittedTurn2.push(e.text);
+      },
+    );
+
+    assertEquals(events.length, 1);
+    assertEquals(events[0], {
+      type: "output_transcript",
+      text: "How are you?",
+      finished: true,
+    });
+    assertEquals(emittedTurn2, ["How are you?"]);
+  },
+);
+
+Deno.test({
+  name:
+    "audio agent does not accumulate previous turns across multi-turn session",
+  ignore: !canRunLiveGemini,
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: injectSecrets(async () => {
+    const { left: testEndpoint, right: agentEndpoint } = createDuplexPair();
+    const outputEvents: HistoryEvent[] = [];
+
+    const agentTask = runAgent({
+      prompt:
+        "You are a helpful assistant. Keep replies under 5 words. In each turn, say ONLY what was asked.",
+      tools: [],
+      maxIterations: 5,
+      timezoneIANA: "UTC",
+      transport: {
+        kind: "audio" as const,
+        endpoint: agentEndpoint,
+        voiceName: "Aoede",
+        participantName: "User",
+      },
+      onOutputEvent: (event) => {
+        outputEvents.push(event);
+        return Promise.resolve();
+      },
+      rewriteHistory: async () => {},
+    });
+
+    await testEndpoint.sendData({
+      type: "text",
+      text: "Say: red",
+      from: "tester",
+    });
+
+    await waitForCondition(
+      () => outputEvents.some((e) => e.type === "own_utterance"),
+      30_000,
+    );
+
+    const firstUtterances = outputEvents.filter((e) =>
+      e.type === "own_utterance"
+    );
+    const firstCount = firstUtterances.length;
+
+    await testEndpoint.sendData({
+      type: "text",
+      text: "Say: blue",
+      from: "tester",
+    });
+
+    await waitForCondition(
+      () =>
+        outputEvents.filter((e) => e.type === "own_utterance").length >
+          firstCount,
+      30_000,
+    );
+
+    await testEndpoint.sendData({ type: "close", from: "tester" });
+    await agentTask;
+
+    const secondTurnUtterances = outputEvents
+      .filter((e) => e.type === "own_utterance")
+      .slice(firstCount);
+    const secondText = secondTurnUtterances
+      .map((e) => (e as { text: string }).text)
+      .join(" ");
+
+    assert(
+      !secondText.toLowerCase().includes("red"),
+      `Second turn utterance should not contain first turn ("red"): "${secondText}"`,
+    );
+  }),
 });
 
 const exampleSkill = {
