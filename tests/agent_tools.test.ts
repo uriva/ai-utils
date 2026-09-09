@@ -309,7 +309,7 @@ runForAllProviders(
       participantUtteranceTurn({ name: "user", text: "\u{1F44D}" }),
     ];
     await agentDeps(mockHistory)(runAgentWithProvider)({
-      maxIterations: 1,
+      maxIterations: 5,
       tools: [],
       prompt:
         "You are a helpful but concise assistant. When a conversation has clearly ended (goodbyes exchanged), do not respond further. A thumbs up or similar acknowledgment after goodbyes does not require a response.",

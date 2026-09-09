@@ -1,3 +1,4 @@
+import { nonempty } from "gamla";
 import { z } from "zod/v4";
 import {
   accessHistory,
@@ -14,14 +15,31 @@ const consultParameters = z.object({
   ),
 });
 
-const formatStrongModelReply = (events: HistoryEvent[]) =>
-  events
+const formatStrongModelReply = (events: HistoryEvent[]): string => {
+  const utterances = events
     .filter((e): e is Extract<HistoryEvent, { type: "own_utterance" }> =>
       e.type === "own_utterance"
     )
     .map((e) => e.text)
-    .filter((t) => t.length > 0)
-    .join("\n\n");
+    .filter((t) => t.length > 0);
+  if (nonempty(utterances)) return utterances.join("\n\n");
+  const toolCalls = events
+    .filter((e): e is Extract<HistoryEvent, { type: "tool_call" }> =>
+      e.type === "tool_call"
+    )
+    .map((e) =>
+      `Advice: Call ${e.name} with parameters: ${JSON.stringify(e.parameters)}`
+    );
+  if (nonempty(toolCalls)) return toolCalls.join("\n\n");
+  const thoughts = events
+    .filter((e): e is Extract<HistoryEvent, { type: "own_thought" }> =>
+      e.type === "own_thought"
+    )
+    .map((e) => e.text)
+    .filter((t) => t.length > 0);
+  if (nonempty(thoughts)) return thoughts.join("\n\n");
+  return "";
+};
 
 export const createConsultTool = (
   strongCallModel: CallModel,

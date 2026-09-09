@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import { each, pipe } from "gamla";
+import { pipe } from "gamla";
 import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z } from "zod/v4";
 import { genJsonFromConvo } from "../mod.ts";
@@ -22,16 +22,23 @@ runForAllProviders(
       { role: "system", content: "Say hello as JSON." },
       { role: "user", content: "hello" },
     ];
-    await each((provider) =>
-      each(async (tier: "lite" | "flash" | "pro") => {
+    const pairs = (["openai", "google"] as const).flatMap((provider) =>
+      (["lite", "flash", "pro"] as const).map((tier) => ({ provider, tier }))
+    );
+    const results = await Promise.allSettled(
+      pairs.map(async ({ provider, tier }) => {
         const result = await genJsonFromConvo(
           { provider, tier },
           messages,
           schema,
         );
         assertEquals(result, { hello: result.hello });
-      })(["lite", "flash", "pro" as const])
-    )(["openai", "google"]);
+      }),
+    );
+    const firstRejected = results.find(
+      (r): r is PromiseRejectedResult => r.status === "rejected",
+    );
+    if (firstRejected) throw firstRejected.reason;
   },
 );
 
