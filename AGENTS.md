@@ -48,6 +48,21 @@ bot, reconstruct the scenario with generic, synthetic inputs that exercise the
 same mechanism (e.g. a made-up short English string instead of the actual bot's
 prompt). The test must prove the generic behavior, not embed the real artifact.
 
+### Avoid Regexes, Keyword Whitelists, and Name Lists (CRITICAL)
+
+Never use long regular expressions, hardcoded keyword dictionaries, or lists of
+names/words to classify intent, gender, language, or semantic attributes. Such
+heuristics are brittle, overfitted, and fail across different languages and
+naming conventions.
+
+- **Empower agent selection during creation:** Expose explicit parameters in
+  tool schemas so the agent can select options (such as voice, language, or
+  format) based on its own persona and task context during creation.
+- **Use LLM intelligence for inference:** When dynamic inference is necessary
+  and not provided explicitly, use LLM intelligence (such as `genJson` or model
+  calls, cached with `rmmbr` where appropriate) rather than manual regex
+  matching or word/name whitelists.
+
 ### English Test Suite Principle
 
 All test prompts, instructions, mock tool outputs, and assertions in this
