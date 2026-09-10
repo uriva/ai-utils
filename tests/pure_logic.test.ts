@@ -1567,6 +1567,30 @@ Deno.test("normalizeHistoryForModel: does NOT append nudge when later user messa
   );
 });
 
+Deno.test("normalizeHistoryForModel: does NOT append nudge for an earlier tool_call if an own_utterance already intervened before the latest user message", () => {
+  const call = toolUseTurn({ name: "react_to_message", args: { emoji: "👍" } });
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({ name: "user", text: "please wait" }),
+    call,
+    participantUtteranceTurn({ name: "user", text: "what is 2 + 2?" }),
+    ownUtteranceTurn("4"),
+    participantUtteranceTurn({ name: "user", text: "what is 3 + 3?" }),
+  ];
+  const normalized = normalizeHistoryForModel(history);
+  assert(
+    !historyHasPendingDeferredUserWaitingNudge(normalized),
+    "must not detect nudge for a past tool_call that was already followed by an own_utterance",
+  );
+  assert(
+    !normalized.some((e) =>
+      e.type === "own_thought" &&
+      "text" in e &&
+      e.text.includes("Respond to the user's latest message")
+    ),
+    "must not inject the nudge when an earlier tool call has already been answered by an own utterance",
+  );
+});
+
 // Anthropic hard-rejects any request where a tool_use id carries more than one
 // tool_result ("each tool_use must have a single result"). Duplicate delivery
 // of a background result can place two results for one call into persisted

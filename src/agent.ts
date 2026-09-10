@@ -1979,7 +1979,14 @@ export const hasUnansweredUserMessage = (history: HistoryEvent[]): boolean => {
 const laterUnansweredUserMessage = (
   history: HistoryEvent[],
   toolCallIndex: number,
-): boolean => hasUnansweredUserMessage(history.slice(toolCallIndex + 1));
+): boolean => {
+  const sliceAfterCall = history.slice(toolCallIndex + 1);
+  const hadInterveningReply = sliceAfterCall.some(
+    (e) => e.type === "own_utterance" || e.type === "own_edit_message",
+  );
+  if (hadInterveningReply) return false;
+  return hasUnansweredUserMessage(sliceAfterCall);
+};
 
 // System-notification nudge appended at the very end of the normalized history
 // (after the user's latest message) so it is the last thing the model sees and
