@@ -149,7 +149,6 @@ Deno.test(
           pendingItems: "None",
           abandonedItems: "None",
           context: "None",
-          skillsToReLearn: "None",
         });
       };
 

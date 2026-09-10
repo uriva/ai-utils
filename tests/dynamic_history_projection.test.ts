@@ -85,7 +85,6 @@ Deno.test(
           pendingItems: "Run deployment step",
           abandonedItems: "None",
           context: "Past migration discussion",
-          skillsToReLearn: "None",
         });
       };
 

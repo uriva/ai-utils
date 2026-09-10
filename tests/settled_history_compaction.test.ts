@@ -73,7 +73,6 @@ Deno.test(
           pendingItems: "None",
           abandonedItems: "None",
           context: "Past session details",
-          skillsToReLearn: "None",
         });
       };
 

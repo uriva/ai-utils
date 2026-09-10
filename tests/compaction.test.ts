@@ -715,7 +715,7 @@ Deno.test("trimming within single segment respects tool_call/tool_result atomici
 });
 
 llmTest(
-  "summarizeEvents identifies active skills that must be re-learned after compaction",
+  "summarizeEvents does not inject active skills to re-learn directive into summary",
   injectSecrets(async () => {
     const base = Date.now();
     const events: HistoryEvent[] = [
@@ -747,16 +747,15 @@ llmTest(
     const summary = await summarizeEvents(events);
     console.log("Summary:\n", summary);
 
-    const lowercaseSummary = summary.toLowerCase();
-    assertEquals(
-      lowercaseSummary.includes("p2b-coder"),
-      true,
-      `Summary should identify 'p2b-coder' as a skill to re-learn.\nFull summary:\n${summary}`,
-    );
     assertEquals(
       summary.includes("Active Skills to Re-Learn"),
-      true,
-      `Summary should contain the active skills instruction block.\nFull summary:\n${summary}`,
+      false,
+      `Summary must NOT contain the 'Active Skills to Re-Learn' block.\nFull summary:\n${summary}`,
+    );
+    assertEquals(
+      summary.includes("You MUST call learn_skill immediately"),
+      false,
+      `Summary must NOT command the agent to immediately call learn_skill.\nFull summary:\n${summary}`,
     );
   }),
 );
