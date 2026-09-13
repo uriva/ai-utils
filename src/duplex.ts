@@ -1,5 +1,6 @@
 export type DuplexMessage =
   | { type: "text"; text: string; from: string }
+  | { type: "system"; text: string; from?: string }
   | {
     type: "audio";
     chunks: Array<{ mimeType: string; dataBase64: string }>;

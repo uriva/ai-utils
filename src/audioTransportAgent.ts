@@ -1,6 +1,7 @@
 import {
   accessOutputEvent,
   type AgentSpec,
+  formatSystemNotification,
   handleFunctionCalls,
   type HistoryEvent,
   invisibleToolUseInstruction,
@@ -8,6 +9,7 @@ import {
   ownUtteranceTurn,
   participantEditMessageTurn,
   type Skill,
+  systemNotificationPrefix,
   type Tool,
   toolUseTurnWithMetadata,
 } from "./agent.ts";
@@ -667,7 +669,12 @@ export const runAudioAgentLoop = async (
       }
       if (state.isReconnecting || !state.session) return;
       try {
-        if (message.type === "text") {
+        if (message.type === "system") {
+          const formatted = message.text.startsWith(systemNotificationPrefix)
+            ? message.text
+            : formatSystemNotification(message.text);
+          state.session.sendText(formatted).catch(() => {});
+        } else if (message.type === "text") {
           state.session.sendText(message.text).catch(() => {});
         } else if (message.type === "audio") {
           if (!loggedFirstAudioIn) {

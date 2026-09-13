@@ -2,8 +2,11 @@ import { assert, assertEquals } from "@std/assert";
 import {
   type AudioSessionEvent,
   createDuplexPair,
+  type DuplexMessage,
+  formatSystemNotification,
   type HistoryEvent,
   runAgent,
+  systemNotificationPrefix,
   tool,
 } from "../mod.ts";
 import {
@@ -885,4 +888,30 @@ Deno.test("buildLiveSetupMessage strictly budgets setup payload under maxLiveSet
   );
   assert(parsed.setup.systemInstruction.parts[0].text.length > 0);
   assert(parsed.setup.tools[0].functionDeclarations.length > 0);
+});
+
+Deno.test("createDuplexPair delivers system message to receiver", async () => {
+  const { left, right } = createDuplexPair();
+  const received: DuplexMessage[] = [];
+  right.onData((msg) => {
+    received.push(msg);
+  });
+  await left.sendData({
+    type: "system",
+    text: "Call connected.",
+  });
+  assertEquals(received.length, 1);
+  assertEquals(received[0].type, "system");
+  if (received[0].type === "system") {
+    assertEquals(received[0].text, "Call connected.");
+  }
+});
+
+Deno.test("formatSystemNotification formats text with system notification prefix", () => {
+  const formatted = formatSystemNotification("Please greet the caller.");
+  assert(formatted.startsWith(systemNotificationPrefix));
+  assertEquals(
+    formatted,
+    `${systemNotificationPrefix} Please greet the caller.]`,
+  );
 });
