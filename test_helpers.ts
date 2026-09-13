@@ -107,10 +107,11 @@ const flushRmmbr = (f: () => Promise<void>) => async () => {
 const injectDeterministic = (f: () => Promise<void>) => () =>
   overrideIdGenerator(makeCounter("id"))(f)();
 
-const rmmbrCacher = (cacheId: string) =>
+const rmmbrCacher = (cacheId: string, ttlSeconds?: number) =>
   cache({
     cacheId,
-    ttl: cacheId.includes("upload") ? 60 * 60 * 24 : 60 * 60 * 24 * 30,
+    ttl: ttlSeconds ??
+      (cacheId.includes("upload") ? 60 * 60 * 24 : 60 * 60 * 24 * 30),
     url: "https://rmmbr.net",
     token: rmmbrToken,
   }) as Injector;

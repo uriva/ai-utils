@@ -262,6 +262,11 @@ export {
 } from "./src/gemini.ts";
 export {
   clearGeminiContextCacheMap,
+  geminiContextCacheBufferSeconds,
+  geminiContextCacheClientTtlSeconds,
+  geminiContextCacheId,
+  geminiContextCacheTtlSeconds,
+  getOrCreateGeminiContextCache,
   injectGeminiContextCachingEnabled,
   invalidateGeminiContextCache,
 } from "./src/geminiContextCache.ts";

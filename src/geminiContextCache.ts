@@ -1,9 +1,11 @@
-import type {
-  FunctionDeclaration,
+import {
+  type FunctionDeclaration,
   GoogleGenAI,
-  ToolConfig,
+  type ToolConfig,
 } from "@google/genai";
 import { context, type Injection } from "@uri/inject";
+import { makeCache } from "./cacher.ts";
+import { accessGeminiToken } from "./gemini.ts";
 
 export type CachedContextEntry = {
   cacheName: string;
@@ -14,9 +16,13 @@ type GoogleToolDeclarations = {
   functionDeclarations?: FunctionDeclaration[];
 };
 
+export const geminiContextCacheTtlSeconds = 3600;
+export const geminiContextCacheBufferSeconds = 120;
+export const geminiContextCacheClientTtlSeconds = geminiContextCacheTtlSeconds -
+  geminiContextCacheBufferSeconds;
+export const geminiContextCacheId = "gemini-context-cache-v1";
+
 const minCacheChars = 4000;
-const defaultTtlSeconds = 3600;
-const expirationBufferMs = 60 * 1000;
 
 const contextCacheMap = new Map<string, CachedContextEntry>();
 const inFlightCreations = new Map<string, Promise<string | null>>();
@@ -54,13 +60,37 @@ export const invalidateGeminiContextCache = async (
   inFlightCreations.delete(key);
 };
 
+const createRemoteCache = async (
+  model: string,
+  systemInstruction: string,
+  toolsJson: string,
+  toolConfigJson: string,
+): Promise<string> => {
+  const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
+  const tools = toolsJson ? JSON.parse(toolsJson) : undefined;
+  const toolConfig = toolConfigJson ? JSON.parse(toolConfigJson) : undefined;
+  const cache = await sdk.caches.create({
+    model,
+    config: {
+      systemInstruction,
+      ...(tools && tools.length > 0 ? { tools } : {}),
+      ...(toolConfig ? { toolConfig } : {}),
+      ttl: `${geminiContextCacheTtlSeconds}s`,
+    },
+  });
+  if (!cache.name) {
+    throw new Error("Gemini context cache creation returned empty name");
+  }
+  return cache.name;
+};
+
 export const getOrCreateGeminiContextCache = async (
-  sdk: GoogleGenAI,
+  _sdk: GoogleGenAI,
   model: string,
   systemInstruction: string,
   tools?: GoogleToolDeclarations[],
   toolConfig?: ToolConfig,
-  ttlSeconds: number = defaultTtlSeconds,
+  ttlSeconds: number = geminiContextCacheTtlSeconds,
 ): Promise<string | null> => {
   const toolsJson = tools ? JSON.stringify(tools) : "";
   const totalChars = systemInstruction.length + toolsJson.length;
@@ -68,9 +98,17 @@ export const getOrCreateGeminiContextCache = async (
     return null;
   }
 
-  const key = await makeCacheKey(model, systemInstruction, toolsJson);
+  const toolConfigJson = toolConfig ? JSON.stringify(toolConfig) : "";
+  const key = await makeCacheKey(
+    model,
+    systemInstruction,
+    toolsJson + "::" + toolConfigJson,
+  );
   const existing = contextCacheMap.get(key);
-  if (existing && Date.now() < existing.expiresAt - expirationBufferMs) {
+  if (
+    existing &&
+    Date.now() < existing.expiresAt - geminiContextCacheBufferSeconds * 1000
+  ) {
     return existing.cacheName;
   }
 
@@ -81,23 +119,19 @@ export const getOrCreateGeminiContextCache = async (
 
   const creationPromise = (async () => {
     try {
-      const cache = await sdk.caches.create({
+      const cacheName = await makeCache(
+        geminiContextCacheId,
+        geminiContextCacheClientTtlSeconds,
+      )(createRemoteCache)(
         model,
-        config: {
-          systemInstruction,
-          ...(tools && tools.length > 0 ? { tools } : {}),
-          ...(toolConfig ? { toolConfig } : {}),
-          ttl: `${ttlSeconds}s`,
-        },
-      });
-      const cacheName = cache.name;
+        systemInstruction,
+        toolsJson,
+        toolConfigJson,
+      );
       if (!cacheName) return null;
-      const expiresAt = cache.expireTime
-        ? Date.parse(cache.expireTime)
-        : Date.now() + ttlSeconds * 1000;
       contextCacheMap.set(key, {
         cacheName,
-        expiresAt,
+        expiresAt: Date.now() + ttlSeconds * 1000,
       });
       return cacheName;
     } catch (_err) {
