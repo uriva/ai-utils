@@ -293,6 +293,7 @@ export {
   findUngroundedUtteranceArtifacts,
   isComplexUrl,
   isLikelyPhoneNumber,
+  isSearchQueryUrl,
   ungroundedHostBlockedNotice,
 } from "./src/urlGrounding.ts";
 export {

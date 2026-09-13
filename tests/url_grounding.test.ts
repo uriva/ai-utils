@@ -366,6 +366,11 @@ Deno.test("isComplexUrl correctly classifies trivial vs complex URLs", () => {
   assertFalse(isComplexUrl("http://google.com/"));
   assertFalse(isComplexUrl("https://www.youtube.com"));
   assertFalse(isComplexUrl("https://www.google.co.uk"));
+  assertFalse(
+    isComplexUrl("https://www.youtube.com/results?search_query=spider-man"),
+  );
+  assertFalse(isComplexUrl("https://www.google.com/search?q=movie+tickets"));
+  assertFalse(isComplexUrl("https://duckduckgo.com/?q=weather"));
 
   assert(isComplexUrl("https://tokenharbor.ai/v1"));
   assert(isComplexUrl("https://form.claude.com"));

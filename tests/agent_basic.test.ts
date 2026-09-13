@@ -460,7 +460,7 @@ runForAllProviders(
     ];
 
     await agentDeps(mockHistory)(runAgent)({
-      maxIterations: 1,
+      maxIterations: 5,
       tools: [],
       prompt:
         "You are a silent observer in a group chat. You must never respond to messages between other people. Only respond if someone explicitly addresses you by name.",

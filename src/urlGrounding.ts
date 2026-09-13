@@ -70,10 +70,28 @@ export const isPlaceholderHost = (rawHost: string): boolean => {
     .test(host);
 };
 
+export const isSearchQueryUrl = (url: URL): boolean => {
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  const path = url.pathname.toLowerCase().replace(/\/+$/, "");
+  if (
+    (host === "youtube.com" && path === "/results" &&
+      url.searchParams.has("search_query")) ||
+    ((host === "google.com" || host.startsWith("google.")) &&
+      path === "/search" && url.searchParams.has("q")) ||
+    (host === "bing.com" && path === "/search" && url.searchParams.has("q")) ||
+    (host === "duckduckgo.com" && (path === "" || path === "/") &&
+      url.searchParams.has("q"))
+  ) {
+    return true;
+  }
+  return false;
+};
+
 export const isComplexUrl = (rawUrl: string): boolean => {
   try {
     const url = new URL(cleanTrailingPunctuation(rawUrl));
     if (isPlaceholderHost(url.hostname)) return false;
+    if (isSearchQueryUrl(url)) return false;
     const path = url.pathname.replace(/\/+$/, "");
     if (path !== "") return true;
     if (url.search && url.search !== "") return true;
