@@ -4,3 +4,4 @@ deno.lock
 artifacts/
 models.json
 bug.json
+__pycache__/
