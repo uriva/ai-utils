@@ -1,4 +1,5 @@
 import { context, type Injection } from "@uri/inject";
+import { decodeBase64 } from "@std/encoding/base64";
 import { getEncoding } from "js-tiktoken";
 import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
 import { z, type ZodType } from "zod/v4";
@@ -117,10 +118,93 @@ const resolveScratchInParams = async <T>(params: T): Promise<T> => {
   return params;
 };
 
+const decodeBase64Utf8 = (b64: string): string => {
+  try {
+    return new TextDecoder().decode(decodeBase64(b64.replace(/\s+/g, "")));
+  } catch {
+    return b64;
+  }
+};
+
+export const unwrapToolPayload = (text: string): string => {
+  let current = text;
+  for (let i = 0; i < 3; i++) {
+    const trimmed = current.trim();
+    if (
+      (!trimmed.startsWith("{") || !trimmed.endsWith("}")) &&
+      (!trimmed.startsWith("[") || !trimmed.endsWith("]"))
+    ) {
+      break;
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        break;
+      }
+      if (parsed.success === false) {
+        break;
+      }
+      if (parsed.encoding === "base64" && typeof parsed.content === "string") {
+        current = decodeBase64Utf8(parsed.content);
+        continue;
+      }
+      if (
+        parsed.data &&
+        typeof parsed.data === "object" &&
+        !Array.isArray(parsed.data)
+      ) {
+        if (
+          parsed.data.encoding === "base64" &&
+          typeof parsed.data.content === "string"
+        ) {
+          current = decodeBase64Utf8(parsed.data.content);
+          continue;
+        }
+        if (typeof parsed.data.content === "string") {
+          current = parsed.data.content;
+          continue;
+        }
+        if (typeof parsed.data.result === "string") {
+          current = parsed.data.result;
+          continue;
+        }
+      }
+      if (typeof parsed.result === "string") {
+        current = parsed.result;
+        continue;
+      }
+      if (typeof parsed.content === "string") {
+        current = parsed.content;
+        continue;
+      }
+      if (typeof parsed.text === "string") {
+        current = parsed.text;
+        continue;
+      }
+      if (typeof parsed.body === "string") {
+        current = parsed.body;
+        continue;
+      }
+      break;
+    } catch {
+      break;
+    }
+  }
+  return current;
+};
+
 export const readScratchFileToolName = "read_scratch_file";
 
 const defaultScratchPadThreshold = 15000;
 const maxScratchReadLines = 200;
+const maxScratchLineChars = 2000;
+
+const truncateScratchLine = (line: string): string =>
+  line.length > maxScratchLineChars
+    ? `${
+      line.slice(0, maxScratchLineChars)
+    }… [line truncated: ${line.length} chars total]`
+    : line;
 
 const scratchPadSpillNotice = (
   id: string,
@@ -169,7 +253,7 @@ const sliceScratchLines = (
   const safeStart = Math.max(1, startLine);
   const fromIdx = safeStart - 1;
   const toIdx = Math.min(total, fromIdx + numLines);
-  const slice = lines.slice(fromIdx, toIdx).join("\n");
+  const slice = lines.slice(fromIdx, toIdx).map(truncateScratchLine).join("\n");
   const next = toIdx < total ? toIdx + 1 : undefined;
   return { text: slice, nextStartLine: next, totalLines: total };
 };
@@ -276,6 +360,8 @@ const readScratchFileParameters: z.ZodObject<{
   id: z.ZodString;
   startLine: z.ZodOptional<z.ZodNumber>;
   numLines: z.ZodOptional<z.ZodNumber>;
+  offset: z.ZodOptional<z.ZodNumber>;
+  limit: z.ZodOptional<z.ZodNumber>;
   grep: z.ZodOptional<z.ZodString>;
 }> = z.object({
   id: z.string().describe("Scratch pad id returned by the spilling tool"),
@@ -284,6 +370,12 @@ const readScratchFileParameters: z.ZodObject<{
   ),
   numLines: z.number().int().optional().describe(
     `Max lines to return (default and hard cap ${maxScratchReadLines}).`,
+  ),
+  offset: z.number().int().optional().describe(
+    "Alias for startLine (1-indexed line to start reading from).",
+  ),
+  limit: z.number().int().optional().describe(
+    `Alias for numLines (max lines to return, default and hard cap ${maxScratchReadLines}).`,
   ),
   grep: z.string().optional().describe(
     "Optional JS regex; only matching lines (prefixed with line number) are returned. Lines longer than 500 chars are returned as a window of ±500 chars around the first match, with char offsets. A leading PCRE-style inline flag group like (?i), (?im) is auto-translated to JS RegExp flags.",
@@ -297,19 +389,20 @@ export const createReadScratchFileTool = (
   description:
     `Read a tool output that was spilled to the scratch pad. Returns up to ${maxScratchReadLines} lines per call. Use 'startLine' (1-indexed) to paginate, or 'grep' (regex) to filter lines.`,
   parameters: readScratchFileParameters,
-  handler: async ({ id, startLine, numLines, grep }) => {
-    const content = await scratchPad.get(id);
-    if (content === undefined) {
+  handler: async ({ id, startLine, numLines, offset, limit, grep }) => {
+    const rawContent = await scratchPad.get(id);
+    if (rawContent === undefined) {
       return `No scratch pad entry found for id "${id}". It may have expired.`;
     }
+    const content = unwrapToolPayload(rawContent);
     const header = scratchPadReadHeader(
       id,
       countLines(content),
       content.length,
     );
-    const limit = clampScratchLines(numLines);
+    const effectiveLimit = clampScratchLines(numLines ?? limit);
     if (typeof grep === "string" && grep.length > 0) {
-      const result = grepScratchLines(content, grep, limit);
+      const result = grepScratchLines(content, grep, effectiveLimit);
       if (!result.ok) {
         return header +
           `Invalid grep regex /${grep}/: ${result.error}. ` +
@@ -318,15 +411,15 @@ export const createReadScratchFileTool = (
       const { text, matchCount, truncated } = result;
       if (matchCount === 0) return header + `No lines matched /${grep}/.`;
       const suffix = truncated
-        ? `\n[${matchCount} total matches; showing first ${limit}. Narrow the pattern to see the rest.]`
+        ? `\n[${matchCount} total matches; showing first ${effectiveLimit}. Narrow the pattern to see the rest.]`
         : `\n[${matchCount} matches.]`;
       return header + text + suffix;
     }
-    const start = typeof startLine === "number" ? startLine : 1;
+    const start = startLine ?? offset ?? 1;
     const { text, nextStartLine, totalLines } = sliceScratchLines(
       content,
       start,
-      limit,
+      effectiveLimit,
     );
     const suffix = nextStartLine
       ? `\n[Showing lines ${start}-${
@@ -1113,9 +1206,10 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
     );
   }
   const validated = parsed.data;
-  const rawText = sanitizeToolOutput(
-    typeof validated === "string" ? validated : validated.result,
-  );
+  const rawOutput = typeof validated === "string"
+    ? validated
+    : validated.result;
+  const rawText = sanitizeToolOutput(unwrapToolPayload(rawOutput));
   const attachments = typeof validated === "string"
     ? undefined
     : validated.attachments;

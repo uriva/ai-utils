@@ -379,3 +379,251 @@ Deno.test(
     });
   },
 );
+
+Deno.test(
+  "scratchpad unpacks JSON/github file content wrappers so line counting, preview, grep, and SCRATCH: resolution use real file text",
+  async () => {
+    const store = new Map<string, string>();
+    const scratchPad = makeScratchPad(store);
+
+    const codeBlocks = Array.from(
+      { length: 100 },
+      (_, i) =>
+        [
+          `// Module section ${i + 1} definition`,
+          `export function computeValue${i + 1}(input: number): number {`,
+          `  const multiplier = ${i * 7 + 3};`,
+          `  const offset = ${i * 13 + 5};`,
+          `  return input * multiplier + offset;`,
+          `}`,
+        ].join("\n"),
+    );
+    codeBlocks[50] = [
+      `// Target section`,
+      `export function targetFunction(arg: string): string {`,
+      `  return "FOUND_TARGET_HERES_THE_CODE";`,
+      `}`,
+    ].join("\n");
+    const realCode = codeBlocks.join("\n");
+
+    const githubTool = {
+      name: "github_get_file_contents",
+      description: "Get file contents from github",
+      parameters: z.object({ path: z.string() }),
+      handler: () =>
+        Promise.resolve(JSON.stringify({
+          success: true,
+          result: realCode,
+        })),
+    };
+
+    let capturedInOtherTool: string | null = null;
+    const saveTool = {
+      name: "save_file",
+      description: "Save file",
+      parameters: z.object({ content: z.string() }),
+      handler: (params: { content: string }) => {
+        capturedInOtherTool = params.content;
+        return Promise.resolve("saved");
+      },
+    };
+
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Fetch file and inspect it",
+      }),
+    ];
+
+    let callCount = 0;
+    let spilledId = "";
+
+    await injectCallModel((events) => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve([
+          {
+            type: "tool_call" as const,
+            isOwn: true as const,
+            name: "github_get_file_contents",
+            parameters: { path: "src/server.ts" },
+            id: "call-gh-1",
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+      if (callCount === 2) {
+        const ghResult = events.find((e) =>
+          e.type === "tool_result" && e.toolCallId === "call-gh-1"
+        ) as Extract<HistoryEvent, { type: "tool_result" }> | undefined;
+        assert(ghResult, "Expected ghResult");
+        assert(
+          ghResult.result.includes("598 lines total"),
+          `Expected spill notice to report 598 lines total, got: ${ghResult.result}`,
+        );
+        assert(
+          ghResult.result.includes("export function computeValue1"),
+          `Expected preview to contain real code, got: ${
+            ghResult.result.slice(0, 200)
+          }`,
+        );
+        assert(
+          !ghResult.result.includes('"success": true'),
+          "Preview should not contain JSON wrapper syntax",
+        );
+        spilledId = "call-gh-1";
+
+        return Promise.resolve([
+          {
+            type: "tool_call" as const,
+            isOwn: true as const,
+            name: readScratchFileToolName,
+            parameters: { id: spilledId, offset: 300, limit: 10 },
+            id: "call-read-offset",
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+      if (callCount === 3) {
+        const readResult = events.find((e) =>
+          e.type === "tool_result" && e.toolCallId === "call-read-offset"
+        ) as Extract<HistoryEvent, { type: "tool_result" }> | undefined;
+        assert(readResult, "Expected readResult");
+        assert(
+          readResult.result.includes("targetFunction"),
+          "Expected targetFunction in offset slice",
+        );
+
+        return Promise.resolve([
+          {
+            type: "tool_call" as const,
+            isOwn: true as const,
+            name: readScratchFileToolName,
+            parameters: { id: spilledId, grep: "targetFunction" },
+            id: "call-read-grep",
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+      if (callCount === 4) {
+        const grepResult = events.find((e) =>
+          e.type === "tool_result" && e.toolCallId === "call-read-grep"
+        ) as Extract<HistoryEvent, { type: "tool_result" }> | undefined;
+        assert(grepResult, "Expected grepResult");
+        assert(
+          grepResult.result.includes("302: export function targetFunction"),
+          `Expected grep to match line 302 with real line number, got: ${grepResult.result}`,
+        );
+
+        return Promise.resolve([
+          {
+            type: "tool_call" as const,
+            isOwn: true as const,
+            name: "save_file",
+            parameters: { content: `SCRATCH:${spilledId}` },
+            id: "call-save",
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+      return Promise.resolve([
+        {
+          type: "own_utterance" as const,
+          isOwn: true as const,
+          text: "All done",
+          id: "done-msg",
+          timestamp: Date.now(),
+        },
+      ]);
+    })(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        provider: "moonshot",
+        maxIterations: 5,
+        tools: [githubTool, saveTool],
+        prompt: "Test assistant",
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+        toolOutputScratchPad: scratchPad,
+      });
+    })();
+
+    assertEquals(capturedInOtherTool, realCode);
+  },
+);
+
+Deno.test(
+  "scratchpad automatically decodes base64-encoded GitHub API content payloads",
+  async () => {
+    const store = new Map<string, string>();
+    const scratchPad = makeScratchPad(store);
+
+    const lines = Array.from(
+      { length: 250 },
+      (_, i) =>
+        `line ${i + 1}: code content for testing base64 decode ${i + 1}`,
+    );
+    const code = lines.join("\n");
+    const base64Content = btoa(code);
+
+    const githubApiTool = {
+      name: "github_api_get_content",
+      description: "Direct GitHub API contents endpoint",
+      parameters: z.object({ path: z.string() }),
+      handler: () =>
+        Promise.resolve(JSON.stringify({
+          name: "index.ts",
+          path: "src/index.ts",
+          sha: "abc12345",
+          size: code.length,
+          encoding: "base64",
+          content: base64Content,
+        })),
+    };
+
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Fetch github content",
+      }),
+    ];
+
+    let callCount = 0;
+    await injectCallModel(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve([
+          {
+            type: "tool_call" as const,
+            isOwn: true as const,
+            name: "github_api_get_content",
+            parameters: { path: "src/index.ts" },
+            id: "call-gh-b64",
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+      return Promise.resolve([
+        {
+          type: "own_utterance" as const,
+          isOwn: true as const,
+          text: "Done",
+          id: "done-msg",
+          timestamp: Date.now(),
+        },
+      ]);
+    })(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        provider: "moonshot",
+        maxIterations: 2,
+        tools: [githubApiTool],
+        prompt: "Test assistant",
+        rewriteHistory: noopRewriteHistory,
+        timezoneIANA: "UTC",
+        toolOutputScratchPad: scratchPad,
+      });
+    })();
+
+    const stored = await scratchPad.get("call-gh-b64");
+    assertEquals(stored, code);
+  },
+);
