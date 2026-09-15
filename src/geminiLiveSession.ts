@@ -50,7 +50,9 @@ type PendingTurn = {
   timeout: number;
 };
 
-const defaultModel = "models/gemini-3.1-flash-live-preview";
+export const defaultLiveModel = "models/gemini-3.8-live";
+export const defaultModel = defaultLiveModel;
+export const geminiLiveVersion = defaultLiveModel;
 const defaultTurnTimeoutMs = 45_000;
 
 const decodeWsData = async (data: string | Blob): Promise<string> =>
@@ -119,13 +121,13 @@ export type AudioSession = {
 export const maxLiveSetupBytes = 65_000;
 
 export const buildLiveSetupMessage = ({
-  model,
+  model = defaultLiveModel,
   voiceName,
   prompt,
   declarations,
   maxBytes = maxLiveSetupBytes,
 }: {
-  model: string;
+  model?: string;
   voiceName: string;
   prompt?: string;
   declarations?: LiveFunctionDeclaration[];

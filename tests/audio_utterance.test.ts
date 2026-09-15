@@ -18,6 +18,7 @@ import {
 import {
   buildLiveSetupMessage,
   consumeTranscriptEvent,
+  defaultLiveModel,
   maxLiveSetupBytes,
 } from "../src/geminiLiveSession.ts";
 import { injectSecrets, withRetries } from "../test_helpers.ts";
@@ -867,7 +868,7 @@ Deno.test("buildLiveSetupMessage strictly budgets setup payload under maxLiveSet
 
   const massivePrompt = "You are an assistant. ".repeat(4000); // ~92,000 characters
   const setupMsg = buildLiveSetupMessage({
-    model: "models/gemini-3.1-flash-live-preview",
+    model: defaultLiveModel,
     voiceName: "Aoede",
     prompt: massivePrompt,
     declarations: dummyDeclarations,
@@ -880,7 +881,7 @@ Deno.test("buildLiveSetupMessage strictly budgets setup payload under maxLiveSet
   );
 
   const parsed = JSON.parse(setupMsg);
-  assertEquals(parsed.setup.model, "models/gemini-3.1-flash-live-preview");
+  assertEquals(parsed.setup.model, defaultLiveModel);
   assertEquals(
     parsed.setup.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig
       .voiceName,

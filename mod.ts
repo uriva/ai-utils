@@ -279,7 +279,11 @@ export {
   safetyWarningText,
   type TokenUsage,
 } from "./src/geminiAgent.ts";
-export { type AudioSessionEvent } from "./src/geminiLiveSession.ts";
+export {
+  type AudioSessionEvent,
+  defaultLiveModel,
+  geminiLiveVersion,
+} from "./src/geminiLiveSession.ts";
 export {
   geminiGenJson,
   genJson,
