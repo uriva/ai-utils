@@ -227,6 +227,7 @@ const respondWithError = (
         id: tc.id,
         name: tc.name,
         response: { result: errorMsg },
+        scheduling: "WHEN_IDLE",
       });
     }
   }
@@ -289,6 +290,7 @@ const resolveToolCalls = async (
               id,
               name,
               response: { result: event.result },
+              scheduling: "WHEN_IDLE",
             });
           }
         },
@@ -673,7 +675,15 @@ export const runAudioAgentLoop = async (
           const formatted = message.text.startsWith(systemNotificationPrefix)
             ? message.text
             : formatSystemNotification(message.text);
-          state.session.sendText(formatted).catch(() => {});
+          state.session.sendClientContent({
+            turns: [
+              {
+                role: "user",
+                parts: [{ text: formatted }],
+              },
+            ],
+            turnComplete: false,
+          }).catch(() => {});
         } else if (message.type === "text") {
           state.session.sendText(message.text).catch(() => {});
         } else if (message.type === "audio") {

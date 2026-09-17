@@ -38,10 +38,11 @@ export type AudioSessionConfig = {
   onClose?: (code: number, reason: string) => void;
 };
 
-type LiveFunctionDeclaration = {
+export type LiveFunctionDeclaration = {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
+  behavior?: "BLOCKING" | "NON_BLOCKING";
 };
 
 type PendingTurn = {
@@ -67,7 +68,7 @@ const mergeTranscript = (current: string, incoming: string) => {
   return `${current}${incoming}`;
 };
 
-const toolsToDeclarations = (
+export const toolsToDeclarations = (
   // deno-lint-ignore no-explicit-any
   tools: Tool<any>[] | undefined,
 ): Array<{ functionDeclarations: LiveFunctionDeclaration[] }> =>
@@ -81,6 +82,7 @@ const toolsToDeclarations = (
         string,
         unknown
       >,
+      behavior: "NON_BLOCKING",
     })),
   }];
 
@@ -103,8 +105,25 @@ export const consumeTranscriptEvent = (
   onSessionEvent?.({ type, text: existing.text, finished });
 };
 
+export type ClientContentPart =
+  | { text: string }
+  | { inlineData: { mimeType: string; data: string } };
+
+export type ClientContentTurn = {
+  role: "user" | "model";
+  parts: ClientContentPart[];
+};
+
+export type ClientContentParams = {
+  turns?: ClientContentTurn[];
+  turnComplete?: boolean;
+};
+
 export type AudioSession = {
   sendText: (text: string) => Promise<AudioSessionEvent[]>;
+  sendClientContent: (
+    params: ClientContentParams,
+  ) => Promise<AudioSessionEvent[]>;
   sendAudio: (chunk: LiveAudioChunk) => Promise<AudioSessionEvent[]>;
   sendAudioChunks: (chunks: LiveAudioChunk[]) => Promise<AudioSessionEvent[]>;
   streamAudioChunks: (chunks: LiveAudioChunk[]) => void;
@@ -114,6 +133,7 @@ export type AudioSession = {
     id: string;
     name: string;
     response: Record<string, unknown>;
+    scheduling?: "WHEN_IDLE" | "SILENT" | "INTERRUPT";
   }) => void;
   close: () => Promise<void>;
 };
@@ -200,7 +220,6 @@ export const createAudioSession = async ({
   let pendingTurn: PendingTurn | undefined;
   let activeTurn = false;
   let bufferedEvents: AudioSessionEvent[] = [];
-  let toolCallPending = false;
   let pendingToolCount = 0;
   const debug = (message: string) => {
     onDebug?.({ type: "debug", message });
@@ -363,8 +382,7 @@ export const createAudioSession = async ({
       });
     }
     if (functionCalls.length > 0) {
-      toolCallPending = true;
-      pendingToolCount = functionCalls.length;
+      pendingToolCount += functionCalls.length;
       flushEvents();
       return;
     }
@@ -402,24 +420,52 @@ export const createAudioSession = async ({
     });
   };
 
-  return {
-    sendText: async (text: string) => {
-      debug(`sendText: ${text}`);
+  const sendClientContent = async ({
+    turns,
+    turnComplete = true,
+  }: ClientContentParams): Promise<AudioSessionEvent[]> => {
+    debug(
+      `sendClientContent: turns=${
+        turns?.length ?? 0
+      } turnComplete=${turnComplete}`,
+    );
+    if (
+      ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING
+    ) {
+      return Promise.reject(new Error("WebSocket is closed"));
+    }
+    if (turnComplete) {
       activeTurn = true;
       const wait = waitForEvents();
       ws.send(JSON.stringify({
         clientContent: {
-          turns: [
-            {
-              role: "user",
-              parts: [{ text }],
-            },
-          ],
+          ...(turns ? { turns } : {}),
           turnComplete: true,
         },
       }));
       return await wait;
-    },
+    }
+    ws.send(JSON.stringify({
+      clientContent: {
+        ...(turns ? { turns } : {}),
+        turnComplete: false,
+      },
+    }));
+    return [];
+  };
+
+  return {
+    sendClientContent,
+    sendText: (text: string) =>
+      sendClientContent({
+        turns: [
+          {
+            role: "user",
+            parts: [{ text }],
+          },
+        ],
+        turnComplete: true,
+      }),
     sendAudio: async ({ mimeType, dataBase64 }: LiveAudioChunk) => {
       debug(`sendAudio: ${mimeType} bytes=${dataBase64.length}`);
       activeTurn = true;
@@ -453,7 +499,6 @@ export const createAudioSession = async ({
       return await wait;
     },
     streamAudioChunks: (chunks: LiveAudioChunk[]) => {
-      if (toolCallPending) return;
       activeTurn = true;
       for (const chunk of chunks) {
         const payload = {
@@ -471,10 +516,16 @@ export const createAudioSession = async ({
       if (!activeTurn) return [];
       return await waitForEvents();
     },
-    respondToToolCall: ({ id, name, response }: {
+    respondToToolCall: ({
+      id,
+      name,
+      response,
+      scheduling = "WHEN_IDLE",
+    }: {
       id: string;
       name: string;
       response: Record<string, unknown>;
+      scheduling?: "WHEN_IDLE" | "SILENT" | "INTERRUPT";
     }) => {
       if (ws.readyState !== WebSocket.OPEN) {
         console.error(
@@ -484,11 +535,15 @@ export const createAudioSession = async ({
       }
       ws.send(JSON.stringify({
         toolResponse: {
-          functionResponses: [{ id, name, response }],
+          functionResponses: [{
+            id,
+            name,
+            response,
+            scheduling,
+          }],
         },
       }));
       pendingToolCount = Math.max(0, pendingToolCount - 1);
-      if (pendingToolCount === 0) toolCallPending = false;
     },
     close: async () => {
       if (ws.readyState === WebSocket.CLOSED) return;

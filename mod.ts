@@ -280,9 +280,16 @@ export {
   type TokenUsage,
 } from "./src/geminiAgent.ts";
 export {
+  type AudioSession,
   type AudioSessionEvent,
+  type ClientContentParams,
+  type ClientContentPart,
+  type ClientContentTurn,
+  createAudioSession,
   defaultLiveModel,
   geminiLiveVersion,
+  type LiveFunctionDeclaration,
+  toolsToDeclarations,
 } from "./src/geminiLiveSession.ts";
 export {
   geminiGenJson,
