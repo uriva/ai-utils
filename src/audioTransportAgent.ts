@@ -103,6 +103,10 @@ export const spokenReplyOnly = (text: string) => {
   if (stripped.includes("Now, I will") && !stripped.includes("relay code is")) {
     return "";
   }
+  const trimmed = stripped.trim();
+  if (trimmed === "<no response>" || trimmed === "[no response]") {
+    return "";
+  }
   return stripped;
 };
 
@@ -521,7 +525,8 @@ const createSessionConfig = (
   const skillsPrompt = formatAudioSkillsPrompt(spec.skills);
   return {
     apiKey: accessGeminiToken(),
-    prompt: `${spec.prompt}${skillsPrompt}\n\n${invisibleToolUseInstruction}`,
+    prompt:
+      `${spec.prompt}${skillsPrompt}\n\n${invisibleToolUseInstruction}\n\nIn this live audio session, never speak or output '[no response]' or '<no response>'. If you have nothing to say or choose to stay silent, reply with an empty string.`,
     voiceName: spec.transport.voiceName,
     tools: allTools,
     onDebug: (msg) => {
@@ -682,7 +687,7 @@ export const runAudioAgentLoop = async (
                 parts: [{ text: formatted }],
               },
             ],
-            turnComplete: false,
+            turnComplete: message.turnComplete ?? true,
           }).catch(() => {});
         } else if (message.type === "text") {
           state.session.sendText(message.text).catch(() => {});

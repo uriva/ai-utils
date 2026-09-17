@@ -900,12 +900,20 @@ Deno.test("createDuplexPair delivers system message to receiver", async () => {
   await left.sendData({
     type: "system",
     text: "Call connected.",
+    turnComplete: true,
   });
   assertEquals(received.length, 1);
   assertEquals(received[0].type, "system");
   if (received[0].type === "system") {
     assertEquals(received[0].text, "Call connected.");
+    assertEquals(received[0].turnComplete, true);
   }
+});
+
+Deno.test("spokenReplyOnly strips <no response> and [no response]", () => {
+  assertEquals(spokenReplyOnly("<no response>"), "");
+  assertEquals(spokenReplyOnly("[no response]"), "");
+  assertEquals(spokenReplyOnly("<no response>\n\n"), "");
 });
 
 Deno.test("formatSystemNotification formats text with system notification prefix", () => {
