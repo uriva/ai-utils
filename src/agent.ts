@@ -2465,7 +2465,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         ),
         params: z.any().describe("The parameters for the tool"),
         spinnerText: z.string().describe(
-          "A short progress update or spinner message in active voice (e.g., 'Searching the web...', 'Deploying server...') representing what this action is actively doing. This message is shown to the user while the tool runs. IMPORTANT: Do NOT include any emojis (such as hourglass ⏳, gears ⚙️, etc.) in this message.",
+          "A short progress update or spinner message in active voice representing what this action is actively doing. CRITICAL: This message is shown directly to the user while the tool runs, so you MUST write it in the same language as the conversation (e.g. if the user speaks Hebrew, write it in Hebrew, e.g. 'מחפש ברשת...'). IMPORTANT: Do NOT include any emojis (such as hourglass ⏳, gears ⚙️, etc.) in this message.",
         ),
       }),
       handler: async ({ command: rawCommand, params }, toolCallId) => {
@@ -2553,7 +2553,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
       parameters: z.object({
         skillName: z.string().describe("The name of the skill to learn about"),
         spinnerText: z.string().describe(
-          "A short progress update or spinner message in active voice (e.g., 'Learning the web search skill...', 'Loading calendar protocols...') representing what this action is actively doing.",
+          "A short progress update or spinner message in active voice representing what this action is actively doing, written in the same language as the conversation.",
         ),
       }),
       handler: async (
@@ -2586,7 +2586,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
       parameters: z.object({
         skillName: z.string().describe("The name of the skill to deactivate"),
         spinnerText: z.string().describe(
-          "A short progress update or spinner message in active voice (e.g., 'Deactivating search skill...') representing what this action is actively doing.",
+          "A short progress update or spinner message in active voice representing what this action is actively doing, written in the same language as the conversation.",
         ),
       }),
       handler: ({ skillName, spinnerText: _spinnerText }) => {

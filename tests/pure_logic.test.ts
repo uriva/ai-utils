@@ -1315,6 +1315,31 @@ Deno.test("resolveToolDescription resolves description from run_command spinnerT
   assertEquals(resolved, "Performing a background task");
 });
 
+Deno.test("createSkillTools describes spinnerText to match conversation language", () => {
+  const dummySkillTool = tool({
+    name: "dummy_tool",
+    description: "A dummy tool",
+    parameters: z.object({ comment: z.string().optional() }),
+    handler: () => Promise.resolve(""),
+  });
+  const skills: Skill[] = [{
+    name: "dummy_skill",
+    description: "A dummy skill",
+    instructions: "Dummy",
+    tools: [dummySkillTool],
+  }];
+  const allTools = createSkillTools(skills);
+  const runCommand = allTools.find((t) => t.name === "run_command");
+  assert(runCommand !== undefined);
+  const shape =
+    (runCommand.parameters as z.ZodObject<{ spinnerText: z.ZodString }>).shape;
+  const desc = shape.spinnerText.description ?? "";
+  assert(
+    desc.includes("same language as the conversation"),
+    "spinnerText description must instruct matching the conversation language",
+  );
+});
+
 import { zodToGeminiParameters } from "../src/gemini.ts";
 
 Deno.test("zodToGeminiParameters converts ZodLiteral (const) to enum with single value", () => {
