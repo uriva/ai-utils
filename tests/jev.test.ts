@@ -49,7 +49,7 @@ Deno.test("formatAgentStateForJev extracts user request and tool names", () => {
     })],
     [{ name: "query" }, { name: "event_by_id" }],
   );
-  assertEquals(state.user_request, "What events are happening in Berlin?");
+  assertEquals(state.trigger_content, "What events are happening in Berlin?");
   assertEquals(state.agent_role, "You are a helpful events concierge.");
   assertEquals(state.tools_available, ["query", "event_by_id"]);
 });

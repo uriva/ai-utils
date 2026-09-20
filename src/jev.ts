@@ -19,9 +19,17 @@ export const formatAgentStateForJev = (
   history: HistoryEvent[],
   tools?: { name: string }[],
 ): Record<string, unknown> => {
+  const lastEvent = history[history.length - 1];
   const lastUserMsg = [...history]
     .reverse()
     .find((e) => e.type === "participant_utterance");
+  const triggerContent =
+    lastEvent && "text" in lastEvent && typeof lastEvent.text === "string"
+      ? lastEvent.text.slice(0, 1000)
+      : (lastUserMsg && "text" in lastUserMsg
+        ? String(lastUserMsg.text).slice(0, 1000)
+        : "Empty user request");
+  const triggerType = lastEvent ? lastEvent.type : "conversation_start";
   const recentEvents = history.slice(-4).map((e) => ({
     type: e.type,
     text: "text" in e && typeof e.text === "string"
@@ -29,9 +37,8 @@ export const formatAgentStateForJev = (
       : undefined,
   }));
   return {
-    user_request: lastUserMsg && "text" in lastUserMsg
-      ? String(lastUserMsg.text).slice(0, 1000)
-      : "Empty user request",
+    trigger_type: triggerType,
+    trigger_content: triggerContent,
     agent_role: prompt.slice(0, 500),
     tools_available: (tools ?? []).map((t) => t.name).slice(0, 15),
     recent_turns: recentEvents,
@@ -55,12 +62,12 @@ const rawCallJev = async (
         model_selection: {
           type: "choice",
           instructions:
-            "Which model tier should handle this task? Choose 'lite' for simple conversational turns, basic Q&A, straightforward queries, greetings, or basic single-step data extraction; choose 'flash' for complex multi-step reasoning, coding, mathematical logic, or intricate planning.",
+            "Which model tier should handle this task? Choose 'lite' for simple user conversational turns, greetings, basic FAQ, or straightforward single-step data extraction; choose 'flash' for system notifications, behavioral instructions, multi-step reasoning, coding, mathematical logic, or intricate planning.",
           criteria: {
             lite:
-              "Simple conversational turn, basic information retrieval, straightforward query, or basic request",
+              "Simple user conversational turn, basic information retrieval, straightforward query, or basic request",
             flash:
-              "Complex multi-step task, nuanced reasoning, coding, mathematical logic, or intricate planning",
+              "System notification, behavioral correction, complex multi-step task, nuanced reasoning, coding, or intricate planning",
           },
         },
       },
@@ -84,7 +91,7 @@ const getRmmbrJevCacher = () => {
   const token = Deno.env.get("RMMBR_TOKEN");
   return token
     ? cache({
-      cacheId: "jev-model-route-v2",
+      cacheId: "jev-model-route-v3",
       ttl: 60 * 60 * 24 * 7,
       url: rmmbrUrl,
       token,
