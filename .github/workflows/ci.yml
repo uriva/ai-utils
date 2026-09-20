@@ -37,6 +37,7 @@ jobs:
       KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       RMMBR_TOKEN: ${{ secrets.RMMBR_TOKEN }}
+      JEV_API_KEY: ${{ secrets.JEV_API_KEY }}
       TEST_PROVIDER: ${{ matrix.stage.provider }}
     name: test (${{ matrix.stage.name }})
     steps:
