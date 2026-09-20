@@ -265,6 +265,7 @@ export {
   geminiFlashVersion,
   geminiGenText,
   geminiLiteVersion,
+  geminiModelVersion,
   geminiProVersion,
   injectGeminiModelVersions,
   injectGeminiToken,

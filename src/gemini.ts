@@ -233,9 +233,9 @@ export const geminiFallbackVersion = defaultGeminiModelVersions.fallback;
 
 export const geminiModelVersion = (
   tierOrLight: ModelTier | boolean | undefined = "flash",
-) => {
+): string => {
   const versions = geminiModelVersions.access();
-  if (tierOrLight === "lite") return versions.lite;
+  if (tierOrLight === "lite" || tierOrLight === true) return versions.lite;
   if (tierOrLight === "pro" || tierOrLight === false) return versions.pro;
   return versions.flash;
 };
