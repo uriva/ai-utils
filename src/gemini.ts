@@ -26,6 +26,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z, type ZodType } from "zod/v4";
 import type { MediaAttachment } from "./agent.ts";
 import { makeCache } from "./cacher.ts";
+import { routeTaskWithJev } from "./jev.ts";
 
 import { pruneDefaultsFromRequired } from "./toolTyping.ts";
 
@@ -213,7 +214,7 @@ type GeminiModelVersions = {
 };
 
 const defaultGeminiModelVersions: GeminiModelVersions = {
-  pro: "gemini-3.7-flash",
+  pro: "gemini-3.8-flash",
   flash: "gemini-3.8-flash",
   lite: "gemini-3.5-flash-lite",
   fallback: "gemini-3.5-flash-lite",
@@ -294,16 +295,17 @@ const generateContentInjection: Injection<
 export const injectGeminiGenerateContent = generateContentInjection.inject;
 
 export const geminiGenJsonFromConvo: <T extends ZodType>(
-  opts: ModelOpts,
+  opts: ModelOpts | undefined,
   messages: ChatCompletionMessageParam[],
   zodType: T,
   attachments?: MediaAttachment[],
 ) => Promise<z.infer<T>> = async <T extends ZodType>(
-  { tier = "flash", maxOutputTokens, disableThinking }: ModelOpts,
+  { tier, maxOutputTokens, disableThinking }: ModelOpts = {},
   messages: ChatCompletionMessageParam[],
   zodType: T,
   attachments?: MediaAttachment[],
 ): Promise<z.infer<T>> => {
+  const resolvedTier = tier ?? await routeTaskWithJev(messages);
   const cacher = makeCache("geminiCompletionResponseText-v4");
   const execGenJson = (req: GenerateContentParameters) =>
     conditionalRetry(isRetryableError)(
@@ -334,11 +336,11 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
   }
   const callWithReq = (c: Content[]) =>
     cachedCall({
-      model: geminiModelVersion(tier),
+      model: geminiModelVersion(resolvedTier),
       config: {
         responseMimeType: "application/json",
         responseSchema: zodToGeminiParameters(zodType),
-        thinkingConfig: geminiThinkingConfig(tier, disableThinking),
+        thinkingConfig: geminiThinkingConfig(resolvedTier, disableThinking),
         ...(maxOutputTokens ? { maxOutputTokens } : {}),
       },
       contents: c,
@@ -387,14 +389,15 @@ export const attachmentsToParts = (
   });
 
 export const geminiGenText = async (
-  { tier = "flash", maxOutputTokens, disableThinking }: ModelOpts,
+  { tier, maxOutputTokens, disableThinking }: ModelOpts = {},
   prompt: string,
-  attachments: MediaAttachment[],
+  attachments: MediaAttachment[] = [],
 ): Promise<string> => {
+  const resolvedTier = tier ?? await routeTaskWithJev(prompt);
   const req = (model: string) => ({
     model,
     config: {
-      thinkingConfig: geminiThinkingConfig(tier, disableThinking),
+      thinkingConfig: geminiThinkingConfig(resolvedTier, disableThinking),
       ...(maxOutputTokens ? { maxOutputTokens } : {}),
     },
     contents: [{
@@ -412,7 +415,7 @@ export const geminiGenText = async (
         }).models.generateContent(req(model)),
     )();
 
-  const primaryModel = geminiModelVersion(tier);
+  const primaryModel = geminiModelVersion(resolvedTier);
   const result = await execGen(primaryModel).catch((err: unknown) => {
     if (
       !isRetryableError(err) &&

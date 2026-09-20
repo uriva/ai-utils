@@ -19,6 +19,7 @@ import { createConsultTool } from "./src/consultTool.ts";
 import { geminiAgentCaller, prepareGeminiHistory } from "./src/geminiAgent.ts";
 import { validateZodSchema } from "./src/gemini.ts";
 import { inspectMediaUrlTool } from "./src/inspectMediaTool.ts";
+import { formatAgentStateForJev, routeTaskWithJev } from "./src/jev.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -135,7 +136,17 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
 
   const dynamicCallModel = async (history: HistoryEvent[]) => {
     const specForTurn = getSpecForTurn(specWithBuiltins, history);
-    return await resolveCallModel(specForTurn)(history);
+    let specToRun = specForTurn;
+    if (specForTurn.lightModel === undefined) {
+      const routedTier = await routeTaskWithJev(
+        formatAgentStateForJev(specForTurn.prompt, history, specForTurn.tools),
+      );
+      specToRun = {
+        ...specForTurn,
+        lightModel: routedTier === "lite",
+      };
+    }
+    return await resolveCallModel(specToRun)(history);
   };
 
   return spec.transport?.kind === "audio"
@@ -299,6 +310,13 @@ export {
   invalidGenJsonMessage,
 } from "./src/genJson.ts";
 export { injectKimiToken, kimiGenJsonFromConvo } from "./src/kimiJson.ts";
+export {
+  accessJevToken,
+  formatAgentStateForJev,
+  injectJevToken,
+  jevApiUrl,
+  routeTaskWithJev,
+} from "./src/jev.ts";
 export { injectOpenAiToken } from "./src/openai.ts";
 export {
   findUngroundedUtteranceArtifacts,
