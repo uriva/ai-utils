@@ -1340,6 +1340,28 @@ Deno.test("createSkillTools describes spinnerText to match conversation language
   );
 });
 
+Deno.test("createSkillTools run_command parameters allow omitting spinnerText", () => {
+  const dummySkillTool = tool({
+    name: "dummy_tool",
+    description: "A dummy tool",
+    parameters: z.object({ comment: z.string().optional() }),
+    handler: () => Promise.resolve(""),
+  });
+  const skills: Skill[] = [{
+    name: "dummy_skill",
+    description: "A dummy skill",
+    instructions: "Dummy",
+    tools: [dummySkillTool],
+  }];
+  const allTools = createSkillTools(skills);
+  const runCommand = allTools.find((t) => t.name === "run_command")!;
+  const parsed = runCommand.parameters.safeParse({
+    command: "dummy_skill/dummy_tool",
+    params: {},
+  });
+  assertEquals(parsed.success, true);
+});
+
 import { zodToGeminiParameters } from "../src/gemini.ts";
 
 Deno.test("zodToGeminiParameters converts ZodLiteral (const) to enum with single value", () => {

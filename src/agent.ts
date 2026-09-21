@@ -2464,7 +2464,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           "The command in format skillName/toolName",
         ),
         params: z.any().describe("The parameters for the tool"),
-        spinnerText: z.string().describe(
+        spinnerText: z.string().optional().describe(
           "A short progress update or spinner message in active voice representing what this action is actively doing. CRITICAL: This message is shown directly to the user while the tool runs, so you MUST write it in the same language as the conversation (e.g. if the user speaks Hebrew, write it in Hebrew, e.g. 'מחפש ברשת...'). IMPORTANT: Do NOT include any emojis (such as hourglass ⏳, gears ⚙️, etc.) in this message.",
         ),
       }),
@@ -2552,7 +2552,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         "Activate a skill: loads its instructions and tools into your system prompt. Reference documents (if any) are separate tools you call directly by their qualified name once the skill is active.",
       parameters: z.object({
         skillName: z.string().describe("The name of the skill to learn about"),
-        spinnerText: z.string().describe(
+        spinnerText: z.string().optional().describe(
           "A short progress update or spinner message in active voice representing what this action is actively doing, written in the same language as the conversation.",
         ),
       }),
@@ -2585,7 +2585,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         "Deactivate a currently active/learned skill to reclaim context token budget",
       parameters: z.object({
         skillName: z.string().describe("The name of the skill to deactivate"),
-        spinnerText: z.string().describe(
+        spinnerText: z.string().optional().describe(
           "A short progress update or spinner message in active voice representing what this action is actively doing, written in the same language as the conversation.",
         ),
       }),
