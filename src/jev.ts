@@ -14,6 +14,17 @@ export const accessJevToken = jevToken.access;
 export const injectJevToken = (token: string): Injector =>
   jevToken.inject(() => token);
 
+const eventContent = (event: HistoryEvent): string | undefined => {
+  if ("text" in event && typeof event.text === "string") return event.text;
+  if ("result" in event && typeof event.result === "string") {
+    return event.result;
+  }
+  if (event.type === "tool_call") {
+    return `${event.name}(${JSON.stringify(event.parameters ?? {})})`;
+  }
+  return undefined;
+};
+
 export const formatAgentStateForJev = (
   prompt: string,
   history: HistoryEvent[],
@@ -23,18 +34,17 @@ export const formatAgentStateForJev = (
   const lastUserMsg = [...history]
     .reverse()
     .find((e) => e.type === "participant_utterance");
-  const triggerContent =
-    lastEvent && "text" in lastEvent && typeof lastEvent.text === "string"
-      ? lastEvent.text.slice(0, 1000)
-      : (lastUserMsg && "text" in lastUserMsg
-        ? String(lastUserMsg.text).slice(0, 1000)
-        : "Empty user request");
+  const lastEventText = lastEvent ? eventContent(lastEvent) : undefined;
+  const triggerContent = lastEventText
+    ? lastEventText.slice(0, 1000)
+    : (lastUserMsg && "text" in lastUserMsg &&
+        typeof lastUserMsg.text === "string"
+      ? lastUserMsg.text.slice(0, 1000)
+      : "Empty user request");
   const triggerType = lastEvent ? lastEvent.type : "conversation_start";
   const recentEvents = history.slice(-4).map((e) => ({
     type: e.type,
-    text: "text" in e && typeof e.text === "string"
-      ? e.text.slice(0, 300)
-      : undefined,
+    text: eventContent(e)?.slice(0, 300),
   }));
   return {
     trigger_type: triggerType,
@@ -43,6 +53,16 @@ export const formatAgentStateForJev = (
     tools_available: (tools ?? []).map((t) => t.name).slice(0, 15),
     recent_turns: recentEvents,
   };
+};
+
+export const jevModelSelectionInstructions =
+  "Which model tier should handle this task? Choose 'lite' for conversational turns, greetings, basic FAQ, or general information questions; choose 'flash' for tool execution, action requests (such as downloading, cutting, editing, or booking), recent tool activity, system notifications, negative constraints, coding, or multi-step logic.";
+
+export const jevModelSelectionCriteria = {
+  lite:
+    "Conversational greeting, general FAQ, information question, or pleasantry without tool actions",
+  flash:
+    "Action request (downloading, cutting, media processing, external actions), recent tool activity, system notification, negative constraint adherence, coding, or complex reasoning",
 };
 
 const rawCallJev = async (
@@ -61,14 +81,8 @@ const rawCallJev = async (
       questions: {
         model_selection: {
           type: "choice",
-          instructions:
-            "Which model tier should handle this task? Choose 'lite' for simple user conversational turns, greetings, basic FAQ, or straightforward single-step data extraction; choose 'flash' for system notifications, behavioral instructions, multi-step reasoning, coding, mathematical logic, or intricate planning.",
-          criteria: {
-            lite:
-              "Simple user conversational turn, basic information retrieval, straightforward query, or basic request",
-            flash:
-              "System notification, behavioral correction, complex multi-step task, nuanced reasoning, coding, or intricate planning",
-          },
+          instructions: jevModelSelectionInstructions,
+          criteria: jevModelSelectionCriteria,
         },
       },
     }),
@@ -91,7 +105,7 @@ const getRmmbrJevCacher = () => {
   const token = Deno.env.get("RMMBR_TOKEN");
   return token
     ? cache({
-      cacheId: "jev-model-route-v3",
+      cacheId: "jev-model-route-v4",
       ttl: 60 * 60 * 24 * 7,
       url: rmmbrUrl,
       token,
