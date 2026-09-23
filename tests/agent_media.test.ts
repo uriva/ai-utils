@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
-import type { Content, Part } from "@google/genai";
+import { type Content, type Part, ThinkingLevel } from "@google/genai";
 import { z } from "zod/v4";
 import {
   type HistoryEvent,
@@ -44,7 +44,6 @@ runForAllProviders(
       }],
       prompt:
         "You can see raw images returned by tools. Do not call inspect_media_url for inline media; describe the attached image directly.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -76,7 +75,6 @@ runForAllProviders(
       maxIterations: 3,
       tools: [],
       prompt: "You can see images attached by the user.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -112,7 +110,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You can see images and their captions. Always mention the caption information in your response.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -163,7 +160,6 @@ runForAllProviders(
       maxIterations: 3,
       tools: [],
       prompt: "You can see images attached by the user.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -231,7 +227,6 @@ runForAllProviders(
       }],
       prompt:
         "When a tool returns a media URL, call inspect_media_url to look at it before answering.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -286,7 +281,7 @@ Deno.test("tool_result attachments are rendered as media parts in the gemini req
       ],
     }),
   ];
-  const req = buildReq(true, "p", [], "UTC", undefined)(
+  const req = buildReq(ThinkingLevel.HIGH, "p", [], "UTC", undefined)(
     // deno-lint-ignore no-explicit-any
     events as any[],
   );

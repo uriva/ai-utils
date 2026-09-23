@@ -1,4 +1,5 @@
 import { assert } from "@std/assert";
+import { ThinkingLevel } from "@google/genai";
 import { buildReq } from "../src/geminiAgent.ts";
 import { ownThoughtTurn, systemNotificationPrefix } from "../src/agent.ts";
 import { internalThoughtPrefix } from "../src/jsonThought.ts";
@@ -44,7 +45,13 @@ Deno.test(
       },
     ];
 
-    const req = buildReq(false, "system prompt", [], "UTC", undefined)(
+    const req = buildReq(
+      ThinkingLevel.HIGH,
+      "system prompt",
+      [],
+      "UTC",
+      undefined,
+    )(
       history,
     );
 
@@ -100,7 +107,13 @@ Deno.test(
       },
     ];
 
-    const req = buildReq(false, "system prompt", [], "UTC", undefined)(
+    const req = buildReq(
+      ThinkingLevel.HIGH,
+      "system prompt",
+      [],
+      "UTC",
+      undefined,
+    )(
       history,
     );
 
@@ -132,7 +145,13 @@ Deno.test(
       syntheticThought,
     ];
 
-    const req = buildReq(false, "system prompt", [], "UTC", undefined)(
+    const req = buildReq(
+      ThinkingLevel.HIGH,
+      "system prompt",
+      [],
+      "UTC",
+      undefined,
+    )(
       history,
     );
 

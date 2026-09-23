@@ -24,7 +24,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helper.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -86,7 +85,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helper.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -130,7 +128,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [someTool],
       prompt: "You are a helper.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -187,7 +184,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [someTool],
       prompt: "You are a helper.",
-      lightModel: true,
       rewriteHistory: (replacements) => {
         rewriteReplacements = replacements;
         return Promise.resolve();
@@ -242,7 +238,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helper.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -277,7 +272,6 @@ runForAllProviders(
       maxIterations: 5,
       tools: [],
       prompt: "You are a helpful assistant.",
-      lightModel: true,
       rewriteHistory: (
         replacements: Record<string, HistoryEvent>,
       ) => {
@@ -320,7 +314,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helpful assistant.",
-      lightModel: true,
       rewriteHistory: (
         replacements: Record<string, HistoryEvent>,
       ) => {
@@ -434,7 +427,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helpful assistant.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });

@@ -15,17 +15,21 @@ import {
 } from "./src/agent.ts";
 import { anthropicAgentCaller } from "./src/anthropicAgent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
-import { createConsultTool } from "./src/consultTool.ts";
 import { geminiAgentCaller, prepareGeminiHistory } from "./src/geminiAgent.ts";
 import { validateZodSchema } from "./src/gemini.ts";
 import { inspectMediaUrlTool } from "./src/inspectMediaTool.ts";
 import { formatAgentStateForJev, routeTaskWithJev } from "./src/jev.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
+import { ThinkingLevel } from "@google/genai";
+
+type AgentSpecForTurn = AgentSpec & {
+  thinkingLevel?: ThinkingLevel;
+};
 
 // deno-lint-ignore no-explicit-any
 const widen = (caller: (events: any) => Promise<any>): CallModel => caller;
 
-const providerCaller = (spec: AgentSpec): CallModel => {
+const providerCaller = (spec: AgentSpecForTurn): CallModel => {
   if (spec.provider === "moonshot") return widen(kimiAgentCaller(spec));
   if (spec.provider === "anthropic") return widen(anthropicAgentCaller(spec));
   // Default to Gemini for audio transport or when provider is "google" or undefined
@@ -55,7 +59,7 @@ const prepareHistory =
 // - otherwise the provider-based caller is chosen from spec.provider.
 // Then injectCallModelWrapper wraps whatever was chosen (tests use this to
 // add rmmbr caching around a real provider caller).
-const resolveCallModel = (spec: AgentSpec): CallModel => {
+const resolveCallModel = (spec: AgentSpecForTurn): CallModel => {
   const base: CallModel = (events) => {
     try {
       return accessCallModel(events);
@@ -69,49 +73,11 @@ const resolveCallModel = (spec: AgentSpec): CallModel => {
     inner: base,
   });
   const prepare = prepareHistory(spec);
-  const runner: CallModel = async (events) =>
+  return async (events) =>
     wrapped(await prepare(sanitizeHistorySkillsForModel(events)));
-
-  if (spec.isConsult) {
-    return injectStreamChunk((_chunk: string) => {})(
-      injectStreamThinkingChunk((_chunk: string) => {})(
-        runner,
-      ),
-    );
-  }
-  return runner;
 };
 
 const builtinTools = [inspectMediaUrlTool];
-
-// The strong model runs as a single CallModel turn and we only keep its text
-// reply. With tools it leads with a tool_call and emits no text; even tool-less
-// it stays silent when the weaker model asks it to "act". So strip tools/skills
-// and prepend a consult-role preamble framing it as an advisor that must answer
-// in text — otherwise `consult` returns "[stronger model returned no text]".
-const consultRolePreamble = (agentPrompt: string) =>
-  `You are the stronger model in your AI family. The weaker model handling the conversation below has paused to consult you for advice.
-
-CRITICAL: You are an ADVISOR, NOT the agent described in the instructions below. The instructions below apply ONLY to the weaker model, NOT to you. You are NOT bound by any of its rules, "do not respond" instructions, or restrictions, and you must NEVER stay silent. Your sole job is to help the weaker model by providing clear, plain-text advice and reasoning. You MUST always write a substantive response in plain text guiding the weaker model on what to do next. You MUST start your response with the word "Advice:" and then provide your detailed guidance.
-
-For your context, here is the system prompt and instructions of the weaker model you are advising (remember: these rules apply to THEM, NOT to you):
-=== WEAKER MODEL INSTRUCTIONS ===
-${agentPrompt}
-=== END WEAKER MODEL INSTRUCTIONS ===`;
-
-const consultBuiltin = (spec: AgentSpec) =>
-  spec.lightModel
-    ? [createConsultTool(
-      resolveCallModel({
-        ...spec,
-        lightModel: false,
-        tools: [],
-        skills: [],
-        prompt: consultRolePreamble(spec.prompt),
-        isConsult: true,
-      }),
-    )]
-    : [];
 
 const addBuiltinTools = (spec: AgentSpec): AgentSpec => {
   const existingToolNames = new Set(spec.tools.map(({ name }) => name));
@@ -124,9 +90,6 @@ const addBuiltinTools = (spec: AgentSpec): AgentSpec => {
       ...spec.tools,
       ...builtinTools.filter(({ name }) => !existingToolNames.has(name)),
       ...scratchTool.filter(({ name }) => !existingToolNames.has(name)),
-      ...consultBuiltin(spec).filter(({ name }) =>
-        !existingToolNames.has(name)
-      ),
     ],
   };
 };
@@ -136,17 +99,16 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
 
   const dynamicCallModel = async (history: HistoryEvent[]) => {
     const specForTurn = getSpecForTurn(specWithBuiltins, history);
-    let specToRun = specForTurn;
-    if (specForTurn.lightModel === undefined) {
-      const routedTier = await routeTaskWithJev(
-        formatAgentStateForJev(specForTurn.prompt, history, specForTurn.tools),
-      );
-      specToRun = {
-        ...specForTurn,
-        lightModel: routedTier === "lite",
-      };
-    }
-    return await resolveCallModel(specToRun)(history);
+    const routedTier = await routeTaskWithJev(
+      formatAgentStateForJev(specForTurn.prompt, history, specForTurn.tools),
+    );
+    const thinkingLevel = routedTier === "lite"
+      ? ThinkingLevel.LOW
+      : ThinkingLevel.HIGH;
+    return await resolveCallModel({
+      ...specForTurn,
+      thinkingLevel,
+    })(history);
   };
 
   return spec.transport?.kind === "audio"
@@ -253,7 +215,6 @@ export {
   summarizeEvents,
   summarizeSegmentToHistoryEvent,
 } from "./src/compaction.ts";
-export { consultToolName } from "./src/consultTool.ts";
 export {
   defaultDeterministicTLDR,
   getSpillThreshold,
@@ -267,12 +228,14 @@ export {
   geminiLiteVersion,
   geminiModelVersion,
   geminiProVersion,
+  geminiThinkingConfig,
   injectGeminiModelVersions,
   injectGeminiToken,
   validateSchema,
   validateZodSchema,
   zodToGeminiParameters,
 } from "./src/gemini.ts";
+export { ThinkingLevel } from "@google/genai";
 export {
   clearGeminiContextCacheMap,
   geminiContextCacheBufferSeconds,

@@ -78,7 +78,6 @@ const singleAttempt = async (
   const history = initialHistory();
   const initialLength = history.length;
   await agentDeps(history)(runAgentWithProvider)({
-    lightModel: true,
     maxOutputTokens: 8000,
     maxIterations: 10,
     disableStreaming: true,

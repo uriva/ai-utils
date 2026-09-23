@@ -62,7 +62,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You are a helpful assistant. If the user sent a corrupted, missing or unsupported file, explain that gracefully and ask them to re-send.",
-      lightModel: true,
       rewriteHistory: mockRewriteHistory,
       timezoneIANA: "UTC",
     });

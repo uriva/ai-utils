@@ -64,8 +64,7 @@ const anthropicApiKeyInjection: Injection<() => string> = context(
 export const injectAnthropicToken = (token: string): Injector =>
   anthropicApiKeyInjection.inject(() => token);
 
-const anthropicModel = (lightModel?: boolean) =>
-  lightModel ? "claude-sonnet-4-6" : "claude-opus-4-7";
+const anthropicModel = () => "claude-opus-4-7";
 
 const isTokenLimitExceeded = (error: Error) =>
   "status" in error && (error as { status: number }).status === 400 &&
@@ -502,7 +501,6 @@ const buildReq = (
   skills: AgentSpec["skills"],
   timezoneIANA: string,
   maxOutputTokens: number | undefined,
-  lightModel: boolean | undefined,
 ): BuildReqFn =>
 async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
   const eventById = (id: MessageId) => events.find((e) => e.id === id);
@@ -546,7 +544,7 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
     : tools;
 
   return {
-    model: anthropicModel(lightModel),
+    model: anthropicModel(),
     system: systemPrompt,
     messages,
     max_tokens: effectiveMaxTokens,
@@ -828,7 +826,6 @@ const anthropicOutputPartToHistoryEvents =
   };
 
 export const anthropicAgentCaller = ({
-  lightModel,
   prompt,
   tools,
   skills,
@@ -837,15 +834,12 @@ export const anthropicAgentCaller = ({
   timezoneIANA,
   maxOutputTokens,
   disableStreaming,
-  isConsult,
   toolOutputScratchPad,
 }: AgentSpec) =>
 async (events: AnthropicHistoryEvent[]): Promise<AnthropicHistoryEvent[]> => {
   const enhancedPrompt = [
     `${prompt}\n\n${systemInstructionTail(toolOutputScratchPad)}`,
-    ...(isConsult ? [] : [
-      `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,
-    ]),
+    `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,
   ].join("\n\n");
 
   const anthropicOutput = await callAnthropicWithFixHistory(
@@ -856,7 +850,6 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicHistoryEvent[]> => {
       allSkills ?? skills,
       timezoneIANA,
       maxOutputTokens,
-      lightModel,
     ),
     disableStreaming,
   )(events);

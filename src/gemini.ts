@@ -248,21 +248,20 @@ export const alternateGeminiModelVersion = (model: string) => {
 };
 
 export const geminiThinkingConfig = (
-  tierOrLight: ModelTier | boolean | undefined = "flash",
-  disableThinking: boolean | undefined = false,
+  levelOrTier: ThinkingLevel | ModelTier | boolean = ThinkingLevel.HIGH,
+  includeThoughts = true,
 ): ThinkingConfig => {
-  if (disableThinking) {
-    return tierOrLight === "lite"
-      ? { thinkingBudget: 1 }
-      : { thinkingBudget: 0 };
-  }
-  const isLight = tierOrLight === "flash" || tierOrLight === "lite" ||
-    tierOrLight === true;
+  const thinkingLevel = levelOrTier === ThinkingLevel.LOW ||
+      levelOrTier === ThinkingLevel.MEDIUM ||
+      levelOrTier === ThinkingLevel.HIGH ||
+      levelOrTier === ThinkingLevel.THINKING_LEVEL_UNSPECIFIED
+    ? levelOrTier
+    : (levelOrTier === "lite" || levelOrTier === true
+      ? ThinkingLevel.LOW
+      : ThinkingLevel.HIGH);
   return {
-    includeThoughts: true,
-    ...(isLight
-      ? { thinkingLevel: ThinkingLevel.THINKING_LEVEL_UNSPECIFIED }
-      : {}),
+    includeThoughts,
+    thinkingLevel,
   };
 };
 
@@ -340,7 +339,12 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
       config: {
         responseMimeType: "application/json",
         responseSchema: zodToGeminiParameters(zodType),
-        thinkingConfig: geminiThinkingConfig(resolvedTier, disableThinking),
+        thinkingConfig: geminiThinkingConfig(
+          resolvedTier === "lite" || disableThinking
+            ? ThinkingLevel.LOW
+            : ThinkingLevel.HIGH,
+          !disableThinking,
+        ),
         ...(maxOutputTokens ? { maxOutputTokens } : {}),
       },
       contents: c,
@@ -397,7 +401,12 @@ export const geminiGenText = async (
   const req = (model: string) => ({
     model,
     config: {
-      thinkingConfig: geminiThinkingConfig(resolvedTier, disableThinking),
+      thinkingConfig: geminiThinkingConfig(
+        resolvedTier === "lite" || disableThinking
+          ? ThinkingLevel.LOW
+          : ThinkingLevel.HIGH,
+        !disableThinking,
+      ),
       ...(maxOutputTokens ? { maxOutputTokens } : {}),
     },
     contents: [{

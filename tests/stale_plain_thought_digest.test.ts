@@ -51,7 +51,6 @@ Deno.test("stale platform notifications fold to one-line digests in model contex
       maxIterations: 1,
       tools: [],
       prompt: "You are a helper.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -98,7 +97,6 @@ Deno.test("recent platform notifications and compaction summaries keep full text
       maxIterations: 1,
       tools: [],
       prompt: "You are a helper.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });

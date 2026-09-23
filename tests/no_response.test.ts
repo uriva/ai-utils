@@ -37,7 +37,6 @@ const runOnce = async (
     maxIterations: 5,
     tools: [],
     prompt: SOCCER_BOT_PROMPT,
-    lightModel: true,
     rewriteHistory: noopRewriteHistory,
     timezoneIANA: "UTC",
   });

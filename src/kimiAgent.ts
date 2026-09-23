@@ -643,7 +643,6 @@ const kimiOutputPartToHistoryEvents =
   };
 
 export const kimiAgentCaller = ({
-  lightModel,
   prompt,
   tools,
   skills,
@@ -652,17 +651,12 @@ export const kimiAgentCaller = ({
   timezoneIANA,
   maxOutputTokens,
   disableStreaming,
-  isConsult,
   toolOutputScratchPad,
 }: AgentSpec) =>
 async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
-  void lightModel;
-
   const enhancedPrompt = [
     `${prompt}\n\n${systemInstructionTail(toolOutputScratchPad)}`,
-    ...(isConsult ? [] : [
-      `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,
-    ]),
+    `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,
   ].join("\n\n");
 
   const kimiOutput = await callKimiWithFixHistory(

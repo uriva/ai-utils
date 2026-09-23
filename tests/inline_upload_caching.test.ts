@@ -55,15 +55,8 @@ const baseSpec = (): Omit<AgentSpec, "provider"> => ({
       parameters: z.object({}),
       handler: () => Promise.resolve(""),
     },
-    {
-      name: "consult",
-      description: "Do not use.",
-      parameters: z.object({}),
-      handler: () => Promise.resolve(""),
-    },
   ],
   prompt: "You can see images attached by the user. Reply briefly.",
-  lightModel: true,
   rewriteHistory: noopRewriteHistory,
   timezoneIANA: "UTC",
 });

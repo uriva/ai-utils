@@ -46,7 +46,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You are a helpful assistant. If a file could not be processed, say so and ask the user to resend.",
-      lightModel: true,
       rewriteHistory,
       timezoneIANA: "UTC",
     };

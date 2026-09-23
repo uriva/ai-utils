@@ -7,8 +7,10 @@ import {
   injectJevToken,
   participantUtteranceTurn,
   routeTaskWithJev,
+  ThinkingLevel,
   toolResultTurn,
 } from "../mod.ts";
+import { buildReq } from "../src/geminiAgent.ts";
 import type { HistoryEvent } from "../src/agent.ts";
 
 const testJevToken = Deno.env.get("JEV_API_KEY") ||
@@ -151,5 +153,40 @@ Deno.test("formatAgentStateForJev preserves tool_result content and tool_call in
   assertEquals(
     recent[2].text,
     "Operation completed successfully with 5 items.",
+  );
+});
+
+Deno.test("buildReq always uses flash model and applies ThinkingLevel constants without numbers", () => {
+  const lowReq = buildReq(
+    ThinkingLevel.LOW,
+    "You are a helpful assistant.",
+    [],
+    "UTC",
+    undefined,
+  )([]);
+  assertEquals(lowReq.model, "gemini-3.8-flash");
+  assertEquals(lowReq.config?.thinkingConfig?.thinkingLevel, ThinkingLevel.LOW);
+  assertEquals(lowReq.config?.thinkingConfig?.includeThoughts, true);
+  assertEquals(
+    "thinkingBudget" in (lowReq.config?.thinkingConfig ?? {}),
+    false,
+  );
+
+  const highReq = buildReq(
+    ThinkingLevel.HIGH,
+    "You are a helpful assistant.",
+    [],
+    "UTC",
+    undefined,
+  )([]);
+  assertEquals(highReq.model, "gemini-3.8-flash");
+  assertEquals(
+    highReq.config?.thinkingConfig?.thinkingLevel,
+    ThinkingLevel.HIGH,
+  );
+  assertEquals(highReq.config?.thinkingConfig?.includeThoughts, true);
+  assertEquals(
+    "thinkingBudget" in (highReq.config?.thinkingConfig ?? {}),
+    false,
   );
 });

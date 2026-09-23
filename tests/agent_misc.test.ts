@@ -96,7 +96,6 @@ runForAllProviders(
         tools: [],
         prompt:
           "You are a helpful assistant. When asked about the time, look at the timestamp shown in brackets before the user's message.",
-        lightModel: true,
         rewriteHistory: noopRewriteHistory,
         timezoneIANA: "America/New_York",
       });

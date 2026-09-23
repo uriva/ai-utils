@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
-import type { Content } from "@google/genai";
+import { type Content, ThinkingLevel } from "@google/genai";
 import { z } from "zod/v4";
 import { tool } from "../mod.ts";
 import {
@@ -478,7 +478,9 @@ Deno.test("tool_call with empty thoughtSignature omits field from API request", 
       result: "done",
     },
   ];
-  const req = buildReq(true, "prompt", [], "UTC", undefined)(events);
+  const req = buildReq(ThinkingLevel.HIGH, "prompt", [], "UTC", undefined)(
+    events,
+  );
   const contents = req.contents as Content[];
   const modelContents = contents.filter((c: Content) => c.role === "model");
   for (const content of modelContents) {
@@ -527,7 +529,9 @@ Deno.test("tool_call with non-empty thoughtSignature preserves it in API request
       result: "done",
     },
   ];
-  const req = buildReq(true, "prompt", [], "UTC", undefined)(events);
+  const req = buildReq(ThinkingLevel.HIGH, "prompt", [], "UTC", undefined)(
+    events,
+  );
   const contents = req.contents as Content[];
   const modelContents = contents.filter((c: Content) => c.role === "model");
   let foundFc = false;

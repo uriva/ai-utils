@@ -2635,7 +2635,6 @@ export type AgentSpec = AgentInputs & {
   onStreamChunk?: (chunk: string) => Promise<void> | void;
   onStreamThinkingChunk?: (chunk: string) => Promise<void> | void;
   maxIterations: number;
-  lightModel?: boolean;
   disableStreaming?: boolean;
   provider?: "google" | "moonshot" | "anthropic";
   rewriteHistory?: (
@@ -2652,7 +2651,6 @@ export type AgentSpec = AgentInputs & {
     participantName: string;
   };
   toolOutputScratchPad?: ToolOutputScratchPad;
-  isConsult?: boolean;
   // Tools whose parameters may legitimately carry hosts that appear in no
   // instruction or history (e.g. arbitrary code execution). Matching covers
   // the tool name and, for router tools, the inner `command` string.

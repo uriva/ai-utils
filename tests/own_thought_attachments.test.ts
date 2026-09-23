@@ -30,7 +30,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You can see images attached alongside internal thoughts. Describe what you see.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });

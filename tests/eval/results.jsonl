@@ -1,0 +1,5 @@
+{"suite":"compaction","task":"savings_within_budget","provider":"local","pass":true,"turns":80,"toolCalls":0,"historyTokens":32160,"timeMs":638}
+{"suite":"grounding","task":"block_ungrounded_host","provider":"fake","pass":true,"turns":2,"toolCalls":0,"historyTokens":0,"timeMs":34}
+{"suite":"tool","task":"parallel_fetch_price","provider":"google","pass":true,"turns":2,"toolCalls":2,"historyTokens":522,"timeMs":8093}
+{"suite":"compaction","task":"savings_within_budget","provider":"local","pass":true,"turns":80,"toolCalls":0,"historyTokens":32160,"timeMs":246}
+{"suite":"grounding","task":"block_ungrounded_host","provider":"fake","pass":true,"turns":2,"toolCalls":0,"historyTokens":0,"timeMs":9}

@@ -1,5 +1,5 @@
 import "@std/dotenv/load";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { z } from "zod/v4";
 import {
   buildReq,
@@ -57,8 +57,7 @@ console.log(
 );
 
 const req = buildReq(
-  false,
-  a.model.lightModel,
+  ThinkingLevel.HIGH,
   a.prompt,
   tools,
   a.model.timezoneIANA,

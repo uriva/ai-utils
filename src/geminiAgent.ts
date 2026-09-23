@@ -9,6 +9,7 @@ import {
   HarmBlockThreshold,
   HarmCategory,
   type Part,
+  ThinkingLevel,
 } from "@google/genai";
 import { context, type Injection } from "@uri/inject";
 import {
@@ -958,14 +959,14 @@ const textSafetyCategories = [
 ];
 
 export const buildReq = (
-  lightModel: boolean | undefined,
+  thinkingLevel: ThinkingLevel,
   prompt: string,
   tools: Tool<ZodType>[],
   timezoneIANA: string,
   maxOutputTokens: number | undefined,
 ) =>
 (events: GeminiHistoryEvent[]): GenerateContentParameters => ({
-  model: geminiModelVersion(lightModel),
+  model: geminiModelVersion("flash"),
   config: {
     systemInstruction: prompt,
     safetySettings: textSafetyCategories.map((category) => ({
@@ -973,7 +974,7 @@ export const buildReq = (
       threshold: HarmBlockThreshold.OFF,
     })),
     ...toolingConfig(tools),
-    thinkingConfig: geminiThinkingConfig(lightModel),
+    thinkingConfig: geminiThinkingConfig(thinkingLevel),
     ...(maxOutputTokens ? { maxOutputTokens } : {}),
   },
   contents: pipe(
@@ -1556,7 +1557,7 @@ export const stripAllExpiredFiles = async (
 export const callGeminiWithFixHistory = (
   rewriteHistory?: AgentSpec["rewriteHistory"],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters =
-    buildReq(false, "", [], "UTC", undefined),
+    buildReq(ThinkingLevel.HIGH, "", [], "UTC", undefined),
   disableStreaming?: boolean,
 ) =>
 async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
@@ -1824,7 +1825,7 @@ export const geminiAgentCaller =
   };
 
 const geminiAgentCallerInner = ({
-  lightModel,
+  thinkingLevel,
   prompt,
   tools,
   skills,
@@ -1833,9 +1834,8 @@ const geminiAgentCallerInner = ({
   timezoneIANA,
   maxOutputTokens,
   disableStreaming,
-  isConsult,
   toolOutputScratchPad,
-}: AgentSpec) =>
+}: AgentSpec & { thinkingLevel?: ThinkingLevel }) =>
 (
   events: GeminiHistoryEvent[],
 ): Promise<GeminiHistoryEvent[]> => {
@@ -1844,8 +1844,7 @@ const geminiAgentCallerInner = ({
   // the no-response tag it was taught here even though a higher-authority system
   // notification (injected by normalizeHistoryForModel) tells it to answer. The
   // notification alone is not enough — the competing license must be removed too.
-  const silenceLicense = isConsult ||
-      historyHasPendingDeferredUserWaitingNudge(events)
+  const silenceLicense = historyHasPendingDeferredUserWaitingNudge(events)
     ? ""
     : noResponseInstruction;
   return pipe(
@@ -1857,7 +1856,7 @@ const geminiAgentCallerInner = ({
     callGeminiWithFixHistory(
       rewriteHistory,
       buildReq(
-        lightModel,
+        thinkingLevel ?? ThinkingLevel.HIGH,
         `${enhancePrompt(prompt, toolOutputScratchPad)}${silenceLicense}`,
         [
           ...tools,

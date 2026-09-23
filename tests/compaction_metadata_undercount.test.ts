@@ -1,4 +1,5 @@
 import { assert } from "@std/assert";
+import { ThinkingLevel } from "@google/genai";
 import { sum } from "gamla";
 import { estimateTokensLocal, type HistoryEvent } from "../src/agent.ts";
 import { partitionSegments, segmentHistoryEvents } from "../src/compaction.ts";
@@ -79,7 +80,13 @@ Deno.test(
     // tokens over the serialized contents (thoughtSignatures included).
     // deno-lint-ignore no-explicit-any
     const geminiHistory = history as any;
-    const req = buildReq(false, "system prompt", [], "UTC", undefined)(
+    const req = buildReq(
+      ThinkingLevel.HIGH,
+      "system prompt",
+      [],
+      "UTC",
+      undefined,
+    )(
       geminiHistory,
     );
     const serializedTokens = roughTokens(JSON.stringify(req.contents));

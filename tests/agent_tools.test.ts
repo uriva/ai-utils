@@ -313,7 +313,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You are a helpful but concise assistant. When a conversation has clearly ended (goodbyes exchanged), do not respond further. A thumbs up or similar acknowledgment after goodbyes does not require a response.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -348,7 +347,6 @@ runForAllProviders(
       tools: [deferredTool],
       prompt:
         "You are an assistant. When asked, call the timeout-wakeup tool with the requested parameters.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -465,7 +463,6 @@ runForAllProviders(
       tools: [deferredTool],
       prompt:
         "You are an assistant. When asked to wait, call the timeout-wakeup tool.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -494,7 +491,6 @@ runForAllProviders(
       tools: [deferredTool],
       prompt:
         "You are a helpful assistant. Always answer the user's latest question.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });

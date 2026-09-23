@@ -1,4 +1,4 @@
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { ThinkingLevel } from "@google/genai";
 import { runAgent } from "../mod.ts";
 import {
@@ -33,7 +33,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helpful assistant. Think carefully before answering.",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
@@ -97,18 +96,16 @@ Deno.test(
 );
 
 Deno.test(
-  "geminiThinkingConfig enables includeThoughts without hardcoded thinkingBudget cap",
+  "geminiThinkingConfig uses ThinkingLevel constants and never thinkingBudget numbers",
   () => {
-    const fullConfig = geminiThinkingConfig(false);
-    assert(fullConfig.includeThoughts === true);
-    assert(!("thinkingBudget" in fullConfig));
-    assert(!("thinkingLevel" in fullConfig));
+    const highConfig = geminiThinkingConfig(ThinkingLevel.HIGH);
+    assert(highConfig.includeThoughts === true);
+    assertEquals(highConfig.thinkingLevel, ThinkingLevel.HIGH);
+    assert(!("thinkingBudget" in highConfig));
 
-    const miniConfig = geminiThinkingConfig(true);
-    assert(miniConfig.includeThoughts === true);
-    assert(
-      miniConfig.thinkingLevel === ThinkingLevel.THINKING_LEVEL_UNSPECIFIED,
-    );
-    assert(!("thinkingBudget" in miniConfig));
+    const lowConfig = geminiThinkingConfig(ThinkingLevel.LOW);
+    assert(lowConfig.includeThoughts === true);
+    assertEquals(lowConfig.thinkingLevel, ThinkingLevel.LOW);
+    assert(!("thinkingBudget" in lowConfig));
   },
 );

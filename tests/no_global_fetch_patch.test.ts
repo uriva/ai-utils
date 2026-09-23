@@ -15,7 +15,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "Reply with exactly: ok",
-      lightModel: true,
       rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });

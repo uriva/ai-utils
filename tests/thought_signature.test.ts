@@ -1,5 +1,6 @@
 import { assert } from "@std/assert";
 import { buildReq } from "../src/geminiAgent.ts";
+import { ThinkingLevel } from "@google/genai";
 import { z } from "zod/v4";
 
 Deno.test(
@@ -41,7 +42,7 @@ Deno.test(
     ];
 
     const reqBuilder = buildReq(
-      false, // lightModel
+      ThinkingLevel.HIGH,
       "system prompt",
       tools,
       "UTC",
@@ -129,7 +130,9 @@ Deno.test(
       },
     ];
 
-    const req = buildReq(false, "system", [], "UTC", undefined)(history);
+    const req = buildReq(ThinkingLevel.HIGH, "system", [], "UTC", undefined)(
+      history,
+    );
     // deno-lint-ignore no-explicit-any
     const contents: any[] = req.contents as any[];
     // deno-lint-ignore no-explicit-any
@@ -188,7 +191,9 @@ Deno.test(
         },
       },
     ];
-    const req = buildReq(false, "system", [], "UTC", undefined)(history);
+    const req = buildReq(ThinkingLevel.HIGH, "system", [], "UTC", undefined)(
+      history,
+    );
     // deno-lint-ignore no-explicit-any
     const contents: any[] = req.contents as any[];
     // deno-lint-ignore no-explicit-any
@@ -231,7 +236,9 @@ Deno.test(
         },
       },
     ];
-    const req = buildReq(false, "system", [], "UTC", undefined)(history);
+    const req = buildReq(ThinkingLevel.HIGH, "system", [], "UTC", undefined)(
+      history,
+    );
     // deno-lint-ignore no-explicit-any
     const contents: any[] = req.contents as any[];
     for (const c of contents) {
