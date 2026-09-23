@@ -22,10 +22,9 @@ Deno.test("geminiModelVersions eliminates 3.7-flash and aligns pro with 3.8-flas
   assertEquals(geminiFlashVersion, "gemini-3.8-flash");
 });
 
-Deno.test("geminiModelVersion resolves boolean true to lite and false to pro", () => {
-  assertEquals(geminiModelVersion(true), "gemini-3.5-flash-lite");
+Deno.test("geminiModelVersion resolves lite, pro, and flash", () => {
   assertEquals(geminiModelVersion("lite"), "gemini-3.5-flash-lite");
-  assertEquals(geminiModelVersion(false), "gemini-3.8-flash");
+  assertEquals(geminiModelVersion("pro"), "gemini-3.8-flash");
   assertEquals(geminiModelVersion("flash"), "gemini-3.8-flash");
 });
 

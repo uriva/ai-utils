@@ -231,12 +231,10 @@ export const geminiFlashVersion = defaultGeminiModelVersions.flash;
 export const geminiLiteVersion = defaultGeminiModelVersions.lite;
 export const geminiFallbackVersion = defaultGeminiModelVersions.fallback;
 
-export const geminiModelVersion = (
-  tierOrLight: ModelTier | boolean | undefined = "flash",
-): string => {
+export const geminiModelVersion = (tier: ModelTier = "flash"): string => {
   const versions = geminiModelVersions.access();
-  if (tierOrLight === "lite" || tierOrLight === true) return versions.lite;
-  if (tierOrLight === "pro" || tierOrLight === false) return versions.pro;
+  if (tier === "lite") return versions.lite;
+  if (tier === "pro") return versions.pro;
   return versions.flash;
 };
 
@@ -248,22 +246,12 @@ export const alternateGeminiModelVersion = (model: string) => {
 };
 
 export const geminiThinkingConfig = (
-  levelOrTier: ThinkingLevel | ModelTier | boolean = ThinkingLevel.HIGH,
+  thinkingLevel: ThinkingLevel = ThinkingLevel.HIGH,
   includeThoughts = true,
-): ThinkingConfig => {
-  const thinkingLevel = levelOrTier === ThinkingLevel.LOW ||
-      levelOrTier === ThinkingLevel.MEDIUM ||
-      levelOrTier === ThinkingLevel.HIGH ||
-      levelOrTier === ThinkingLevel.THINKING_LEVEL_UNSPECIFIED
-    ? levelOrTier
-    : (levelOrTier === "lite" || levelOrTier === true
-      ? ThinkingLevel.LOW
-      : ThinkingLevel.HIGH);
-  return {
-    includeThoughts,
-    thinkingLevel,
-  };
-};
+): ThinkingConfig => ({
+  includeThoughts,
+  thinkingLevel,
+});
 
 // Parse (and validation-failure) errors must happen INSIDE the cached
 // function: a malformed response body must never be written to the cache,
