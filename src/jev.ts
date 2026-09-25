@@ -1,6 +1,8 @@
 import { context, type Injection, type Injector } from "@uri/inject";
 import { cache } from "rmmbr";
 import type { HistoryEvent } from "./agent.ts";
+import { makeCache } from "./cacher.ts";
+import type { DecisionAnswer, DecisionQuestion } from "./decisionModel.ts";
 import type { ModelTier } from "./utils.ts";
 
 export const jevApiUrl = "https://api.typesafe.ai/v1/systemone";
@@ -147,4 +149,86 @@ export const routeTaskWithJev = async (
   } catch {
     return "flash";
   }
+};
+
+let rmmbrDecisionCaller:
+  | ((
+    token: string,
+    payload: string,
+  ) => Promise<Record<string, DecisionAnswer>>)
+  | undefined;
+
+const rawCallJevDecision = async (
+  token: string,
+  payload: string,
+): Promise<Record<string, DecisionAnswer>> => {
+  const response = await fetch(jevApiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: payload,
+    signal: AbortSignal.timeout(10000),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Jev API error (${response.status}): ${errorText}`);
+  }
+  const data = await response.json();
+  return data?.answers ?? {};
+};
+
+const inMemoryDecisionCache = new Map<
+  string,
+  { answers: Record<string, DecisionAnswer>; expiresAt: number }
+>();
+
+const getRmmbrDecisionCacher = () => {
+  const token = Deno.env.get("RMMBR_TOKEN");
+  return token
+    ? cache({
+      cacheId: "jev-decision-v1",
+      ttl: 60 * 60 * 24 * 30,
+      url: rmmbrUrl,
+      token,
+      customKeyFn: (_token: string, payload: string) => payload,
+    })
+    : undefined;
+};
+
+export const callJevDecisionModel = async (
+  state: unknown,
+  questions: Record<string, DecisionQuestion>,
+): Promise<Record<string, DecisionAnswer>> => {
+  const token = accessJevToken();
+  if (!token) throw new Error("No Jev token available");
+
+  const payload = JSON.stringify({
+    model: "jev-latest",
+    state,
+    questions,
+  });
+
+  const memCached = inMemoryDecisionCache.get(payload);
+  if (memCached && Date.now() < memCached.expiresAt) {
+    return memCached.answers;
+  }
+
+  if (!rmmbrDecisionCaller) {
+    const rmmbrCacher = getRmmbrDecisionCacher();
+    const injected = makeCache("jev-decision-v1");
+    const base = rmmbrCacher
+      ? rmmbrCacher(rawCallJevDecision)
+      : rawCallJevDecision;
+    rmmbrDecisionCaller = injected(base);
+  }
+
+  const answers = await rmmbrDecisionCaller(token, payload);
+  inMemoryDecisionCache.set(payload, {
+    answers,
+    expiresAt: Date.now() + memoryTtlMs,
+  });
+  return answers;
 };

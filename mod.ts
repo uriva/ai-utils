@@ -267,6 +267,23 @@ export {
   toolsToDeclarations,
 } from "./src/geminiLiveSession.ts";
 export {
+  callDecisionModel,
+  type ChoiceDecisionAnswer,
+  type ChoiceDecisionQuestion,
+  decide,
+  type DecisionAnswer,
+  type DecisionModelCaller,
+  type DecisionQuestion,
+  genDecision,
+  injectDecisionModel,
+  isDecisionField,
+  isStringField,
+  type NoulDecisionAnswer,
+  type NoulDecisionQuestion,
+  type ScoreDecisionAnswer,
+  type ScoreDecisionQuestion,
+} from "./src/decisionModel.ts";
+export {
   geminiGenJson,
   genJson,
   genJsonFromConvo,
@@ -276,6 +293,7 @@ export {
 export { injectKimiToken, kimiGenJsonFromConvo } from "./src/kimiJson.ts";
 export {
   accessJevToken,
+  callJevDecisionModel,
   formatAgentStateForJev,
   injectJevToken,
   jevApiUrl,
