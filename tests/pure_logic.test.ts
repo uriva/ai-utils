@@ -1730,3 +1730,32 @@ Deno.test("normalizeHistoryForModel: a real result for a late-resolving deferred
     "the real deferred result must survive normalization",
   );
 });
+
+Deno.test("normalizeHistoryForModel: recent proactive task survives when participant replies afterwards", () => {
+  const now = Date.now();
+  const proactiveNote =
+    "PROACTIVE TASK: You have a task to complete: User quota review requested";
+  const history: HistoryEvent[] = [
+    {
+      ...ownThoughtTurn(proactiveNote),
+      timestamp: now - 120_000,
+    },
+    {
+      ...ownUtteranceTurn("You have a new update. Please reply here."),
+      timestamp: now - 90_000,
+    },
+    {
+      ...participantUtteranceTurn({ name: "user", text: "yes please" }),
+      timestamp: now - 60_000,
+    },
+  ];
+  const normalized = normalizeHistoryForModel(history);
+  const found = normalized.some((e) =>
+    e.type === "own_thought" && "text" in e && e.text === proactiveNote
+  );
+  assertEquals(
+    found,
+    true,
+    "recent proactive task must survive across participant reply",
+  );
+});

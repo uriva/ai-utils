@@ -2139,6 +2139,24 @@ const pendingDeferredAcknowledgement =
   "(I started a background task earlier; it is still running and will report " +
   "back separately. I'll answer the user's latest message in the meantime.)";
 
+const isPlatformNotificationText = (text: string): boolean =>
+  text.startsWith("PROACTIVE TASK:") ||
+  text.startsWith("SYSTEM NOTE:") ||
+  text.startsWith("[System notification:") ||
+  text.startsWith("[Earlier platform notification") ||
+  text.startsWith("[external event]:") ||
+  text.startsWith("SYSTEM AUDIT:") ||
+  text.startsWith("AUTOMATED CHECK:") ||
+  text.startsWith("SCHEDULED REVIEW:");
+
+const isRecentPlatformNotification = (e: HistoryEvent): boolean =>
+  e.type === "own_thought" &&
+  !e.modelMetadata &&
+  "text" in e &&
+  typeof e.text === "string" &&
+  isPlatformNotificationText(e.text) &&
+  Date.now() - e.timestamp <= stalePlainThoughtRetentionMs;
+
 export const normalizeHistoryForModel = (
   history: HistoryEvent[],
 ): HistoryEvent[] => {
@@ -2153,10 +2171,11 @@ export const normalizeHistoryForModel = (
 
   const filteredHistory = digestedHistory.filter((e) => {
     if (e.type === "own_thought") {
-      if (e.timestamp >= lastParticipantTimestamp) return true;
       if (typeof e.text === "string" && isCompactedSummaryText(e.text)) {
         return true;
       }
+      if (isRecentPlatformNotification(e)) return true;
+      if (e.timestamp >= lastParticipantTimestamp) return true;
       return false;
     }
     return true;

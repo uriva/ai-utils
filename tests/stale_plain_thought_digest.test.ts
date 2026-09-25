@@ -114,3 +114,44 @@ Deno.test("recent platform notifications and compaction summaries keep full text
     "compaction summaries must never be folded",
   );
 });
+
+Deno.test("recent platform notifications survive across participant turns", async () => {
+  let captured: HistoryEvent[] = [];
+  const fakeCallModel = (events: HistoryEvent[]) => {
+    captured = events;
+    return Promise.resolve([ownUtteranceTurn("Noted.")]);
+  };
+  const recentProactiveNote = proactiveNote(95);
+  await injectCallModel(fakeCallModel)(async () => {
+    await agentDeps([
+      {
+        ...ownThoughtTurn(recentProactiveNote),
+        timestamp: Date.now() - 3 * 60 * 1000,
+      },
+      {
+        ...ownUtteranceTurn("You have a new update."),
+        timestamp: Date.now() - 2 * 60 * 1000,
+      },
+      {
+        ...participantUtteranceTurn({
+          name: "user",
+          text: "Tell me more about it.",
+        }),
+        timestamp: Date.now() - 1 * 60 * 1000,
+      },
+    ])(runAgent)({
+      maxIterations: 1,
+      tools: [],
+      prompt: "You are a helper.",
+      rewriteHistory: noopRewriteHistory,
+      timezoneIANA: "UTC",
+    });
+  })();
+
+  const thoughts = captured.filter((e) => e.type === "own_thought");
+  assertEquals(
+    thoughts.some((e) => e.text === recentProactiveNote),
+    true,
+    "recent platform notification from before participant message must survive in model context",
+  );
+});
