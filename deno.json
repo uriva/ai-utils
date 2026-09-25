@@ -1,6 +1,6 @@
 {
   "name": "@uri/ai-utils",
-  "version": "0.3.35",
+  "version": "0.3.36",
   "minimumDependencyAge": 0,
   "license": "MIT",
   "exports": "./mod.ts",

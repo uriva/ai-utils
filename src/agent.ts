@@ -1009,83 +1009,8 @@ const collapseRepeatedLines = (text: string): string => {
   return collapsed.join("\n");
 };
 
-const longestCommonPrefix = (s1: string, s2: string): string => {
-  let i = 0;
-  while (i < s1.length && i < s2.length && s1[i] === s2[i]) {
-    i++;
-  }
-  return s1.slice(0, i);
-};
-
-const isStructuredLine = (line: string): boolean => {
-  const trimmed = line.trim();
-  return (
-    (trimmed.includes("{") && trimmed.includes("}")) ||
-    (trimmed.includes("[") &&
-      trimmed.includes("]") &&
-      (trimmed.includes('"') || trimmed.includes(":")))
-  );
-};
-
-const collapseSimilarPrefixLines = (text: string): string => {
-  const lines = text.split("\n");
-  const collapsed: string[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const current = lines[i];
-    if (i + 1 >= lines.length) {
-      collapsed.push(current);
-      i++;
-      continue;
-    }
-
-    if (isStructuredLine(current)) {
-      collapsed.push(current);
-      i++;
-      continue;
-    }
-
-    const next = lines[i + 1];
-    const prefix = longestCommonPrefix(current, next);
-
-    if (prefix.trim().length >= 15) {
-      let count = 2;
-      while (
-        i + count < lines.length &&
-        longestCommonPrefix(prefix, lines[i + count]).trim().length >= 15
-      ) {
-        count++;
-      }
-
-      if (count > 2) {
-        let groupPrefix = prefix;
-        for (let j = 2; j < count; j++) {
-          groupPrefix = longestCommonPrefix(groupPrefix, lines[i + j]);
-        }
-        const trimmedPrefix = groupPrefix.trimEnd();
-        collapsed.push(
-          `${trimmedPrefix}... (collapsed ${count} structurally similar lines)`,
-        );
-      } else {
-        collapsed.push(current);
-        collapsed.push(next);
-      }
-      i += count;
-    } else {
-      collapsed.push(current);
-      i++;
-    }
-  }
-
-  return collapsed.join("\n");
-};
-
-const sanitizeToolOutput = (text: string): string => {
-  return collapseRepeatedLines(
-    collapseSimilarPrefixLines(resolveCarriageReturns(stripAnsi(text))),
-  );
-};
+const sanitizeToolOutput = (text: string): string =>
+  collapseRepeatedLines(resolveCarriageReturns(stripAnsi(text)));
 
 export const callToResult = (
   // deno-lint-ignore no-explicit-any

@@ -15,7 +15,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 const paramField = (params: unknown, key: string): unknown =>
   isRecord(params) ? params[key] : undefined;
 
-Deno.test("global tool output sanitization - resolves carriage returns, collapses duplicates, and collapses similar prefixes", async () => {
+Deno.test("global tool output sanitization - resolves carriage returns and collapses duplicate lines", async () => {
   const dummyTool = {
     name: "dummy",
     description: "test",
@@ -50,7 +50,42 @@ Deno.test("global tool output sanitization - resolves carriage returns, collapse
       "[==========] 100%",
       "Done!",
       "Success (repeated 3 times)",
-      "Download https://jsr.io/@std/... (collapsed 3 structurally similar lines)",
+      "Download https://jsr.io/@std/semver/meta.json",
+      "Download https://jsr.io/@std/fmt/meta.json",
+      "Download https://jsr.io/@std/path/meta.json",
+    ].join("\n"),
+  );
+});
+
+Deno.test("global tool output sanitization - preserves lines sharing a common prefix without collapsing", async () => {
+  const documentTool = {
+    name: "inspect_file",
+    description: "test",
+    parameters: z.object({}),
+    handler: () =>
+      Promise.resolve(
+        [
+          "Transaction line item: Voucher 01/01/2026 Batch A 100.00 USD",
+          "Transaction line item: Voucher 01/01/2026 Batch A 200.00 USD",
+          "Transaction line item: Voucher 01/01/2026 Batch A 300.00 USD",
+        ].join("\n"),
+      ),
+  };
+
+  const resolver = callToResult([documentTool]);
+  const res = await resolver({
+    name: "inspect_file",
+    args: {},
+    id: "call-doc",
+  });
+
+  assertEquals(res?.toolCallId, "call-doc");
+  assertEquals(
+    res?.result,
+    [
+      "Transaction line item: Voucher 01/01/2026 Batch A 100.00 USD",
+      "Transaction line item: Voucher 01/01/2026 Batch A 200.00 USD",
+      "Transaction line item: Voucher 01/01/2026 Batch A 300.00 USD",
     ].join("\n"),
   );
 });
