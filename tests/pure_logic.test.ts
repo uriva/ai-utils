@@ -446,6 +446,80 @@ Deno.test("invalid Gemini tool calls rewrite to useful thoughts without internal
   assertEquals(replacementText.includes("Removed tool"), false);
 });
 
+Deno.test(
+  "geminiOutputToHistoryEvents propagates sibling thoughtSignature to function_call part",
+  () => {
+    const events = geminiOutputToHistoryEvents([
+      {
+        type: "text",
+        text: "Thinking...",
+        thought: true,
+        thoughtSignature: "sig-from-thought",
+      },
+      {
+        type: "function_call",
+        functionCall: { name: "my_tool", args: {} },
+      },
+    ]);
+    const toolCall = events.find((e) => e.type === "tool_call");
+    assert(toolCall);
+    assertEquals(
+      "modelMetadata" in toolCall && toolCall.modelMetadata?.thoughtSignature,
+      "sig-from-thought",
+    );
+  },
+);
+
+Deno.test(
+  "filterAndRewriteInvalidToolCalls preserves tool_call when sibling thought in same response has thoughtSignature",
+  () => {
+    const replacements: Record<string, HistoryEvent> = {};
+    const filter = filterAndRewriteInvalidToolCalls((r) => {
+      Object.assign(replacements, r);
+      return Promise.resolve();
+    });
+    const history: Parameters<typeof filter>[0] = [
+      {
+        type: "own_thought",
+        isOwn: true,
+        id: "thought-id",
+        timestamp: 1,
+        text: "Thinking...",
+        modelMetadata: {
+          type: "gemini",
+          responseId: "resp-1",
+          thoughtSignature: "sig-from-thought",
+        },
+      },
+      {
+        type: "tool_call",
+        isOwn: true,
+        id: "call-id",
+        timestamp: 1,
+        name: "run_command",
+        parameters: { command: "x" },
+        modelMetadata: {
+          type: "gemini",
+          responseId: "resp-1",
+          thoughtSignature: "",
+        },
+      },
+      {
+        type: "tool_result",
+        isOwn: true,
+        id: "result-id",
+        timestamp: 2,
+        toolCallId: "call-id",
+        result: "useful result",
+      },
+    ];
+
+    const filtered = filter(history);
+    assertEquals(filtered.length, 3);
+    assertEquals(Object.keys(replacements).length, 0);
+  },
+);
+
 Deno.test("tool_call with empty thoughtSignature omits field from API request", () => {
   const events = [
     {

@@ -356,9 +356,13 @@ const logFunctionCallsMissingThoughtSignature = (
   finishReason: string | undefined,
   parts: Part[],
 ) => {
+  const siblingSignature = parts.find((p) => p.thoughtSignature?.trim())
+    ?.thoughtSignature;
   const missing = parts
     .map((part, index) => ({ part, index }))
-    .filter(({ part }) => part.functionCall && !part.thoughtSignature?.trim())
+    .filter(({ part }) =>
+      part.functionCall && !part.thoughtSignature?.trim() && !siblingSignature
+    )
     .map(({ part, index }) => ({
       index,
       name: part.functionCall?.name,
@@ -612,6 +616,9 @@ const rawCallGemini = async (
 
   rejectMalformedFunctionCall(finishReason, parts);
 
+  const siblingSignature = parts.find((p) => p.thoughtSignature?.trim())
+    ?.thoughtSignature;
+
   return parts.flatMap((part: Part): GeminiOutput => {
     const {
       text,
@@ -622,7 +629,13 @@ const rawCallGemini = async (
       thought,
     } = part;
     if (functionCall) {
-      return [{ type: "function_call", functionCall, thoughtSignature }];
+      return [{
+        type: "function_call",
+        functionCall,
+        thoughtSignature: thoughtSignature?.trim()
+          ? thoughtSignature
+          : siblingSignature,
+      }];
     }
     if (inlineData) {
       return [{ type: "inline_data", inlineData, thoughtSignature }];
@@ -1144,9 +1157,19 @@ const eventHasThoughtSignature = (e: GeminiHistoryEvent): boolean =>
 
 export const filterInvalidToolCalls = (
   history: GeminiHistoryEvent[],
-): GeminiHistoryEvent[] =>
-  history.filter((e) => {
-    if (e.type === "tool_call" && !eventHasThoughtSignature(e)) {
+): GeminiHistoryEvent[] => {
+  const signaturesByResponseId = new Set<string>();
+  for (const e of history) {
+    if (eventHasThoughtSignature(e)) {
+      signaturesByResponseId.add(getOriginalId(e));
+    }
+  }
+  return history.filter((e) => {
+    if (
+      e.type === "tool_call" &&
+      !eventHasThoughtSignature(e) &&
+      !signaturesByResponseId.has(getOriginalId(e))
+    ) {
       console.warn(
         `Warning: Filtering out tool_call "${e.name}" (id: ${e.id}) with missing or empty thoughtSignature. ` +
           `This would cause Gemini API error: "Function call is missing a thought_signature in functionCall parts".`,
@@ -1155,6 +1178,7 @@ export const filterInvalidToolCalls = (
     }
     return true;
   });
+};
 
 const toolCallToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
   type: "own_thought",
@@ -1198,11 +1222,19 @@ const computeInvalidToolCallReplacements = (
     }
   }
 
-  // A response group is tainted if it contains tool calls, but NONE of them
-  // have a thoughtSignature. (In parallel calls, only the first gets a signature).
+  const signaturesByResponseId = new Set<string>();
+  for (const e of history) {
+    if (eventHasThoughtSignature(e)) {
+      signaturesByResponseId.add(getOriginalId(e));
+    }
+  }
+
+  // A response group is tainted if it contains tool calls, but NONE of the events
+  // in that response group have a thoughtSignature.
   const taintedResponseIds = new Set<string>();
   for (const [responseId, toolCalls] of toolCallsByResponseId.entries()) {
-    const hasSignature = toolCalls.some(eventHasThoughtSignature);
+    const hasSignature = toolCalls.some(eventHasThoughtSignature) ||
+      signaturesByResponseId.has(responseId);
     if (!hasSignature) taintedResponseIds.add(responseId);
   }
 
@@ -2043,8 +2075,14 @@ export const geminiOutputToHistoryEvents = (
   if (didNothing(geminiOutput)) {
     return doNothingResultEvents(responseId, geminiOutput);
   }
+  const siblingSignature = geminiOutput.find((p) => p.thoughtSignature?.trim())
+    ?.thoughtSignature;
   return geminiOutput.flatMap((part) => {
-    const event = geminiOutputPartToHistoryEvent(responseId)(part);
+    const effectivePart = part.type === "function_call" &&
+        !part.thoughtSignature?.trim() && siblingSignature
+      ? { ...part, thoughtSignature: siblingSignature }
+      : part;
+    const event = geminiOutputPartToHistoryEvent(responseId)(effectivePart);
     return event ? [event] : [];
   });
 };
