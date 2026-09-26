@@ -37,6 +37,7 @@ import {
   getStreamThinkingChunk,
   type HistoryEventWithMetadata,
   historyHasPendingDeferredUserWaitingNudge,
+  injectIsMockModel,
   isRecord,
   type MediaAttachment,
   type MessageId,
@@ -582,9 +583,11 @@ const geminiSdkExchangeInjection: Injection<typeof geminiSdkExchange> = context(
   geminiSdkExchange,
 );
 
-// Test seam: script the exact Gemini exchange (parts + finishReason) without
-// hitting the API, e.g. to reproduce malformed function-call responses.
-export const injectGeminiSdkExchange = geminiSdkExchangeInjection.inject;
+export const injectGeminiSdkExchange = (exchange: typeof geminiSdkExchange) =>
+  pipe(
+    geminiSdkExchangeInjection.inject(exchange),
+    injectIsMockModel(() => true),
+  );
 
 const rawCallGemini = async (
   signal: AbortSignal,
@@ -809,16 +812,26 @@ const historyEventToContent = (
   }
   if (e.type === "tool_result") {
     const toolCall = e.toolCallId ? eventById(e.toolCallId) : undefined;
-    const name = toolCall && "name" in toolCall ? toolCall.name : "unknown";
+    const name = toolCall && "name" in toolCall && toolCall.name &&
+        toolCall.name !== "unknown"
+      ? toolCall.name
+      : undefined;
+    const formattedResult = stampText(
+      stripAnsi(e.result + toolResultExternalMediaText(e.attachments)),
+    );
+    if (!name) {
+      return wrapUserContent([
+        { text: formattedResult },
+        ...toolResultMediaParts(e.attachments),
+      ]);
+    }
     const parts: Part[] = [
       {
         functionResponse: {
           id: e.toolCallId,
           name,
           response: {
-            result: stampText(
-              stripAnsi(e.result + toolResultExternalMediaText(e.attachments)),
-            ),
+            result: formattedResult,
           },
         },
       },

@@ -740,6 +740,12 @@ const isCallModelInjectedContext: Injection<() => boolean> = context(
   (): boolean => false,
 );
 
+const isMockModelInjectedContext: Injection<() => boolean> = context(
+  (): boolean => false,
+);
+
+export const injectIsMockModel = isMockModelInjectedContext.inject;
+
 export const injectCallModel = (caller: CallModel): Injector =>
   pipe(
     callModelInjection.inject(caller),
@@ -748,6 +754,9 @@ export const injectCallModel = (caller: CallModel): Injector =>
 
 export const isCallModelInjected = (): boolean =>
   isCallModelInjectedContext.access();
+
+export const isMockModelInjected = (): boolean =>
+  isCallModelInjectedContext.access() || isMockModelInjectedContext.access();
 
 export const accessCallModel = callModelInjection.access;
 
@@ -2861,7 +2870,7 @@ export const runAbstractAgent = (
 
       const concludingTexts = concludingUtteranceTexts(emit);
       if (
-        (!isCallModelInjected() || isDecisionModelInjected()) &&
+        (!isMockModelInjected() || isDecisionModelInjected()) &&
         nonempty(concludingTexts) &&
         retryCounts.hallucination < maxHallucinationRetries
       ) {
