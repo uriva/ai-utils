@@ -65,6 +65,7 @@ Deno.test(
           tools: [],
           rewriteHistory: noopRewriteHistory,
           timezoneIANA: "UTC",
+          enableHallucinationAudit: true,
         });
       }),
     )();
@@ -132,6 +133,7 @@ Deno.test(
           tools: [],
           rewriteHistory: noopRewriteHistory,
           timezoneIANA: "UTC",
+          enableHallucinationAudit: true,
         });
       }),
     )();

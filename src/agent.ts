@@ -2584,6 +2584,7 @@ export type AgentSpec = AgentInputs & {
     participantName: string;
   };
   toolOutputScratchPad?: ToolOutputScratchPad;
+  enableHallucinationAudit?: boolean;
   // Tools whose parameters may legitimately carry hosts that appear in no
   // instruction or history (e.g. arbitrary code execution). Matching covers
   // the tool name and, for router tools, the inner `command` string.
@@ -2839,6 +2840,7 @@ export const runAbstractAgent = (
 
       const concludingTexts = concludingUtteranceTexts(emit);
       if (
+        spec.enableHallucinationAudit &&
         nonempty(concludingTexts) &&
         retryCounts.hallucination < maxHallucinationRetries
       ) {
