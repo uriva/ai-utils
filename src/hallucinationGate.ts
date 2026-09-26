@@ -25,6 +25,15 @@ export const lastParticipantUtterance = (
     e.type === "participant_utterance"
   );
 
+export const recentUserQueriesText = (history: HistoryEvent[]): string =>
+  history
+    .filter((e): e is ParticipantUtterance =>
+      e.type === "participant_utterance" && typeof e.text === "string"
+    )
+    .slice(-3)
+    .map((e) => (e.name ? `${e.name}: ${e.text}` : e.text))
+    .join("\n");
+
 export const verifiedToolFacts = (history: HistoryEvent[]): string =>
   history
     .flatMap((e) => {

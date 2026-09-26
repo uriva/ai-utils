@@ -49,6 +49,7 @@ import {
   hallucinationCorrectionText,
   lastParticipantUtterance,
   maxHallucinationRetries,
+  recentUserQueriesText,
   verifiedToolFacts,
 } from "./hallucinationGate.ts";
 export const stopThoughtPrefix =
@@ -2877,9 +2878,11 @@ export const runAbstractAgent = (
       ) {
         const lastUser = lastParticipantUtterance(normalizedHistory);
         if (lastUser && lastUser.text) {
+          const userQueries = recentUserQueriesText(normalizedHistory) ||
+            lastUser.text;
           const facts = verifiedToolFacts(normalizedHistory);
           const isHallucinated = await auditUtteranceForHallucination(
-            lastUser.text,
+            userQueries,
             concludingTexts.join("\n"),
             facts || undefined,
           );
