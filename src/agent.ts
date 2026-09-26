@@ -1,7 +1,16 @@
-import { context, type Injection } from "@uri/inject";
+import { context, type Injection, type Injector } from "@uri/inject";
 import { decodeBase64 } from "@std/encoding/base64";
 import { getEncoding } from "js-tiktoken";
-import { coerce, each, empty, filter, last, nonempty, timeit } from "gamla";
+import {
+  coerce,
+  each,
+  empty,
+  filter,
+  last,
+  nonempty,
+  pipe,
+  timeit,
+} from "gamla";
 import { z, type ZodType } from "zod/v4";
 import {
   cleanActiveMemoryToolRaw,
@@ -34,6 +43,7 @@ import {
   internalThoughtMarker,
   stripJsonThought,
 } from "./jsonThought.ts";
+import { isDecisionModelInjected } from "./decisionModel.ts";
 import {
   auditUtteranceForHallucination,
   hallucinationCorrectionText,
@@ -726,7 +736,19 @@ const callModelInjection: Injection<CallModel> = context(
   },
 );
 
-export const injectCallModel = callModelInjection.inject;
+const isCallModelInjectedContext: Injection<() => boolean> = context(
+  (): boolean => false,
+);
+
+export const injectCallModel = (caller: CallModel): Injector =>
+  pipe(
+    callModelInjection.inject(caller),
+    isCallModelInjectedContext.inject(() => true),
+  );
+
+export const isCallModelInjected = (): boolean =>
+  isCallModelInjectedContext.access();
+
 export const accessCallModel = callModelInjection.access;
 
 // Wraps the resolved CallModel. Used e.g. by test_helpers to add rmmbr
@@ -2584,7 +2606,6 @@ export type AgentSpec = AgentInputs & {
     participantName: string;
   };
   toolOutputScratchPad?: ToolOutputScratchPad;
-  enableHallucinationAudit?: boolean;
   // Tools whose parameters may legitimately carry hosts that appear in no
   // instruction or history (e.g. arbitrary code execution). Matching covers
   // the tool name and, for router tools, the inner `command` string.
@@ -2840,7 +2861,7 @@ export const runAbstractAgent = (
 
       const concludingTexts = concludingUtteranceTexts(emit);
       if (
-        spec.enableHallucinationAudit &&
+        (!isCallModelInjected() || isDecisionModelInjected()) &&
         nonempty(concludingTexts) &&
         retryCounts.hallucination < maxHallucinationRetries
       ) {

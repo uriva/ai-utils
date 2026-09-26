@@ -65,6 +65,9 @@ export const injectDecisionModel = (
   caller: DecisionModelCaller,
 ): Injector => decisionModelOverrideInjection.inject(() => caller);
 
+export const isDecisionModelInjected = (): boolean =>
+  Boolean(decisionModelOverrideInjection.access());
+
 export const callDecisionModel = (
   state: unknown,
   questions: Record<string, DecisionQuestion>,
