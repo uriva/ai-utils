@@ -331,7 +331,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
           resolvedTier === "lite" || disableThinking
             ? ThinkingLevel.LOW
             : ThinkingLevel.HIGH,
-          !disableThinking,
+          !disableThinking && resolvedTier !== "lite",
         ),
         ...(maxOutputTokens ? { maxOutputTokens } : {}),
       },
@@ -393,7 +393,7 @@ export const geminiGenText = async (
         resolvedTier === "lite" || disableThinking
           ? ThinkingLevel.LOW
           : ThinkingLevel.HIGH,
-        !disableThinking,
+        !disableThinking && resolvedTier !== "lite",
       ),
       ...(maxOutputTokens ? { maxOutputTokens } : {}),
     },

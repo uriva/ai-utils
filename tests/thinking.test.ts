@@ -1,5 +1,9 @@
 import { assert, assertEquals } from "@std/assert";
-import { ThinkingLevel } from "@google/genai";
+import {
+  type GenerateContentParameters,
+  type GenerateContentResponse,
+  ThinkingLevel,
+} from "@google/genai";
 import { runAgent } from "../mod.ts";
 import {
   getStreamThinkingChunk,
@@ -8,7 +12,13 @@ import {
   ownUtteranceTurn,
   participantUtteranceTurn,
 } from "../src/agent.ts";
-import { geminiThinkingConfig } from "../src/gemini.ts";
+import {
+  geminiGenJsonFromConvo,
+  geminiThinkingConfig,
+  injectGeminiGenerateContent,
+} from "../src/gemini.ts";
+import { pipe } from "gamla";
+import { z } from "zod/v4";
 import {
   agentDeps,
   noopRewriteHistory,
@@ -107,5 +117,72 @@ Deno.test(
     assert(lowConfig.includeThoughts === true);
     assertEquals(lowConfig.thinkingLevel, ThinkingLevel.LOW);
     assert(!("thinkingBudget" in lowConfig));
+
+    const disabledConfig = geminiThinkingConfig(ThinkingLevel.LOW, false);
+    assertEquals(disabledConfig.includeThoughts, false);
+    assertEquals(disabledConfig.thinkingLevel, ThinkingLevel.LOW);
+    assert(!("thinkingBudget" in disabledConfig));
+  },
+);
+
+Deno.test(
+  "geminiGenJsonFromConvo sets includeThoughts false when disableThinking is true",
+  async () => {
+    let capturedReq: GenerateContentParameters | undefined;
+    const fakeGenerateContent = (req: GenerateContentParameters) => {
+      capturedReq = req;
+      return Promise.resolve({
+        candidates: [{ finishReason: "STOP" }],
+        text: '{"ok": true}',
+      } as unknown as GenerateContentResponse);
+    };
+
+    const result = await pipe(
+      injectGeminiGenerateContent(fakeGenerateContent),
+    )(() =>
+      geminiGenJsonFromConvo(
+        { tier: "flash", disableThinking: true },
+        [{ role: "user", content: "hello" }],
+        z.object({ ok: z.boolean() }),
+      )
+    )();
+
+    assertEquals(result, { ok: true });
+    assertEquals(capturedReq?.config?.thinkingConfig?.includeThoughts, false);
+    assertEquals(
+      capturedReq?.config?.thinkingConfig?.thinkingLevel,
+      ThinkingLevel.LOW,
+    );
+  },
+);
+
+Deno.test(
+  "geminiGenJsonFromConvo sets includeThoughts false when tier is lite",
+  async () => {
+    let capturedReq: GenerateContentParameters | undefined;
+    const fakeGenerateContent = (req: GenerateContentParameters) => {
+      capturedReq = req;
+      return Promise.resolve({
+        candidates: [{ finishReason: "STOP" }],
+        text: '{"ok": true}',
+      } as unknown as GenerateContentResponse);
+    };
+
+    const result = await pipe(
+      injectGeminiGenerateContent(fakeGenerateContent),
+    )(() =>
+      geminiGenJsonFromConvo(
+        { tier: "lite" },
+        [{ role: "user", content: "hello" }],
+        z.object({ ok: z.boolean() }),
+      )
+    )();
+
+    assertEquals(result, { ok: true });
+    assertEquals(capturedReq?.config?.thinkingConfig?.includeThoughts, false);
+    assertEquals(
+      capturedReq?.config?.thinkingConfig?.thinkingLevel,
+      ThinkingLevel.LOW,
+    );
   },
 );
