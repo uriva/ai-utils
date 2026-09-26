@@ -834,7 +834,10 @@ const historyEventToContent = (
         thoughtSignature: e.modelMetadata.thoughtSignature,
       }])
       : e.modelMetadata
-      ? wrapModelContent([{ text: " " }])
+      ? wrapModelContent([{
+        text: e.text || " ",
+        thought: true,
+      }])
       : wrapUserContent([
         {
           text: isCompactedSummaryText(e.text)

@@ -9,7 +9,7 @@ import {
 import { pipe } from "gamla";
 
 Deno.test(
-  "runAgent - prunes obsolete internal thoughts from past completed turns when calling model on a new turn",
+  "runAgent - preserves internal thoughts from past turns in model context across user replies",
   async () => {
     const baseTime = Date.now() - 10000;
 
@@ -61,6 +61,14 @@ Deno.test(
         text:
           "Internal reasoning: Looking up population of Paris. Estimated ~2.1 million.",
         timestamp: baseTime + 1100,
+      },
+      {
+        id: "t-stop",
+        type: "own_thought",
+        isOwn: true,
+        text:
+          "I'm working on this for some time and not making progress. I should instead stop and ask the user for feedback.",
+        timestamp: baseTime + 1150,
       },
       {
         id: "o-2",
@@ -117,9 +125,17 @@ Deno.test(
 
     assertEquals(
       thoughtsInModelContext.length,
-      0,
-      "Expected obsolete internal thoughts from past answered turns to be pruned from model input, but found:\n" +
+      3,
+      "Expected normal internal thoughts from past completed turns to be preserved in model context, but found: " +
         JSON.stringify(thoughtsInModelContext, null, 2),
+    );
+
+    assertEquals(
+      thoughtsInModelContext.some((e) =>
+        e.text.includes("not making progress")
+      ),
+      false,
+      "Expected stale loop-breaker stop thought from prior turn to be pruned, but it leaked into new turn",
     );
 
     // Verify all user utterances and bot answers are still intact in context
