@@ -12,6 +12,7 @@ import {
   segmentHistoryEvents,
   shouldCompactHistory,
 } from "./compaction.ts";
+import { searchPastHistoryToolRaw } from "./historySearch.ts";
 import {
   compactToolResultsInMemory,
   runToolResultCompaction,
@@ -2279,6 +2280,11 @@ export const cleanActiveMemoryTool = (
   // deno-lint-ignore no-explicit-any
 ): Tool<any> => tool(cleanActiveMemoryToolRaw(rewriteHistory, getHistory));
 
+export const searchPastHistoryTool = (
+  historyGetter: () => Promise<HistoryEvent[]> = getHistory,
+  // deno-lint-ignore no-explicit-any
+): Tool<any> => tool(searchPastHistoryToolRaw(historyGetter));
+
 export const doNothingToolName = "do_nothing";
 
 export const doNothingTool: Tool<
@@ -2567,6 +2573,7 @@ export type AgentSpec = AgentInputs & {
   ) => Promise<void>;
   compactHistory?: (history: HistoryEvent[]) => Promise<void>;
   historyCompactionTokenThreshold?: number;
+  enableHistorySearch?: boolean;
   timezoneIANA: string;
   maxOutputTokens?: number;
   transport?: {
@@ -2784,6 +2791,9 @@ export const runAbstractAgent = (
       ...(skills && skills.length > 0 ? createSkillTools(skills) : []),
       ...(spec.rewriteHistory
         ? [cleanActiveMemoryTool(spec.rewriteHistory)]
+        : []),
+      ...(spec.enableHistorySearch !== false
+        ? [searchPastHistoryTool(getHistory)]
         : []),
     ];
     const skillsArr = skills ?? [];

@@ -186,6 +186,7 @@ export {
   sanitizeModelOutput,
   sanitizeWindowBoundary,
   scheduleHistoryCompaction,
+  searchPastHistoryTool,
   type Skill,
   skillAutoLoadMarker,
   skillLoadedResultText,
@@ -307,6 +308,7 @@ export {
   isSearchQueryUrl,
   ungroundedHostBlockedNotice,
 } from "./src/urlGrounding.ts";
+export { searchPastHistoryToolName } from "./src/historySearch.ts";
 export {
   catchAiRefusesToAdhereToTyping,
   type ModelOpts,
