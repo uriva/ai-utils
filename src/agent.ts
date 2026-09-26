@@ -35,11 +35,12 @@ import {
   stripJsonThought,
 } from "./jsonThought.ts";
 import {
-  findUngroundedToolCallHosts,
-  findUngroundedUtteranceArtifacts,
-  ungroundedHostBlockedNotice,
-  ungroundedUtteranceBlockedNotice,
-} from "./urlGrounding.ts";
+  auditUtteranceForHallucination,
+  hallucinationCorrectionText,
+  lastParticipantUtterance,
+  maxHallucinationRetries,
+  verifiedToolFacts,
+} from "./hallucinationGate.ts";
 export const stopThoughtPrefix =
   "I'm working on this for some time and not making progress.";
 export const stopThoughtDefault =
@@ -2601,69 +2602,10 @@ const maxRepetitionFloodRetries = 3;
 
 const maxTruncationRetries = 2;
 
-const maxGroundingRetries = 2;
-
-const maxUrlGroundingRetries = 2;
-
 const maxDoNothingRetries = 2;
 
 export const unansweredUserCorrectionText =
   "[SYSTEM NOTICE]: The user is waiting for a response to their message, but you have not yet sent a reply or taken action. Please proceed to answer the user's request or take the next required action now.";
-
-export const isPlatformInjectedThoughtText = (text: string): boolean =>
-  isCompactedSummaryText(text) ||
-  text.startsWith("PROACTIVE TASK:") ||
-  text.startsWith("[thought]: PROACTIVE TASK:") ||
-  text.startsWith(systemNotificationPrefix) ||
-  text.startsWith("[Earlier platform notification") ||
-  text.startsWith("[SYSTEM NOTICE]:") ||
-  text.startsWith("[SYSTEM SUMMARY");
-
-// Ground truth for the tool-call URL gate: only text the model did NOT author
-// itself counts — instructions, tool documentation, user messages, tool
-// results, external events, and platform-injected thoughts (proactive tasks,
-// system notifications, compaction summaries). The model's own reasoning thoughts
-// and utterances are excluded so it cannot launder a fabricated host through its own reasoning.
-const groundTruthEventText = (e: HistoryEvent): string[] => {
-  if (
-    e.type === "participant_utterance" ||
-    e.type === "participant_edit_message"
-  ) {
-    return [e.text];
-  }
-  if (e.type === "tool_result") return [e.result];
-  if (e.type === "external_event") return [e.text];
-  if (
-    e.type === "own_thought" &&
-    typeof e.text === "string" &&
-    isPlatformInjectedThoughtText(e.text)
-  ) {
-    return [e.text];
-  }
-  return [];
-};
-
-// Building the ground truth is expensive (spec-for-turn rebuild + a JSON
-// schema conversion per tool), and within one agent iteration both grounding
-// gates ask for the exact same `normalizedHistory` reference — memoize on it.
-const groundTruthCache = new WeakMap<HistoryEvent[], string[]>();
-
-const toolCallGroundTruthTexts = (
-  spec: AgentSpec,
-  history: HistoryEvent[],
-): string[] => {
-  const cached = groundTruthCache.get(history);
-  if (cached) return cached;
-  const texts = [
-    getSpecForTurn(spec, history).prompt,
-    ...(getSpecForTurn(spec, history).tools ?? []).map((t) =>
-      `${t.name}: ${t.description}\n${zodToTypingString(t.parameters)}`
-    ),
-    ...history.flatMap(groundTruthEventText),
-  ];
-  groundTruthCache.set(history, texts);
-  return texts;
-};
 
 // A response concludes the turn when it carries user-facing utterances with no
 // pending tool calls — the loop returns right after emitting it. Only then is
@@ -2804,8 +2746,7 @@ export const runAbstractAgent = (
       emojiFlood: 0,
       repetitionFlood: 0,
       truncation: 0,
-      grounding: 0,
-      urlGrounding: 0,
+      hallucination: 0,
       doNothing: 0,
     };
     while (true) {
@@ -2899,54 +2840,28 @@ export const runAbstractAgent = (
       const concludingTexts = concludingUtteranceTexts(emit);
       if (
         nonempty(concludingTexts) &&
-        retryCounts.grounding < maxGroundingRetries
+        retryCounts.hallucination < maxHallucinationRetries
       ) {
-        const artifacts = findUngroundedUtteranceArtifacts(
-          toolCallGroundTruthTexts(spec, normalizedHistory),
-          concludingTexts,
-          emit.flatMap((e) => (e.type === "own_thought" ? [e.text] : [])),
-        );
-        if (
-          nonempty(artifacts.ungroundedUrls) ||
-          nonempty(artifacts.ungroundedPhones)
-        ) {
-          retryCounts.grounding++;
-          console.warn(
-            `[grounding-gate] blocked ungrounded utterance artifacts (attempt ${retryCounts.grounding}/${maxGroundingRetries})`,
+        const lastUser = lastParticipantUtterance(normalizedHistory);
+        if (lastUser && lastUser.text) {
+          const facts = verifiedToolFacts(normalizedHistory);
+          const isHallucinated = await auditUtteranceForHallucination(
+            lastUser.text,
+            concludingTexts.join("\n"),
+            facts || undefined,
           );
-          ephemeralHistory = [
-            ...ephemeralHistory,
-            ownThoughtTurn(ungroundedUtteranceBlockedNotice(artifacts)),
-          ];
-          continue;
+          if (isHallucinated) {
+            retryCounts.hallucination++;
+            console.warn(
+              `[hallucination-gate] blocked hallucinated/off-topic utterance (attempt ${retryCounts.hallucination}/${maxHallucinationRetries})`,
+            );
+            ephemeralHistory = [
+              ...ephemeralHistory,
+              ownThoughtTurn(hallucinationCorrectionText(lastUser.text)),
+            ];
+            continue;
+          }
         }
-      }
-
-      // CPU-only check; skipped entirely on utterance-only turns.
-      const ungroundedHosts = emitWithDescriptions.some((e) =>
-          e.type === "tool_call"
-        )
-        ? findUngroundedToolCallHosts(
-          toolCallGroundTruthTexts(spec, normalizedHistory),
-          spec.urlGroundingExemptToolNames ?? [],
-          emitWithDescriptions,
-        )
-        : [];
-      if (
-        nonempty(ungroundedHosts) &&
-        retryCounts.urlGrounding < maxUrlGroundingRetries
-      ) {
-        retryCounts.urlGrounding++;
-        console.warn(
-          `[url-grounding-gate] blocked tool call to ungrounded host(s): ${
-            ungroundedHosts.join(", ")
-          } (attempt ${retryCounts.urlGrounding}/${maxUrlGroundingRetries})`,
-        );
-        ephemeralHistory = [
-          ...ephemeralHistory,
-          ownThoughtTurn(ungroundedHostBlockedNotice(ungroundedHosts)),
-        ];
-        continue;
       }
 
       if (

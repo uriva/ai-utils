@@ -302,12 +302,10 @@ export {
 } from "./src/jev.ts";
 export { injectOpenAiToken } from "./src/openai.ts";
 export {
-  findUngroundedUtteranceArtifacts,
-  isComplexUrl,
-  isLikelyPhoneNumber,
-  isSearchQueryUrl,
-  ungroundedHostBlockedNotice,
-} from "./src/urlGrounding.ts";
+  auditUtteranceForHallucination,
+  hallucinationCorrectionText,
+  HallucinationDecisionSchema,
+} from "./src/hallucinationGate.ts";
 export { searchPastHistoryToolName } from "./src/historySearch.ts";
 export {
   catchAiRefusesToAdhereToTyping,
