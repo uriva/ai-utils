@@ -1200,20 +1200,21 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
 };
 
 export const toolUseTurn = (
-  { name, args }: FunctionCall,
+  { id, name, args }: FunctionCall,
 ): HistoryEvent => ({
   type: "tool_call",
   ...sharedFields(),
+  ...(id ? { id } : {}),
   isOwn: true,
   name: coerce(name),
   parameters: args,
 });
 
 export const toolUseTurnWithMetadata = <Metadata>(
-  { name, args }: FunctionCall,
+  call: FunctionCall,
   modelMetadata: Metadata | undefined,
 ): HistoryEventWithMetadata<Metadata> => ({
-  ...toolUseTurn({ name, args }),
+  ...toolUseTurn(call),
   modelMetadata,
 } as HistoryEventWithMetadata<Metadata>);
 

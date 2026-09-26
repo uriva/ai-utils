@@ -12,7 +12,6 @@ import {
   runAgent,
   tool,
 } from "./mod.ts";
-import { injectDecisionModel } from "./src/decisionModel.ts";
 import {
   type AgentSpec,
   type CallModelWrapper,
@@ -122,11 +121,6 @@ export const injectSecrets = pipe(
   injectDeterministic,
   injectCacher(rmmbrCacher),
   injectCallModelWrapper(cachingCallModelWrapper),
-  injectDecisionModel(() =>
-    Promise.resolve({
-      is_hallucination: { type: "choice" as const, choice: "false" },
-    })
-  ),
   injectMetadataStore(() => ({
     get: () => Promise.resolve(null),
     set: () => Promise.resolve(),
