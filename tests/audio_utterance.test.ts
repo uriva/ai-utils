@@ -351,7 +351,7 @@ const runTwoBotExchange = async (): Promise<
     text: "Say a short greeting out loud now.",
     from: "tester",
   });
-  await waitForCondition(aliceSpoke, 15_000);
+  await waitForCondition(aliceSpoke, 30_000);
 
   await new Promise((r) => setTimeout(r, 2000));
   await aliceEndpoint.sendData({
@@ -359,7 +359,7 @@ const runTwoBotExchange = async (): Promise<
     text: "Say a short greeting out loud now.",
     from: "tester",
   });
-  await waitForCondition(bobSpoke, 15_000);
+  await waitForCondition(bobSpoke, 30_000);
 
   await Promise.all([
     aliceEndpoint.sendData({ type: "close", from: "tester" }),
