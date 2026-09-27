@@ -2136,8 +2136,8 @@ export const normalizeHistoryForModel = (
       if (event.type !== "tool_call") return [...acc, event];
       const matchedResults = (groupedResults.get(event.id) ?? [])
         .filter((result) => !consumedResultIds.has(result.id));
-      matchedResults.forEach((result) => consumedResultIds.add(result.id));
       if (nonempty(matchedResults)) {
+        consumedResultIds.add(matchedResults[0].id);
         // Providers forbid multiple results per tool_use (Anthropic answers
         // 400 "each tool_use must have a single result"), so keep only the
         // chronologically first delivery; extras stay in persisted history.
@@ -2179,6 +2179,43 @@ export const normalizeHistoryForModel = (
     : [];
 
   return [...interleaved, ...orphanedResults, ...userWaitingNotification];
+};
+
+export const disambiguateDuplicateToolCalls = (
+  events: HistoryEvent[],
+): HistoryEvent[] => {
+  const seen = new Set<string>();
+  let hasDuplicates = false;
+  for (const e of events) {
+    if (e.type === "tool_call") {
+      if (seen.has(e.id)) {
+        hasDuplicates = true;
+        break;
+      }
+      seen.add(e.id);
+    }
+  }
+  if (!hasDuplicates) return events;
+  const seenCallIds = new Set<string>();
+  const idMap = new Map<string, string>();
+  return events.map((event) => {
+    if (event.type === "tool_call") {
+      if (seenCallIds.has(event.id)) {
+        const newId = `${event.id}_dup_${crypto.randomUUID().slice(0, 8)}`;
+        idMap.set(event.id, newId);
+        return { ...event, id: newId };
+      }
+      seenCallIds.add(event.id);
+      return event;
+    }
+    if (
+      event.type === "tool_result" && event.toolCallId &&
+      idMap.has(event.toolCallId)
+    ) {
+      return { ...event, toolCallId: idMap.get(event.toolCallId) };
+    }
+    return event;
+  });
 };
 
 export const sanitizeWindowBoundary = (
@@ -2228,7 +2265,9 @@ export const projectHistoryToModelContext = async ({
   const sanitized = sanitizeWindowBoundary(rawHistory);
   if (empty(sanitized)) return [];
 
-  const cleaned = applyCleanActiveMemoryDirectives(sanitized);
+  const disambiguated = disambiguateDuplicateToolCalls(sanitized);
+
+  const cleaned = applyCleanActiveMemoryDirectives(disambiguated);
 
   const segments = segmentHistoryEvents(cleaned, settledGapMs);
   if (empty(segments)) return [];
@@ -2859,6 +2898,26 @@ const withResolvedToolDescriptions = (
     return desc ? { ...event, description: desc } : event;
   });
 
+const disambiguateNewToolCalls = (
+  existingEvents: HistoryEvent[],
+  newEvents: HistoryEvent[],
+): HistoryEvent[] => {
+  const existingCallIds = new Set(
+    existingEvents.filter((e) => e.type === "tool_call").map((e) => e.id),
+  );
+  return newEvents.map((e) => {
+    if (e.type === "tool_call" && existingCallIds.has(e.id)) {
+      const newId = `${e.id}_${crypto.randomUUID().slice(0, 8)}`;
+      existingCallIds.add(newId);
+      return { ...e, id: newId };
+    }
+    if (e.type === "tool_call") {
+      existingCallIds.add(e.id);
+    }
+    return e;
+  });
+};
+
 export const runAbstractAgent = (
   spec: AgentSpec,
   callModel: (history: HistoryEvent[]) => Promise<HistoryEvent[]>,
@@ -3039,16 +3098,21 @@ export const runAbstractAgent = (
         continue;
       }
 
+      const emitWithUniqueIds = disambiguateNewToolCalls(
+        history,
+        emitWithDescriptions,
+      );
+
       // Process what needs to be emitted
-      if (emitWithDescriptions.length > 0) {
-        await each(outputEvent)(emitWithDescriptions);
+      if (emitWithUniqueIds.length > 0) {
+        await each(outputEvent)(emitWithUniqueIds);
 
         const hadDeferred = await handleFunctionCalls(
           allTools,
           undefined,
           skillsArr,
           scratchPad,
-        )(emitWithDescriptions);
+        )(emitWithUniqueIds);
         if (hadDeferred) return;
 
         // We actually yielded things to the outside world, reset ephemeral history
@@ -3057,12 +3121,12 @@ export const runAbstractAgent = (
 
         const updatedHistory = await getHistory();
         if (
-          !(emitWithDescriptions.some((ev: HistoryEvent) =>
+          !(emitWithUniqueIds.some((ev: HistoryEvent) =>
             ev.type === "tool_call"
           )) &&
           nonempty(updatedHistory) &&
           last(updatedHistory).isOwn &&
-          !emitWithDescriptions.every((ev: HistoryEvent) =>
+          !emitWithUniqueIds.every((ev: HistoryEvent) =>
             ev.type === "own_thought"
           )
         ) {

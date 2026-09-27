@@ -17,6 +17,7 @@ import {
   empty,
   filter,
   groupBy,
+  last,
   map,
   pipe,
   sum,
@@ -928,6 +929,17 @@ const wrapUserContent = wrapRole("user");
 const getOriginalId = (e: GeminiHistoryEvent): string =>
   "modelMetadata" in e ? e.modelMetadata?.responseId ?? e.id : e.id;
 
+const groupConsecutiveBy =
+  <T>(keyFn: (item: T) => string) => (items: T[]): T[][] =>
+    items.reduce<T[][]>((acc, item) => {
+      const currentGroup = last(acc);
+      if (currentGroup && keyFn(last(currentGroup)) === keyFn(item)) {
+        currentGroup.push(item);
+        return acc;
+      }
+      return [...acc, [item]];
+    }, []);
+
 const fixStart = (history: Content[]) =>
   (empty(history) || history[0].role !== "user")
     ? [
@@ -1007,8 +1019,7 @@ export const buildReq = (
     ...(maxOutputTokens ? { maxOutputTokens } : {}),
   },
   contents: pipe(
-    groupBy(getOriginalId),
-    Object.values<GeminiHistoryEvent[]>,
+    groupConsecutiveBy(getOriginalId),
     map(
       pipe(
         map(historyEventToContent(indexById(events), timezoneIANA)),
@@ -1127,21 +1138,23 @@ export const filterUnsupportedGeminiAttachments = (
 export const filterOrphanedToolResults = (
   history: GeminiHistoryEvent[],
 ): GeminiHistoryEvent[] => {
-  const unconsumedCallIds = new Set(
-    history.filter((e) => e.type === "tool_call").map((e) => e.id),
-  );
+  const unconsumedCounts = new Map<string, number>();
+  for (const e of history) {
+    if (e.type === "tool_call") {
+      unconsumedCounts.set(e.id, (unconsumedCounts.get(e.id) ?? 0) + 1);
+    }
+  }
   return history.filter((e) => {
     if (e.type !== "tool_result") return true;
-    if (!e.toolCallId || !unconsumedCallIds.has(e.toolCallId)) {
+    const count = e.toolCallId ? unconsumedCounts.get(e.toolCallId) ?? 0 : 0;
+    if (count <= 0) {
       console.warn(
         `Warning: Filtering out orphaned tool_result (id: ${e.id}, toolCallId: ${e.toolCallId}). ` +
           `No unclaimed matching tool_call found with that ID.`,
       );
       return false;
     }
-    // Each tool_call claims exactly one result; extra results for the same
-    // call are orphans.
-    unconsumedCallIds.delete(e.toolCallId);
+    unconsumedCounts.set(e.toolCallId!, count - 1);
     return true;
   });
 };

@@ -135,6 +135,7 @@ export {
   compileGrepPattern,
   createReadScratchFileTool,
   createSkillTools,
+  disambiguateDuplicateToolCalls,
   doNothingEvent,
   doNothingTool,
   doNothingToolName,
