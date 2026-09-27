@@ -11,7 +11,8 @@ import {
   toolUseTurn,
 } from "../mod.ts";
 import { searchPastHistoryToolRaw } from "../src/historySearch.ts";
-import { agentDeps } from "../test_helpers.ts";
+import { cleanActiveMemoryToolName } from "../src/utils.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 const createSampleHistory = (): HistoryEvent[] => {
   const baseTime = 1788500000000;
@@ -297,3 +298,96 @@ Deno.test("searchPastHistoryTool - agent can call tool to retrieve past facts", 
     }`,
   );
 });
+
+runForAllProviders(
+  "agent recovers raw details via search_past_history when prior tool results were compacted into a summary",
+  async (runAgent) => {
+    const rawHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please generate a server license key.",
+      }),
+      {
+        id: "call-license-1",
+        type: "tool_call",
+        name: "generate_license",
+        parameters: { product: "enterprise-server" },
+        timestamp: 1700000002000,
+        isOwn: true,
+      },
+      {
+        id: "res-license-1",
+        type: "tool_result",
+        result:
+          "SUCCESS: Generated license key: KEY-8822-PROD-UNCOMPACT-99. Saved to /etc/license.key",
+        timestamp: 1700000002500,
+        isOwn: true,
+        toolCallId: "call-license-1",
+      },
+      {
+        id: "msg-bot-1",
+        type: "own_utterance",
+        text: "I have generated your server license key and saved it.",
+        timestamp: 1700000003000,
+        isOwn: true,
+      },
+      {
+        id: "call-clean-1",
+        type: "tool_call",
+        name: cleanActiveMemoryToolName,
+        parameters: {
+          start_time: new Date(1700000002000).toISOString(),
+          end_time: new Date(1700000002500).toISOString(),
+          summary: "Generated server license and saved to file.",
+        },
+        timestamp: 1700000004000,
+        isOwn: true,
+      },
+      {
+        id: "res-clean-1",
+        type: "tool_result",
+        result: `Successfully summarized 2 events from ${
+          new Date(1700000002000).toISOString()
+        } to ${
+          new Date(1700000002500).toISOString()
+        } with summary: "Generated server license and saved to file."`,
+        timestamp: 1700000004001,
+        isOwn: true,
+        toolCallId: "call-clean-1",
+      },
+      participantUtteranceTurn({
+        name: "user",
+        text:
+          "What was the exact license key string that was generated earlier?",
+      }),
+    ];
+
+    await agentDeps(rawHistory)(runAgent)({
+      maxIterations: 3,
+      tools: [],
+      prompt: "You are a helpful assistant.",
+      timezoneIANA: "UTC",
+    });
+
+    const calledSearch = rawHistory.some((e) =>
+      e.type === "tool_call" && e.name === searchPastHistoryToolName
+    );
+    const lastUtterance = [...rawHistory].reverse().find((e) =>
+      e.type === "own_utterance"
+    );
+    const recoveredKey = lastUtterance?.text?.includes(
+      "KEY-8822-PROD-UNCOMPACT-99",
+    );
+
+    assert(
+      calledSearch,
+      "Agent should call search_past_history when info is compacted away",
+    );
+    assert(
+      recoveredKey,
+      `Agent should recover exact key from raw history. Last utterance: ${lastUtterance?.text}`,
+    );
+  },
+  3,
+  true, // Gemini-only: relies on search_past_history tool call resolution
+);

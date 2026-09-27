@@ -3,6 +3,7 @@ import {
   accessCallModelWrapper,
   type AgentSpec,
   type CallModel,
+  cleanActiveMemoryTool,
   createReadScratchFileTool,
   getSpecForTurn,
   type HistoryEvent,
@@ -12,6 +13,7 @@ import {
   injectStreamThinkingChunk,
   runAbstractAgent,
   sanitizeHistorySkillsForModel,
+  searchPastHistoryTool,
 } from "./src/agent.ts";
 import { anthropicAgentCaller } from "./src/anthropicAgent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
@@ -81,12 +83,20 @@ const addBuiltinTools = (spec: AgentSpec): AgentSpec => {
   const scratchTool = spec.toolOutputScratchPad
     ? [createReadScratchFileTool(spec.toolOutputScratchPad)]
     : [];
+  const cleanTool = spec.enableCleanActiveMemory !== false
+    ? [cleanActiveMemoryTool()]
+    : [];
+  const searchTool = spec.enableHistorySearch !== false
+    ? [searchPastHistoryTool()]
+    : [];
   return {
     ...spec,
     tools: [
       ...spec.tools,
       ...builtinTools.filter(({ name }) => !existingToolNames.has(name)),
       ...scratchTool.filter(({ name }) => !existingToolNames.has(name)),
+      ...cleanTool.filter(({ name }) => !existingToolNames.has(name)),
+      ...searchTool.filter(({ name }) => !existingToolNames.has(name)),
     ],
   };
 };
@@ -295,7 +305,9 @@ export { injectKimiToken, kimiGenJsonFromConvo } from "./src/kimiJson.ts";
 export {
   accessJevToken,
   callJevDecisionModel,
+  decideCleanupWithJev,
   decideSkillsWithJev,
+  extractCandidateToolEpisodes,
   formatAgentStateForJev,
   injectJevToken,
   jevApiUrl,
@@ -310,6 +322,7 @@ export {
 export { searchPastHistoryToolName } from "./src/historySearch.ts";
 export {
   catchAiRefusesToAdhereToTyping,
+  cleanActiveMemoryToolName,
   type ModelOpts,
   type ModelTier,
 } from "./src/utils.ts";

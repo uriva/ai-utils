@@ -12,7 +12,7 @@ import {
   lastParticipantUtterance,
   verifiedToolFacts,
 } from "./hallucinationGate.ts";
-import type { ModelTier } from "./utils.ts";
+import { cleanActiveMemoryToolName, type ModelTier } from "./utils.ts";
 
 export const jevApiUrl = "https://api.typesafe.ai/v1/systemone";
 const rmmbrUrl = "https://rmmbr.net";
@@ -326,5 +326,152 @@ export const decideSkillsWithJev = async (
       err,
     );
     return { toLearn: [], toUnlearn: [] };
+  }
+};
+
+export type PastToolEpisode = {
+  turnIndex: number;
+  startTime: number;
+  endTime: number;
+  startTimeStr: string;
+  endTimeStr: string;
+  userText: string;
+  botText: string;
+  toolCalls: { name: string; params: unknown }[];
+  toolResultsSummary: string[];
+  eventsCount: number;
+};
+
+export const extractCandidateToolEpisodes = (
+  history: HistoryEvent[],
+): PastToolEpisode[] => {
+  const episodes: PastToolEpisode[] = [];
+  let currentEpisode: Partial<PastToolEpisode> | null = null;
+  let turnIdx = 0;
+
+  for (let i = 0; i < history.length; i++) {
+    const e = history[i];
+    if (e.type === "participant_utterance") {
+      if (
+        currentEpisode &&
+        currentEpisode.toolCalls &&
+        currentEpisode.toolCalls.length > 0 &&
+        currentEpisode.botText
+      ) {
+        episodes.push(currentEpisode as PastToolEpisode);
+      }
+      turnIdx++;
+      currentEpisode = {
+        turnIndex: turnIdx,
+        startTime: e.timestamp,
+        endTime: e.timestamp,
+        startTimeStr: new Date(e.timestamp).toISOString(),
+        endTimeStr: new Date(e.timestamp).toISOString(),
+        userText: e.text ?? "",
+        botText: "",
+        toolCalls: [],
+        toolResultsSummary: [],
+        eventsCount: 1,
+      };
+    } else if (currentEpisode) {
+      currentEpisode.endTime = e.timestamp;
+      currentEpisode.endTimeStr = new Date(e.timestamp).toISOString();
+      currentEpisode.eventsCount = (currentEpisode.eventsCount ?? 0) + 1;
+
+      if (e.type === "tool_call") {
+        currentEpisode.toolCalls?.push({ name: e.name, params: e.parameters });
+      } else if (e.type === "tool_result") {
+        const preview = typeof e.result === "string"
+          ? e.result.slice(0, 150).replace(/\n/g, " ")
+          : "";
+        currentEpisode.toolResultsSummary?.push(preview);
+      } else if (e.type === "own_utterance") {
+        currentEpisode.botText = e.text ?? "";
+      }
+    }
+  }
+
+  // The latest episode (turn N) is in-flight (unanswered).
+  // The immediate prior episode (turn N-1) is protected working memory.
+  // Candidates are strictly episodes with index <= N-2.
+  if (episodes.length < 2) return [];
+
+  const candidatePool = episodes.slice(0, -1);
+
+  return candidatePool.filter((ep) => {
+    const alreadyCompacted = history.some((e) =>
+      e.type === "tool_call" &&
+      e.name === cleanActiveMemoryToolName &&
+      // deno-lint-ignore no-explicit-any
+      (e.parameters as any)?.start_time === ep.startTimeStr
+    );
+    return !alreadyCompacted;
+  });
+};
+
+export const decideCleanupWithJev = async (
+  prompt: string,
+  history: HistoryEvent[],
+): Promise<PastToolEpisode[]> => {
+  const token = accessJevToken();
+  if (!token && !isDecisionModelInjected()) {
+    return [];
+  }
+
+  const candidateEpisodes = extractCandidateToolEpisodes(history);
+  if (candidateEpisodes.length === 0) return [];
+
+  const lastUser = lastParticipantUtterance(history);
+  const currentUserRequest = lastUser && typeof lastUser.text === "string"
+    ? lastUser.text
+    : "No prompt";
+
+  const state = {
+    agent_role: prompt.slice(0, 1000),
+    current_user_request: currentUserRequest,
+    past_tool_episodes: candidateEpisodes.map((ep) => ({
+      turn_id: `turn_${ep.turnIndex}`,
+      user_request: ep.userText.slice(0, 150),
+      tools_invoked: ep.toolCalls.map((t) => t.name).join(", "),
+      tool_results_preview: ep.toolResultsSummary.slice(0, 2).join(" | ")
+        .slice(0, 200),
+      bot_response: ep.botText.slice(0, 150),
+    })),
+  };
+
+  const questions = Object.fromEntries(
+    candidateEpisodes.map((ep) => [
+      `compact_turn_${ep.turnIndex}`,
+      {
+        type: "noul" as const,
+        instructions:
+          `Should the intermediate tool execution logs of Turn ${ep.turnIndex} ("${
+            ep.userText.slice(0, 60)
+          }") be compacted into a summary?`,
+        criteria: {
+          true:
+            `The action or subtask in Turn ${ep.turnIndex} has been completed and responded to. The current user request ("${
+              currentUserRequest.slice(0, 60)
+            }") does not require re-inspecting the exact raw tool output, error stack traces, or intermediate line numbers from Turn ${ep.turnIndex}.`,
+          false:
+            `The current user request is directly asking about, debugging, or relying on specific raw details from Turn ${ep.turnIndex} that would be lost if summarized.`,
+        },
+      },
+    ]),
+  );
+
+  try {
+    const answers = await callDecisionModel(state, questions);
+    return candidateEpisodes.filter((ep) => {
+      const ans = answers[`compact_turn_${ep.turnIndex}`];
+      const score = ans && ans.type === "noul" ? ans.noul : 0;
+      return score >= 0.60;
+    });
+  } catch (err) {
+    console.warn(
+      "[jev-cleanup] active memory cleanup check failed, failing open:",
+      err,
+    );
+    return [];
   }
 };

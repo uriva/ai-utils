@@ -9,6 +9,7 @@ import {
   last,
   nonempty,
   pipe,
+  sum,
   timeit,
 } from "gamla";
 import { z, type ZodType } from "zod/v4";
@@ -24,7 +25,12 @@ import {
 } from "./compaction.ts";
 import { searchPastHistoryToolRaw } from "./historySearch.ts";
 import { compactToolResultsInMemory } from "./continuousCompaction.ts";
-import { stripAnsi } from "./utils.ts";
+import {
+  cleanActiveMemoryToolName,
+  isEmojiFlood,
+  isRepetitionFlood,
+  stripAnsi,
+} from "./utils.ts";
 import { accessGeminiToken } from "./gemini.ts";
 import { genJson } from "./genJson.ts";
 import { zodToCompactTypingString, zodToTypingString } from "./toolTyping.ts";
@@ -34,7 +40,6 @@ import {
   stripAllInternalSentTimestamps,
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
-import { isEmojiFlood, isRepetitionFlood } from "./utils.ts";
 import {
   extractJsonThought,
   hasJsonThought,
@@ -42,7 +47,7 @@ import {
   stripJsonThought,
 } from "./jsonThought.ts";
 import { isDecisionModelInjected } from "./decisionModel.ts";
-import { decideSkillsWithJev } from "./jev.ts";
+import { decideCleanupWithJev, decideSkillsWithJev } from "./jev.ts";
 import {
   auditUtteranceForHallucination,
   hallucinationCorrectionText,
@@ -2625,6 +2630,45 @@ const adjustActiveSkillsWithJev = async (
   }
 };
 
+const maybeCleanupActiveMemoryWithJev = async (
+  prompt: string,
+): Promise<void> => {
+  const history = await getHistory();
+  if (history.length < 12) return;
+  if (sum(history.map(estimateTokensLocal)) < 5000) return;
+
+  const toCompact = await decideCleanupWithJev(prompt, history);
+  for (const ep of toCompact) {
+    const callId = `auto-clean-${generateId()}`;
+    const toolNames = [...new Set(ep.toolCalls.map((t) => t.name))].join(", ");
+    const summary = `Executed ${toolNames} to address "${
+      ep.userText.slice(0, 80).replace(/\n/g, " ")
+    }". Result: ${ep.botText.slice(0, 120).replace(/\n/g, " ")}`;
+
+    await outputEvent({
+      id: callId,
+      timestamp: Date.now(),
+      type: "tool_call",
+      isOwn: true,
+      name: cleanActiveMemoryToolName,
+      parameters: {
+        start_time: ep.startTimeStr,
+        end_time: ep.endTimeStr,
+        summary,
+      },
+    });
+    await outputEvent({
+      id: `${callId}-result`,
+      timestamp: Date.now(),
+      type: "tool_result",
+      isOwn: true,
+      toolCallId: callId,
+      result:
+        `Successfully summarized ${ep.eventsCount} events from ${ep.startTimeStr} to ${ep.endTimeStr} with summary: "${summary}"`,
+    });
+  }
+};
+
 export const resolveToolDescription = (
   // deno-lint-ignore no-explicit-any
   _allTools: Tool<any>[],
@@ -2667,6 +2711,7 @@ export type AgentSpec = AgentInputs & {
   compactHistory?: (history: HistoryEvent[]) => Promise<void>;
   historyCompactionTokenThreshold?: number;
   enableCleanActiveMemory?: boolean;
+  enableAutoMemoryCleanup?: boolean;
   enableHistorySearch?: boolean;
   timezoneIANA: string;
   maxOutputTokens?: number;
@@ -2821,14 +2866,19 @@ export const runAbstractAgent = (
   injectAgentSpec(() => spec)(async () => {
     const { tools, skills } = spec;
     const scratchPad = spec.toolOutputScratchPad;
+    const existingToolNames = new Set(tools.map(({ name }) => name));
     const allTools = [
       ...tools,
       ...(skills && skills.length > 0 ? createSkillTools(skills) : []),
       ...(spec.enableCleanActiveMemory !== false
-        ? [cleanActiveMemoryTool(getHistory)]
+        ? [cleanActiveMemoryTool(getHistory)].filter(({ name }) =>
+          !existingToolNames.has(name)
+        )
         : []),
       ...(spec.enableHistorySearch !== false
-        ? [searchPastHistoryTool(getHistory)]
+        ? [searchPastHistoryTool(getHistory)].filter(({ name }) =>
+          !existingToolNames.has(name)
+        )
         : []),
     ];
     const skillsArr = skills ?? [];
@@ -2853,6 +2903,13 @@ export const runAbstractAgent = (
         (!isMockModelInjected() || isDecisionModelInjected())
       ) {
         await adjustActiveSkillsWithJev(spec.prompt, skillsArr);
+      }
+      if (
+        c === 1 &&
+        (!isMockModelInjected() || isDecisionModelInjected()) &&
+        spec.enableAutoMemoryCleanup !== false
+      ) {
+        await maybeCleanupActiveMemoryWithJev(spec.prompt);
       }
       const history = await getHistory();
       let normalizedHistory = await projectModelContext(

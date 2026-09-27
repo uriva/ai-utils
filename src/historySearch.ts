@@ -26,7 +26,7 @@ export const searchPastHistoryParameters = z.object({
   order: z.enum(["asc", "desc"]).optional().default("asc").describe(
     "Sort order by timestamp: 'asc' (chronological, oldest first, default) or 'desc' (newest first).",
   ),
-  limit: z.number().int().positive().optional().default(20).describe(
+  limit: z.number().int().min(1).optional().default(20).describe(
     "Maximum number of matching events to return (default: 20, max: 50).",
   ),
   offset: z.number().int().nonnegative().optional().default(0).describe(
@@ -145,7 +145,7 @@ export const searchPastHistoryToolRaw = (
   name: searchPastHistoryToolName,
   description:
     "Search and inspect conversation history events from earlier in this conversation or past sessions. " +
-    "Allows grepping for keywords/regex across past messages, thoughts, and tool calls/results, or retrieving events within a specific time range.",
+    "Use this to find exact uncompacted tool outputs, codes, quotes, or details from earlier turns that were summarized, truncated, or scrolled out of context, or to search past messages by keyword or regex.",
   parameters: searchPastHistoryParameters,
   handler: async ({
     query,
