@@ -33,20 +33,11 @@ runForAllProviders(
       }),
     ];
 
-    const rewriteHistory = (replacements: Record<string, HistoryEvent>) => {
-      for (const [id, replacement] of Object.entries(replacements)) {
-        const index = history.findIndex((e) => e.id === id);
-        if (index !== -1) history[index] = replacement;
-      }
-      return Promise.resolve();
-    };
-
     const spec = {
       maxIterations: 3,
       tools: [],
       prompt:
         "You are a helpful assistant. If a file could not be processed, say so and ask the user to resend.",
-      rewriteHistory,
       timezoneIANA: "UTC",
     };
 

@@ -6,11 +6,7 @@ import {
   tool,
   type ToolUse,
 } from "../src/agent.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 const fetchPriceTool = tool({
   name: "fetch_price",
@@ -39,7 +35,6 @@ runForAllProviders(
         "CRITICAL EFFICIENCY REQUIREMENT: When a user asks about multiple items, you MUST fetch information for all requested items concurrently in the same turn by calling fetch_price for each item in parallel in your very first response.",
         "Never look up items one by one in sequential turns.",
       ].join(" "),
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 

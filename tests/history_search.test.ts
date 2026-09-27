@@ -283,7 +283,6 @@ Deno.test("searchPastHistoryTool - agent can call tool to retrieve past facts", 
       maxIterations: 3,
       tools: [],
       prompt: "You are a helpful assistant.",
-      rewriteHistory: async () => {},
       timezoneIANA: "UTC",
     });
   })();

@@ -7,7 +7,7 @@ import {
   ownUtteranceTurn,
   participantUtteranceTurn,
 } from "../src/agent.ts";
-import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
+import { agentDeps } from "../test_helpers.ts";
 
 const hour = 60 * 60 * 1000;
 
@@ -51,7 +51,6 @@ Deno.test("stale platform notifications fold to one-line digests in model contex
       maxIterations: 1,
       tools: [],
       prompt: "You are a helper.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   })();
@@ -97,7 +96,6 @@ Deno.test("recent platform notifications and compaction summaries keep full text
       maxIterations: 1,
       tools: [],
       prompt: "You are a helper.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   })();
@@ -143,7 +141,6 @@ Deno.test("recent platform notifications survive across participant turns", asyn
       maxIterations: 1,
       tools: [],
       prompt: "You are a helper.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   })();

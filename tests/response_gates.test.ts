@@ -1,6 +1,6 @@
 import { assert, assertRejects } from "@std/assert";
 import { runAgent } from "../mod.ts";
-import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
+import { agentDeps } from "../test_helpers.ts";
 import {
   forcedStopUtterance,
   type HistoryEvent,
@@ -23,7 +23,6 @@ const run = (
       maxIterations: 20,
       tools: [],
       prompt: "You are a helpful assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
       ...specOverrides,
     });

@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { runAgent } from "../mod.ts";
-import { agentDeps, noopRewriteHistory, someTool } from "../test_helpers.ts";
+import { agentDeps, someTool } from "../test_helpers.ts";
 import {
   type HistoryEvent,
   injectCallModel,
@@ -108,7 +108,6 @@ Deno.test(
         maxIterations: 5,
         tools: [someTool],
         prompt: "You are a geography assistant.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();

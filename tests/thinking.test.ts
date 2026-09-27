@@ -19,11 +19,7 @@ import {
 } from "../src/gemini.ts";
 import { pipe } from "gamla";
 import { z } from "zod/v4";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 runForAllProviders(
   "agent returns own_thought events when thinking is enabled",
@@ -43,7 +39,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helpful assistant. Think carefully before answering.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -89,7 +84,6 @@ Deno.test(
           thinkingText += chunk;
           thinkingChunkCount++;
         },
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();

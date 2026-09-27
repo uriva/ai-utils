@@ -11,11 +11,7 @@ import {
   type ToolOutputScratchPad,
   truncateToolOutput,
 } from "../src/agent.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 const needle = "SECRET_TOKEN_a7f3b9c2_v2";
 
@@ -60,7 +56,6 @@ runForAllProviders(
       tools: [dumpLogsTool],
       prompt:
         `You are an AI assistant. When a tool output is spilled to a scratch pad, use the ${readScratchFileToolName} tool (with the grep argument for regex search) to find what you need.`,
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
       toolOutputScratchPad: scratchPad,
     });
@@ -200,7 +195,6 @@ const runFakeGrepAgent = async (
       maxIterations: 4,
       tools: [],
       prompt: "test",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
       toolOutputScratchPad: scratchPad,
     });
@@ -366,7 +360,6 @@ Deno.test(
         maxIterations: 1,
         tools: [testTool],
         prompt: "Test assistant",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
         toolOutputScratchPad: scratchPad,
       });
@@ -541,7 +534,6 @@ Deno.test(
         maxIterations: 5,
         tools: [githubTool, saveTool],
         prompt: "Test assistant",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
         toolOutputScratchPad: scratchPad,
       });
@@ -617,7 +609,6 @@ Deno.test(
         maxIterations: 2,
         tools: [githubApiTool],
         prompt: "Test assistant",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
         toolOutputScratchPad: scratchPad,
       });

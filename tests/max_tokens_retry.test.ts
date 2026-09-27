@@ -8,7 +8,7 @@ import {
   participantUtteranceTurn,
   thinkingTokenExhaustionWarningText,
 } from "../src/agent.ts";
-import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
+import { agentDeps } from "../test_helpers.ts";
 
 // Provider-agnostic: when the model hits its output token budget it returns
 // a truncated own_utterance (signalled by truncated=true). runAbstractAgent
@@ -41,7 +41,6 @@ Deno.test(
         maxIterations: 3,
         tools: [],
         prompt: "unused in fake",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -95,7 +94,6 @@ Deno.test(
         maxIterations: 3,
         tools: [],
         prompt: "unused in fake",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -141,7 +139,6 @@ Deno.test(
         maxIterations: 10,
         tools: [],
         prompt: "unused in fake",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -183,7 +180,6 @@ Deno.test(
         maxIterations: 10,
         tools: [],
         prompt: "unused in fake",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();

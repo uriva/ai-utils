@@ -6,7 +6,7 @@ import {
   participantUtteranceTurn,
 } from "../src/agent.ts";
 import { genJsonOverride } from "../src/genJson.ts";
-import { agentDeps, noopRewriteHistory, someTool } from "../test_helpers.ts";
+import { agentDeps, someTool } from "../test_helpers.ts";
 
 // checkProgress is a periodic auditor model call. It must not bill full-model
 // tokens over the entire history: it runs on the mini model and only sees a
@@ -55,7 +55,6 @@ Deno.test("progress audit runs on the mini model over a bounded recent-history s
           maxIterations: 1,
           tools: [someTool],
           prompt: "You are an assistant.",
-          rewriteHistory: noopRewriteHistory,
           timezoneIANA: "UTC",
         })
       )();

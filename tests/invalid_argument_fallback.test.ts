@@ -45,7 +45,6 @@ const baseSpec = {
   maxIterations: 5,
   tools: [],
   prompt: "You are a helpful assistant.",
-  rewriteHistory: () => Promise.resolve(),
   timezoneIANA: "UTC",
 };
 

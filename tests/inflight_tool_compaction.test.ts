@@ -77,18 +77,6 @@ Deno.test(
       ]);
     };
 
-    const historyReplacements: Record<string, HistoryEvent> = {};
-    const rewriteHistory = (replacements: Record<string, HistoryEvent>) => {
-      Object.assign(historyReplacements, replacements);
-      for (const [id, event] of Object.entries(replacements)) {
-        const idx = history.findIndex((e) => e.id === id);
-        if (idx !== -1) {
-          history[idx] = event;
-        }
-      }
-      return Promise.resolve();
-    };
-
     await pipe(
       injectCallModel(fakeCallModel),
       agentDeps(history),
@@ -98,22 +86,28 @@ Deno.test(
         maxIterations: 10,
         tools: [inspectTool],
         prompt: "You are a code inspection agent.",
-        rewriteHistory,
         toolOutputScratchPad: scratchPad,
         timezoneIANA: "UTC",
       });
     })();
 
-    // In history, the oldest tool result (from turn 1) must have been compacted to Memory TLDR
-    const toolResults = history.filter((e) =>
+    // In projected context received by the model on the last turn,
+    // the oldest tool result (from turn 1) must have been compacted to Memory TLDR
+    const lastReceived =
+      modelReceivedHistories[modelReceivedHistories.length - 1];
+    const projectedToolResults = lastReceived.filter((e) =>
       e.type === "tool_result"
     ) as Extract<
       HistoryEvent,
       { type: "tool_result" }
     >[];
-    assertEquals(toolResults.length, 4, "Expected 4 tool results in history");
+    assertEquals(
+      projectedToolResults.length,
+      4,
+      "Expected 4 tool results in model context",
+    );
 
-    const firstResult = toolResults[0];
+    const firstResult = projectedToolResults[0];
     const isFirstCompacted = firstResult.result?.includes(
       "Because time has passed, this tool result has been compacted",
     ) || firstResult.result?.includes("Memory TLDR:");
@@ -121,16 +115,28 @@ Deno.test(
     assertEquals(
       isFirstCompacted,
       true,
-      "Expected oldest in-flight tool result to be compacted to Memory TLDR, but found:\n" +
+      "Expected oldest in-flight tool result to be compacted to Memory TLDR in model context, but found:\n" +
         firstResult.result?.slice(0, 200),
     );
 
     // The most recent tool result (from turn 4) should remain in full fidelity
-    const latestResult = toolResults[3];
+    const latestResult = projectedToolResults[3];
     assertEquals(
       latestResult.result?.includes("=== MODULE Billing SOURCE CODE ==="),
       true,
       "Expected most recent tool result to remain full fidelity",
+    );
+
+    // Raw history preserves full fidelity for all results
+    const rawToolResults = history.filter((e) =>
+      e.type === "tool_result"
+    ) as Extract<
+      HistoryEvent,
+      { type: "tool_result" }
+    >[];
+    assertEquals(
+      rawToolResults[0].result?.includes("=== MODULE Auth SOURCE CODE ==="),
+      true,
     );
   },
 );

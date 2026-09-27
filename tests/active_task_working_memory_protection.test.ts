@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { runAgent } from "../mod.ts";
-import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
+import { agentDeps } from "../test_helpers.ts";
 import { pipe } from "gamla";
 import { z } from "zod/v4";
 import {
@@ -162,7 +162,6 @@ Deno.test(
         maxIterations: 10,
         tools: [readFileTool, runTestsTool],
         prompt: "You are an automated software engineer.",
-        rewriteHistory: noopRewriteHistory,
         compactHistory: fakeCompactHistory,
         toolOutputScratchPad: scratchPad,
         historyCompactionTokenThreshold: 64_000,

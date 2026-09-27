@@ -8,12 +8,7 @@ import {
   z,
 } from "../mod.ts";
 import { injectTokenUsage, type TokenUsage } from "../src/geminiAgent.ts";
-import {
-  agentDeps,
-  injectSecrets,
-  noopRewriteHistory,
-  runWithProvider,
-} from "../test_helpers.ts";
+import { agentDeps, injectSecrets, runWithProvider } from "../test_helpers.ts";
 
 Deno.test({
   name:
@@ -49,7 +44,6 @@ Deno.test({
       provider: "google",
       prompt: largePrompt,
       tools: [searchTool],
-      rewriteHistory: noopRewriteHistory,
       maxIterations: 5,
       timezoneIANA: "UTC",
     };

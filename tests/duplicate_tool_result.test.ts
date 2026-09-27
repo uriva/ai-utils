@@ -4,12 +4,7 @@ import {
   toolResultTurn,
   toolUseTurn,
 } from "../mod.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-  someTool,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders, someTool } from "../test_helpers.ts";
 
 // Duplicate delivery of a background tool result can place two tool_results
 // with the same toolCallId into persisted history. Anthropic hard-rejects such
@@ -44,7 +39,6 @@ runForAllProviders(
       maxIterations: 3,
       tools: [someTool],
       prompt: "You are a helpful assistant. Be brief.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     const reply = history.find((event) => event.type === "own_utterance");

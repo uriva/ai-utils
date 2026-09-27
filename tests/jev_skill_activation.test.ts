@@ -10,7 +10,6 @@ import {
   addition,
   agentDeps,
   multiplication,
-  noopRewriteHistory,
   runForAllProviders,
 } from "../test_helpers.ts";
 
@@ -39,7 +38,6 @@ runForAllProviders(
       tools: [],
       skills: [calculatorSkill],
       prompt: "You are a helpful assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -88,7 +86,6 @@ runForAllProviders(
       tools: [],
       skills: [calculatorSkill],
       prompt: "You are a helpful assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -106,7 +103,6 @@ runForAllProviders(
       tools: [],
       skills: [calculatorSkill],
       prompt: "You are a helpful assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 

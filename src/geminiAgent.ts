@@ -1073,9 +1073,7 @@ const didNothing = (output: GeminiOutput) =>
 
 // MIME types Gemini rejects with "Unsupported MIME type". Keeping this list
 // explicit (rather than waiting for the API to 400 us) lets us strip the
-// attachment once, up front, and persist the rewrite via `rewriteHistory` on
-// the first call — which matters for cached test runs where the reactive
-// error path in `stripAllUnsupportedMimeTypes` never fires.
+// attachment once, up front, in the projected context on the first call.
 const knownUnsupportedGeminiMimeTypes = new Set<string>([
   "application/octet-stream",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1121,30 +1119,10 @@ const stripUnsupportedAttachmentsFromEvent = (
   };
 };
 
-const filterUnsupportedGeminiAttachments = (
+export const filterUnsupportedGeminiAttachments = (
   history: GeminiHistoryEvent[],
 ): GeminiHistoryEvent[] =>
   history.map((event) => stripUnsupportedAttachmentsFromEvent(event).event);
-
-// Same stripping as `filterUnsupportedGeminiAttachments` but records
-// replacements so callers can persist them via `rewriteHistory`. Runs outside
-// the cached `callModel` boundary so side effects fire even on cache hits.
-export const filterAndRewriteUnsupportedGeminiAttachments =
-  (rewriteHistory?: AgentSpec["rewriteHistory"]) =>
-  async (history: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> => {
-    const replacements: Record<string, GeminiHistoryEvent> = {};
-    const result = history.map((event) => {
-      const { event: stripped, changed } = stripUnsupportedAttachmentsFromEvent(
-        event,
-      );
-      if (changed) replacements[event.id] = stripped;
-      return stripped;
-    });
-    if (rewriteHistory && !empty(Object.keys(replacements))) {
-      await rewriteHistory(replacements);
-    }
-    return result;
-  };
 
 export const filterOrphanedToolResults = (
   history: GeminiHistoryEvent[],
@@ -1170,31 +1148,6 @@ export const filterOrphanedToolResults = (
 
 const eventHasThoughtSignature = (e: GeminiHistoryEvent): boolean =>
   !!("modelMetadata" in e && e.modelMetadata?.thoughtSignature?.trim());
-
-export const filterInvalidToolCalls = (
-  history: GeminiHistoryEvent[],
-): GeminiHistoryEvent[] => {
-  const signaturesByResponseId = new Set<string>();
-  for (const e of history) {
-    if (eventHasThoughtSignature(e)) {
-      signaturesByResponseId.add(getOriginalId(e));
-    }
-  }
-  return history.filter((e) => {
-    if (
-      e.type === "tool_call" &&
-      !eventHasThoughtSignature(e) &&
-      !signaturesByResponseId.has(getOriginalId(e))
-    ) {
-      console.warn(
-        `Warning: Filtering out tool_call "${e.name}" (id: ${e.id}) with missing or empty thoughtSignature. ` +
-          `This would cause Gemini API error: "Function call is missing a thought_signature in functionCall parts".`,
-      );
-      return false;
-    }
-    return true;
-  });
-};
 
 const toolCallToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
   type: "own_thought",
@@ -1222,7 +1175,7 @@ const textToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
   text: "text" in e ? (e.text as string) : "",
 });
 
-const computeInvalidToolCallReplacements = (
+export const computeInvalidToolCallReplacements = (
   history: GeminiHistoryEvent[],
 ): {
   filtered: GeminiHistoryEvent[];
@@ -1286,41 +1239,12 @@ const computeInvalidToolCallReplacements = (
   return { filtered, replacements };
 };
 
-// Synchronous filter used inside the cached provider caller so the filter is
-// applied deterministically on every run (including on cache hits inside the
-// inner call, though in practice the pre-filter runs first and this is a
-// no-op). The `rewriteHistory` side-effect is fire-and-forget here because it
-// has already been awaited outside the cache boundary in
-// `prepareGeminiHistory`.
-export const filterAndRewriteInvalidToolCalls =
-  (rewriteHistory?: AgentSpec["rewriteHistory"]) =>
-  (history: GeminiHistoryEvent[]): GeminiHistoryEvent[] => {
-    const { filtered, replacements } = computeInvalidToolCallReplacements(
-      history,
-    );
-    if (rewriteHistory && !empty(Object.keys(replacements))) {
-      rewriteHistory(replacements).catch((err) =>
-        console.warn("Failed to rewrite history for invalid tool calls:", err)
-      );
-    }
-    return filtered;
-  };
+export const filterInvalidToolCalls = (
+  history: GeminiHistoryEvent[],
+): GeminiHistoryEvent[] => computeInvalidToolCallReplacements(history).filtered;
 
-// Async variant invoked OUTSIDE the cached `callModel` boundary so the
-// `rewriteHistory` side effect runs even when the inner call is served from
-// the rmmbr cache. Production flows through here too; making it await means
-// downstream code can rely on the persisted history being up to date.
-export const filterAndRewriteInvalidToolCallsAsync =
-  (rewriteHistory?: AgentSpec["rewriteHistory"]) =>
-  async (history: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> => {
-    const { filtered, replacements } = computeInvalidToolCallReplacements(
-      history,
-    );
-    if (rewriteHistory && !empty(Object.keys(replacements))) {
-      await rewriteHistory(replacements);
-    }
-    return filtered;
-  };
+export const filterAndRewriteInvalidToolCalls = (_rewriteHistory?: unknown) =>
+  filterInvalidToolCalls;
 
 const hasFileAttachment =
   (fileId: string) =>
@@ -1425,31 +1349,26 @@ const stripAllUnsupportedMimeTypes = async (
   initialError: Error,
   events: GeminiHistoryEvent[],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
-  rewriteHistory?: AgentSpec["rewriteHistory"],
   disableStreaming?: boolean,
 ): Promise<GeminiOutput> => {
   let currentEvents = events;
   let currentError = initialError;
-  const allReplacements: Record<string, GeminiHistoryEvent> = {};
   for (let attempt = 0; attempt < 5; attempt++) {
     const mimeType = extractUnsupportedMimeType(currentError);
     if (!mimeType) throw currentError;
     console.warn(
       `Stripping unsupported MIME type from history: ${mimeType}`,
     );
-    const { updatedHistory, replacements } = stripAttachmentsByMimeType(
+    const { updatedHistory } = stripAttachmentsByMimeType(
       mimeType,
       currentEvents,
     );
-    Object.assign(allReplacements, replacements);
     currentEvents = updatedHistory;
     try {
-      const result = await callGemini(
+      return await callGemini(
         eventsToRequest(currentEvents),
         disableStreaming,
       );
-      if (rewriteHistory) await rewriteHistory(allReplacements);
-      return result;
     } catch (error) {
       const err = normalizeError(error);
       if (!isUnsupportedMimeTypeError(err)) throw err;
@@ -1501,7 +1420,6 @@ const stripAllCorruptedFileAttachmentsAndRetry = async (
   originalError: Error,
   events: GeminiHistoryEvent[],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
-  rewriteHistory?: AgentSpec["rewriteHistory"],
   disableStreaming?: boolean,
 ): Promise<GeminiOutput> => {
   console.warn(
@@ -1512,12 +1430,10 @@ const stripAllCorruptedFileAttachmentsAndRetry = async (
   if (empty(Object.keys(nuclear.replacements))) {
     throw originalError;
   }
-  const result = await callGemini(
+  return await callGemini(
     eventsToRequest(nuclear.updatedHistory),
     disableStreaming,
   );
-  if (rewriteHistory) await rewriteHistory(nuclear.replacements);
-  return result;
 };
 
 const stripAllFileAttachments = (
@@ -1554,12 +1470,10 @@ export const stripAllExpiredFiles = async (
   initialError: Error,
   events: GeminiHistoryEvent[],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
-  rewriteHistory?: AgentSpec["rewriteHistory"],
   disableStreaming?: boolean,
 ): Promise<GeminiOutput> => {
   let currentEvents = events;
   let currentError = initialError;
-  const allReplacements: Record<string, GeminiHistoryEvent> = {};
   for (let attempt = 0; attempt < 20; attempt++) {
     const fixed = stripExpiredFile(currentError, currentEvents);
     if (!fixed) throw currentError;
@@ -1568,15 +1482,12 @@ export const stripAllExpiredFiles = async (
         `Could not find file referenced in 403 error in any attachment. Stripping all file attachments as fallback.`,
       );
       const nuclear = stripAllFileAttachments(currentEvents);
-      Object.assign(allReplacements, nuclear.replacements);
       currentEvents = nuclear.updatedHistory;
       try {
-        const result = await callGemini(
+        return await callGemini(
           eventsToRequest(currentEvents),
           disableStreaming,
         );
-        if (rewriteHistory) await rewriteHistory(allReplacements);
-        return result;
       } catch (nuclearError) {
         const err = normalizeError(nuclearError);
         throw new Error(
@@ -1584,15 +1495,12 @@ export const stripAllExpiredFiles = async (
         );
       }
     }
-    Object.assign(allReplacements, fixed.replacements);
     currentEvents = fixed.updatedHistory;
     try {
-      const result = await callGemini(
+      return await callGemini(
         eventsToRequest(currentEvents),
         disableStreaming,
       );
-      if (rewriteHistory) await rewriteHistory(allReplacements);
-      return result;
     } catch (error) {
       const err = normalizeError(error);
       if (!isFileNotActiveError(err)) throw err;
@@ -1603,7 +1511,6 @@ export const stripAllExpiredFiles = async (
 };
 
 export const callGeminiWithFixHistory = (
-  rewriteHistory?: AgentSpec["rewriteHistory"],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters =
     buildReq(ThinkingLevel.HIGH, "", [], "UTC", undefined),
   disableStreaming?: boolean,
@@ -1633,7 +1540,6 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
           err,
           events,
           eventsToRequest,
-          rewriteHistory,
           disableStreaming,
         );
       }
@@ -1642,7 +1548,6 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
           err,
           events,
           eventsToRequest,
-          rewriteHistory,
           disableStreaming,
         );
       }
@@ -1651,7 +1556,6 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
         err,
         events,
         eventsToRequest,
-        rewriteHistory,
         disableStreaming,
       );
     }
@@ -1675,13 +1579,6 @@ const enhancePrompt = (
   toolOutputScratchPad?: AgentSpec["toolOutputScratchPad"],
 ) => `${prompt}\n\n${systemInstructionTail(toolOutputScratchPad)}`;
 
-// Side-effectful history normalization that MUST run outside the cached
-// `callModel` boundary. Without this, tests replay a populated rmmbr cache
-// and never see the underlying provider call — meaning the `rewriteHistory`
-// calls buried inside the Gemini caller silently skip. The same logic is
-// still applied inside `geminiAgentCaller` for correctness during cache
-// misses / production; the pre-filter here makes those paths idempotent
-// no-ops while guaranteeing the rewrite is persisted on every call.
 // Rehydrates `modelMetadata` on events that lack it (e.g. re-read from Deno
 // KV in prompt2bot, where we strip metadata before write to stay under the
 // 64KB value cap). Events that already carry inline `modelMetadata` are left
@@ -1778,21 +1675,17 @@ const resolveAttachments = async (
   return { updatedHistory, replacements };
 };
 
-export const prepareGeminiHistory =
-  (rewriteHistory?: AgentSpec["rewriteHistory"]) =>
-  async (
-    events: HistoryEventWithMetadata<GeminiMetadata>[],
-  ): Promise<HistoryEventWithMetadata<GeminiMetadata>[]> => {
-    const safeRewrite = rewriteHistory ?? (() => Promise.resolve());
-    const enriched = await enrichGeminiEventsWithMetadata(events);
-    const filtered = await pipe(
-      filterAndRewriteInvalidToolCallsAsync(safeRewrite),
-      filterAndRewriteUnsupportedGeminiAttachments(safeRewrite),
-    )(enriched);
-    const { updatedHistory, replacements } = await resolveAttachments(filtered);
-    if (!empty(Object.keys(replacements))) await safeRewrite(replacements);
-    return updatedHistory;
-  };
+export const prepareGeminiHistory = async (
+  events: HistoryEventWithMetadata<GeminiMetadata>[],
+): Promise<HistoryEventWithMetadata<GeminiMetadata>[]> => {
+  const enriched = await enrichGeminiEventsWithMetadata(events);
+  const filtered = pipe(
+    filterInvalidToolCalls,
+    filterUnsupportedGeminiAttachments,
+  )(enriched);
+  const { updatedHistory } = await resolveAttachments(filtered);
+  return updatedHistory;
+};
 
 const geminiMaxTokensReason = "MAX_TOKENS";
 
@@ -1878,7 +1771,6 @@ const geminiAgentCallerInner = ({
   tools,
   skills,
   allSkills,
-  rewriteHistory = () => Promise.resolve(),
   timezoneIANA,
   maxOutputTokens,
   disableStreaming,
@@ -1896,13 +1788,12 @@ const geminiAgentCallerInner = ({
     ? ""
     : noResponseInstruction;
   return pipe(
-    filterAndRewriteInvalidToolCalls(rewriteHistory),
+    filterInvalidToolCalls,
     filterOrphanedToolResults,
     filterDoNothing,
     filterUnsupportedGeminiAttachments,
     capEventsToTokenBudget(maxHistoryTokens),
     callGeminiWithFixHistory(
-      rewriteHistory,
       buildReq(
         thinkingLevel ?? ThinkingLevel.HIGH,
         `${enhancePrompt(prompt, toolOutputScratchPad)}${silenceLicense}`,

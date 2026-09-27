@@ -1,10 +1,6 @@
 import { participantUtteranceTurn } from "../src/agent.ts";
 import type { AgentSpec } from "../src/agent.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 runForAllProviders(
   "agent leaves globalThis.fetch untouched",
@@ -15,7 +11,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "Reply with exactly: ok",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     const fetchAfter = globalThis.fetch;

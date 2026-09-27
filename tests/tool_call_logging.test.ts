@@ -1,11 +1,6 @@
 import { assert } from "@std/assert";
 import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-  someTool,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders, someTool } from "../test_helpers.ts";
 
 const withCapturedConsoleLog = async <T>(
   fn: () => Promise<T>,
@@ -37,7 +32,6 @@ runForAllProviders(
         maxIterations: 5,
         tools: [someTool],
         prompt: "You are an AI assistant.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       })
     );

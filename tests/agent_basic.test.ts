@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { runAgent } from "../mod.ts";
+import { computeInvalidToolCallReplacements } from "../src/geminiAgent.ts";
 import {
   doNothingEvent,
   forcedStopUtterance,
@@ -10,12 +11,7 @@ import {
   participantUtteranceTurn,
   thinkingTokenExhaustionWarningText,
 } from "../src/agent.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-  someTool,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders, someTool } from "../test_helpers.ts";
 
 runForAllProviders(
   "agent can run when history starts with only a model message",
@@ -24,7 +20,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helper.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -37,7 +32,6 @@ runForAllProviders(
       tools: [],
       prompt: `You are the neighborhood friendly spiderman.`,
       maxIterations: 5,
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -57,7 +51,6 @@ runForAllProviders(
       prompt: "You are a helpful assistant that writes the full alphabet.",
       maxIterations: 1,
       maxOutputTokens: 2,
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     const ownUtterance = mockHistory.find((e) => e.type === "own_utterance");
@@ -85,7 +78,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helper.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -128,7 +120,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [someTool],
       prompt: "You are a helper.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -136,9 +127,9 @@ runForAllProviders(
   true, // Gemini-only: test uses Gemini-specific thoughtSignature metadata
 );
 
-runForAllProviders(
+Deno.test(
   "tool_call with empty thoughtSignature filters out other events from the same responseId",
-  async (runAgent) => {
+  () => {
     let rewriteReplacements: Record<string, HistoryEvent> = {};
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
@@ -180,16 +171,11 @@ runForAllProviders(
       } as HistoryEvent,
     ];
 
-    await agentDeps(mockHistory)(runAgent)({
-      maxIterations: 1,
-      tools: [someTool],
-      prompt: "You are a helper.",
-      rewriteHistory: (replacements) => {
-        rewriteReplacements = replacements;
-        return Promise.resolve();
-      },
-      timezoneIANA: "UTC",
-    });
+    const { replacements } = computeInvalidToolCallReplacements(
+      // deno-lint-ignore no-explicit-any
+      mockHistory as any,
+    );
+    rewriteReplacements = replacements;
 
     assertEquals(Object.keys(rewriteReplacements).length, 3);
     assertEquals(rewriteReplacements["test-id"].type, "own_thought");
@@ -214,8 +200,6 @@ runForAllProviders(
       "The tool returned: tool result",
     );
   },
-  3,
-  true, // Gemini-only: test uses Gemini-specific thoughtSignature metadata
 );
 
 runForAllProviders(
@@ -238,7 +222,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helper.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -247,7 +230,6 @@ runForAllProviders(
 runForAllProviders(
   "handles 403 file permission errors and replaces history items",
   async (runAgent) => {
-    const replacedItems = new Map<string, HistoryEvent>();
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -272,18 +254,6 @@ runForAllProviders(
       maxIterations: 5,
       tools: [],
       prompt: "You are a helpful assistant.",
-      rewriteHistory: (
-        replacements: Record<string, HistoryEvent>,
-      ) => {
-        Object.entries(replacements).forEach(([id, newItem]) => {
-          replacedItems.set(id, newItem);
-          const index = mockHistory.findIndex((e) => e.id === id);
-          if (index !== -1) {
-            mockHistory[index] = newItem;
-          }
-        });
-        return Promise.resolve();
-      },
       timezoneIANA: "UTC",
     });
 
@@ -292,9 +262,8 @@ runForAllProviders(
 );
 
 runForAllProviders(
-  "handles unsupported MIME type by stripping attachment and rewriting history",
+  "handles unsupported MIME type by stripping attachment and succeeding",
   async (runAgent) => {
-    const replacedItems = new Map<string, HistoryEvent>();
     const mockHistory: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -314,30 +283,13 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helpful assistant.",
-      rewriteHistory: (
-        replacements: Record<string, HistoryEvent>,
-      ) => {
-        Object.entries(replacements).forEach(([id, newItem]) => {
-          replacedItems.set(id, newItem);
-          const index = mockHistory.findIndex((e) => e.id === id);
-          if (index !== -1) {
-            mockHistory[index] = newItem;
-          }
-        });
-        return Promise.resolve();
-      },
       timezoneIANA: "UTC",
     });
 
-    assert(replacedItems.size > 0, "rewriteHistory should have been called");
-    const rewritten = [...replacedItems.values()][0];
+    const reply = mockHistory.find((e) => e.type === "own_utterance");
     assert(
-      !("attachments" in rewritten) ||
-        !rewritten.attachments?.some((a) =>
-          a.mimeType ===
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-      "Unsupported attachment should have been stripped from rewritten history",
+      reply !== undefined,
+      "Agent should reply successfully after stripping unsupported MIME type",
     );
   },
   3,
@@ -369,7 +321,6 @@ Deno.test("agent forwards stream chunks fired by callModel", async () => {
         streamedText += chunk;
         chunkCount++;
       },
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   })();
@@ -391,7 +342,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helpful assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -427,7 +377,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helpful assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -456,7 +405,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You are a silent observer in a group chat. You must never respond to messages between other people. Only respond if someone explicitly addresses you by name.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 

@@ -3,11 +3,8 @@ import {
   assertNotEquals,
   assertStringIncludes,
 } from "@std/assert";
-import {
-  getSpillThreshold,
-  type HistoryEvent,
-  runToolResultCompaction,
-} from "../mod.ts";
+import { compactToolResultsInMemory, getSpillThreshold } from "../mod.ts";
+import type { HistoryEvent } from "../src/agent.ts";
 
 Deno.test("continuousCompaction - getSpillThreshold behaves as expected over time", () => {
   const now = Date.now();
@@ -29,20 +26,12 @@ Deno.test("continuousCompaction - getSpillThreshold behaves as expected over tim
   assertEquals(threshold24h, 1500);
 });
 
-Deno.test("continuousCompaction - runToolResultCompaction retroactively compacts old large tool results", async () => {
+Deno.test("continuousCompaction - compactToolResultsInMemory compacts old large tool results in memory", async () => {
   const now = Date.now();
   const scratchStore = new Map<string, string>();
-  const replacements: Record<string, HistoryEvent> = {};
 
   const setScratch = (id: string, content: string): Promise<void> => {
     scratchStore.set(id, content);
-    return Promise.resolve();
-  };
-
-  const rewriteHistory = (
-    reps: Record<string, HistoryEvent>,
-  ): Promise<void> => {
-    Object.assign(replacements, reps);
     return Promise.resolve();
   };
 
@@ -97,22 +86,32 @@ Deno.test("continuousCompaction - runToolResultCompaction retroactively compacts
     },
   ];
 
-  await runToolResultCompaction(
+  const compacted = await compactToolResultsInMemory(
     history,
     { setScratch, generateTLDR: mockGenerateTLDR },
-    rewriteHistory,
   );
 
   // Assertions
   // Recent result should NOT have been modified
-  assertEquals(replacements["recent-result-id"], undefined);
-
-  // Old result SHOULD have been modified
-  assertNotEquals(replacements["old-result-id"], undefined);
-  const updatedOldResult = replacements["old-result-id"] as Extract<
+  const updatedRecentResult = compacted.find((e: HistoryEvent) =>
+    e.id === "recent-result-id"
+  ) as Extract<
     HistoryEvent,
     { type: "tool_result" }
   >;
+  assertEquals(
+    updatedRecentResult.result.startsWith("Success: cached main.ts"),
+    true,
+  );
+
+  // Old result SHOULD have been modified
+  const updatedOldResult = compacted.find((e: HistoryEvent) =>
+    e.id === "old-result-id"
+  ) as Extract<
+    HistoryEvent,
+    { type: "tool_result" }
+  >;
+  assertNotEquals(updatedOldResult, undefined);
 
   assertStringIncludes(
     updatedOldResult.result,
@@ -127,31 +126,29 @@ Deno.test("continuousCompaction - runToolResultCompaction retroactively compacts
     'read_scratch_file` with the ID: "old-result-id"',
   );
 
-  // Verify full content was saved to scratchpad store
+  // Scratchpad must have stored the full original output
+  const spilledContent = scratchStore.get("old-result-id");
+  assertNotEquals(spilledContent, undefined);
   assertEquals(
-    scratchStore.get("old-result-id"),
-    (history[3] as Extract<HistoryEvent, { type: "tool_result" }>).result,
+    spilledContent?.startsWith("Success: revert command executed cleanly\n"),
+    true,
   );
+  assertEquals(spilledContent?.length, 8041);
+
+  // Recent tool result must NOT have been spilled to scratchpad
+  assertEquals(scratchStore.get("recent-result-id"), undefined);
 });
 
-Deno.test("continuousCompaction - produces rich deterministic technical TLDR when generateTLDR is omitted without calling LLM", async () => {
+Deno.test("continuousCompaction - deterministic rich TLDR generation without custom model", async () => {
   const now = Date.now();
   const scratchStore = new Map<string, string>();
-  const replacements: Record<string, HistoryEvent> = {};
 
   const setScratch = (id: string, content: string): Promise<void> => {
     scratchStore.set(id, content);
     return Promise.resolve();
   };
 
-  const rewriteHistory = (
-    reps: Record<string, HistoryEvent>,
-  ): Promise<void> => {
-    Object.assign(replacements, reps);
-    return Promise.resolve();
-  };
-
-  const oldToolCallId = "call-inspect-1";
+  const oldToolCallId = "old-inspect-id";
   const history: HistoryEvent[] = [
     {
       id: oldToolCallId,
@@ -174,13 +171,14 @@ Deno.test("continuousCompaction - produces rich deterministic technical TLDR whe
   ];
 
   // Run compaction WITHOUT passing generateTLDR
-  await runToolResultCompaction(
+  const compacted = await compactToolResultsInMemory(
     history,
     { setScratch },
-    rewriteHistory,
   );
 
-  const updatedResult = replacements["old-inspect-res"] as Extract<
+  const updatedResult = compacted.find((e: HistoryEvent) =>
+    e.id === "old-inspect-res"
+  ) as Extract<
     HistoryEvent,
     { type: "tool_result" }
   >;

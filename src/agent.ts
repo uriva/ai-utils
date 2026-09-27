@@ -13,6 +13,7 @@ import {
 } from "gamla";
 import { z, type ZodType } from "zod/v4";
 import {
+  applyCleanActiveMemoryDirectives,
   cleanActiveMemoryToolRaw,
   defaultSegmentGapMs,
   defaultSettledHistoryTokenThreshold,
@@ -22,10 +23,7 @@ import {
   shouldCompactHistory,
 } from "./compaction.ts";
 import { searchPastHistoryToolRaw } from "./historySearch.ts";
-import {
-  compactToolResultsInMemory,
-  runToolResultCompaction,
-} from "./continuousCompaction.ts";
+import { compactToolResultsInMemory } from "./continuousCompaction.ts";
 import { stripAnsi } from "./utils.ts";
 import { accessGeminiToken } from "./gemini.ts";
 import { genJson } from "./genJson.ts";
@@ -2225,7 +2223,9 @@ export const projectHistoryToModelContext = async ({
   const sanitized = sanitizeWindowBoundary(rawHistory);
   if (empty(sanitized)) return [];
 
-  const segments = segmentHistoryEvents(sanitized, settledGapMs);
+  const cleaned = applyCleanActiveMemoryDirectives(sanitized);
+
+  const segments = segmentHistoryEvents(cleaned, settledGapMs);
   if (empty(segments)) return [];
 
   let projectedEvents = await projectSettledSessions(
@@ -2309,11 +2309,9 @@ export const learnSkillToolName = "learn_skill";
 export const unlearnSkillToolName = "unlearn_skill";
 
 export const cleanActiveMemoryTool = (
-  rewriteHistory: (
-    replacements: Record<string, HistoryEvent>,
-  ) => Promise<void> = () => Promise.resolve(),
+  historyGetter: () => Promise<HistoryEvent[]> = getHistory,
   // deno-lint-ignore no-explicit-any
-): Tool<any> => tool(cleanActiveMemoryToolRaw(rewriteHistory, getHistory));
+): Tool<any> => tool(cleanActiveMemoryToolRaw(historyGetter));
 
 export const searchPastHistoryTool = (
   historyGetter: () => Promise<HistoryEvent[]> = getHistory,
@@ -2343,8 +2341,9 @@ export const tool = <ParametersSchema extends z.ZodObject<z.ZodRawShape>>(
 });
 
 const activeSkillNames = (history: HistoryEvent[]): Set<string> => {
+  const cleaned = applyCleanActiveMemoryDirectives(history);
   const names = new Set<string>();
-  const sortedHistory = [...history].sort((a, b) => a.timestamp - b.timestamp);
+  const sortedHistory = [...cleaned].sort((a, b) => a.timestamp - b.timestamp);
   for (const e of sortedHistory) {
     if (e.type === "tool_call" && e.name === learnSkillToolName) {
       // deno-lint-ignore no-explicit-any
@@ -2665,11 +2664,9 @@ export type AgentSpec = AgentInputs & {
   maxIterations: number;
   disableStreaming?: boolean;
   provider?: "google" | "moonshot" | "anthropic";
-  rewriteHistory?: (
-    replacements: Record<string, HistoryEvent>,
-  ) => Promise<void>;
   compactHistory?: (history: HistoryEvent[]) => Promise<void>;
   historyCompactionTokenThreshold?: number;
+  enableCleanActiveMemory?: boolean;
   enableHistorySearch?: boolean;
   timezoneIANA: string;
   maxOutputTokens?: number;
@@ -2827,8 +2824,8 @@ export const runAbstractAgent = (
     const allTools = [
       ...tools,
       ...(skills && skills.length > 0 ? createSkillTools(skills) : []),
-      ...(spec.rewriteHistory
-        ? [cleanActiveMemoryTool(spec.rewriteHistory)]
+      ...(spec.enableCleanActiveMemory !== false
+        ? [cleanActiveMemoryTool(getHistory)]
         : []),
       ...(spec.enableHistorySearch !== false
         ? [searchPastHistoryTool(getHistory)]
@@ -3002,13 +2999,6 @@ export const runAbstractAgent = (
         retryCounts.doNothing = 0;
 
         const updatedHistory = await getHistory();
-        if (scratchPad && spec.rewriteHistory) {
-          await runToolResultCompaction(
-            updatedHistory,
-            { setScratch: (id, content) => scratchPad.set(id, content) },
-            spec.rewriteHistory,
-          );
-        }
         if (
           !(emitWithDescriptions.some((ev: HistoryEvent) =>
             ev.type === "tool_call"

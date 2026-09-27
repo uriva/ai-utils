@@ -7,7 +7,7 @@ import {
   participantUtteranceTurn,
   toolResultTurn,
 } from "../src/agent.ts";
-import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
+import { agentDeps } from "../test_helpers.ts";
 import { z } from "zod/v4";
 
 // Repro of the prompt2bot builder-bot infinite loop
@@ -84,7 +84,6 @@ Deno.test(
         maxIterations: 1,
         tools: [readConversationTool],
         prompt: "You are a builder assistant.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();

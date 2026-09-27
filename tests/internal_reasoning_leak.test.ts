@@ -6,7 +6,7 @@ import {
   ownUtteranceTurn,
   participantUtteranceTurn,
 } from "../src/agent.ts";
-import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
+import { agentDeps } from "../test_helpers.ts";
 
 // When the model reasons "out loud" it emits the reasoning as the leading
 // visible text part and the actual reply as the final one. Only the reply may
@@ -30,7 +30,6 @@ Deno.test("runAgent delivers only the reply when the model emits leading reasoni
       maxIterations: 1,
       tools: [],
       prompt: "unused",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   })();

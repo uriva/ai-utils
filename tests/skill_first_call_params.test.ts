@@ -14,11 +14,7 @@ import {
   type Skill,
   skillAutoLoadMarker,
 } from "../src/agent.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 // Effect contract for skill tool usage (strategy-agnostic):
 // 1. No parameter validation error ever surfaces to the model, even when its
@@ -93,7 +89,6 @@ const scenarioSpec = (prompt: string) => (skills: Skill[]): AgentSpec => ({
   tools: [],
   skills,
   prompt,
-  rewriteHistory: noopRewriteHistory,
   timezoneIANA: "UTC",
 });
 

@@ -466,8 +466,107 @@ export const projectSettledSessions = async (
   return [...processedSettled.flat(), ...activeSegment.events];
 };
 
+export type CleanMemoryDirective = {
+  toolCallId: string;
+  start: number;
+  end: number;
+  startTimeStr: string;
+  endTimeStr: string;
+  summary?: string;
+  toolCallTimestamp: number;
+};
+
+export const parseCleanMemoryDirectives = (
+  events: HistoryEvent[],
+): CleanMemoryDirective[] => {
+  const directives: CleanMemoryDirective[] = [];
+  for (const event of events) {
+    if (
+      event.type !== "tool_call" || event.name !== cleanActiveMemoryToolName
+    ) {
+      continue;
+    }
+    const resultEvent = events.find(
+      (e): e is Extract<HistoryEvent, { type: "tool_result" }> =>
+        e.type === "tool_result" && e.toolCallId === event.id,
+    );
+    if (!resultEvent || typeof resultEvent.result !== "string") continue;
+    const isSuccess =
+      resultEvent.result.startsWith("Successfully summarized") ||
+      resultEvent.result.startsWith("Successfully deleted");
+    if (!isSuccess) continue;
+
+    // deno-lint-ignore no-explicit-any
+    const params = event.parameters as any;
+    const startStr = typeof params?.start_time === "string"
+      ? params.start_time
+      : "";
+    const endStr = typeof params?.end_time === "string" ? params.end_time : "";
+    const summary = typeof params?.summary === "string" && params.summary.trim()
+      ? params.summary.trim()
+      : undefined;
+
+    const start = Date.parse(startStr);
+    const end = Date.parse(endStr);
+    if (Number.isNaN(start) || Number.isNaN(end) || start > end) continue;
+
+    directives.push({
+      toolCallId: event.id,
+      start,
+      end,
+      startTimeStr: startStr,
+      endTimeStr: endStr,
+      summary,
+      toolCallTimestamp: event.timestamp,
+    });
+  }
+  return directives.sort((a, b) => a.toolCallTimestamp - b.toolCallTimestamp);
+};
+
+const applyOneCleanDirective = (
+  events: HistoryEvent[],
+  directive: CleanMemoryDirective,
+): HistoryEvent[] => {
+  let placedSummary = false;
+  const result: HistoryEvent[] = [];
+  for (const event of events) {
+    const isUserUtterance = event.type === "participant_utterance";
+    const isInSpan = event.timestamp >= directive.start &&
+      event.timestamp <= directive.end;
+    const isPriorToDirective = event.timestamp < directive.toolCallTimestamp;
+    const isTarget = !isUserUtterance &&
+      isInSpan &&
+      isPriorToDirective &&
+      event.id !== directive.toolCallId;
+
+    if (isTarget) {
+      if (directive.summary && !placedSummary) {
+        result.push({
+          id: `clean-summary-${directive.toolCallId}`,
+          type: "own_thought",
+          isOwn: true,
+          text:
+            `[SYSTEM SUMMARY of events from ${directive.startTimeStr} to ${directive.endTimeStr}]: ${directive.summary}`,
+          timestamp: directive.start,
+        });
+        placedSummary = true;
+      }
+      continue;
+    }
+    result.push(event);
+  }
+  return result;
+};
+
+export const applyCleanActiveMemoryDirectives = (
+  events: HistoryEvent[],
+): HistoryEvent[] => {
+  const directives = parseCleanMemoryDirectives(events);
+  if (empty(directives)) return events;
+  return directives.reduce(applyOneCleanDirective, events);
+};
+
 export const cleanActiveMemoryToolRaw = (
-  rewriteHistory: (replacements: Record<string, HistoryEvent>) => Promise<void>,
   getHistory: () => Promise<HistoryEvent[]>,
 ) => ({
   name: cleanActiveMemoryToolName,
@@ -513,7 +612,6 @@ export const cleanActiveMemoryToolRaw = (
       return "Memory cleanup aborted: You cannot delete or summarize user messages (participant_utterance). Only select time spans containing tool results, tool calls, or thoughts.";
     }
 
-    const replacements: Record<string, HistoryEvent> = {};
     const removedSkillNames: string[] = [];
     for (const e of match) {
       if (e.type === "tool_call" && e.name === "learn_skill") {
@@ -527,35 +625,9 @@ export const cleanActiveMemoryToolRaw = (
 
     let resultMsg = "";
     if (summary) {
-      const first = match[0];
-      replacements[first.id] = {
-        id: first.id,
-        type: "own_thought",
-        isOwn: true,
-        text:
-          `[SYSTEM SUMMARY of events from ${start_time} to ${end_time}]: ${summary}`,
-        timestamp: first.timestamp,
-      };
-      for (let j = 1; j < match.length; j++) {
-        const ev = match[j];
-        replacements[ev.id] = {
-          id: ev.id,
-          type: "do_nothing",
-          isOwn: true,
-          timestamp: ev.timestamp,
-        };
-      }
       resultMsg =
         `Successfully summarized ${match.length} events from ${start_time} to ${end_time} with summary: "${summary}"`;
     } else {
-      for (const ev of match) {
-        replacements[ev.id] = {
-          id: ev.id,
-          type: "do_nothing",
-          isOwn: true,
-          timestamp: ev.timestamp,
-        };
-      }
       resultMsg =
         `Successfully deleted ${match.length} events from ${start_time} to ${end_time}.`;
     }
@@ -568,7 +640,6 @@ export const cleanActiveMemoryToolRaw = (
         }. If you still need to use any of these skills, you must call "learn_skill" on them again to reload their tools and instructions.`;
     }
 
-    await rewriteHistory(replacements);
     return resultMsg;
   },
 });

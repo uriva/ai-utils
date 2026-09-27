@@ -19,7 +19,7 @@ import {
   tool,
 } from "../src/agent.ts";
 import type { AgentSpec, Skill } from "../src/agent.ts";
-import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
+import { agentDeps } from "../test_helpers.ts";
 
 const todoWrite = tool({
   name: "todo_write",
@@ -166,7 +166,6 @@ Deno.test("agent-level: a bare skill tool call surfaces the canonical command co
       tools: [],
       skills: [recordingTodoSkill],
       prompt: "You help users manage todos.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     })
   )();
@@ -364,7 +363,6 @@ Deno.test("agent-level: a misrouted skill command executes the target tool and s
       tools: [],
       skills: [fileSkill, recordingTodoSkill],
       prompt: "You help users manage todos.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     })
   )();

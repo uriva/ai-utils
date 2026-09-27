@@ -158,25 +158,3 @@ export const compactToolResultsInMemory = async (
 
   return events.map((e) => replacements.get(e.id) ?? e);
 };
-
-export const runToolResultCompaction = async (
-  events: HistoryEvent[],
-  options: CompactionOptions,
-  rewriteHistory?: (
-    replacements: Record<string, HistoryEvent>,
-  ) => Promise<void>,
-): Promise<void> => {
-  const compacted = await compactToolResultsInMemory(events, options);
-  if (rewriteHistory && compacted !== events) {
-    const replacements: Record<string, HistoryEvent> = {};
-    for (const e of compacted) {
-      const orig = events.find((origE) => origE.id === e.id);
-      if (orig && orig !== e) {
-        replacements[e.id] = e;
-      }
-    }
-    if (Object.keys(replacements).length > 0) {
-      await rewriteHistory(replacements);
-    }
-  }
-};

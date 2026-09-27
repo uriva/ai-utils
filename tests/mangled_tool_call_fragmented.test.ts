@@ -7,7 +7,7 @@ import {
   ownUtteranceTurn,
   participantUtteranceTurn,
 } from "../src/agent.ts";
-import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
+import { agentDeps } from "../test_helpers.ts";
 
 // The model sometimes renders a tool call as visible text, and the provider can
 // deliver that text split across several text parts (thought-signature
@@ -65,7 +65,6 @@ Deno.test(
         maxIterations: 10,
         tools: [readFileTool],
         prompt: "You are a helpful assistant.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();

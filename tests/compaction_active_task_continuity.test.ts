@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { runAgent } from "../mod.ts";
-import { agentDeps, noopRewriteHistory, someTool } from "../test_helpers.ts";
+import { agentDeps, someTool } from "../test_helpers.ts";
 import {
   doNothingEvent,
   type HistoryEvent,
@@ -65,7 +65,6 @@ Deno.test(
         maxIterations: 10,
         tools: [someTool],
         prompt: "You are an automated maintenance assistant.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();

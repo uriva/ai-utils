@@ -11,7 +11,6 @@ import { buildReq } from "../src/geminiAgent.ts";
 import {
   agentDeps,
   b64,
-  noopRewriteHistory,
   recognizedTheDog,
   runForAllProviders,
 } from "../test_helpers.ts";
@@ -44,7 +43,6 @@ runForAllProviders(
       }],
       prompt:
         "You can see raw images returned by tools. Do not call inspect_media_url for inline media; describe the attached image directly.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     assert(
@@ -75,7 +73,6 @@ runForAllProviders(
       maxIterations: 3,
       tools: [],
       prompt: "You can see images attached by the user.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     assert(
@@ -110,7 +107,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You can see images and their captions. Always mention the caption information in your response.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     assert(
@@ -160,7 +156,6 @@ runForAllProviders(
       maxIterations: 3,
       tools: [],
       prompt: "You can see images attached by the user.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -227,7 +222,6 @@ runForAllProviders(
       }],
       prompt:
         "When a tool returns a media URL, call inspect_media_url to look at it before answering.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 

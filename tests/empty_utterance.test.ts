@@ -1,12 +1,7 @@
 import { assert } from "@std/assert";
 import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
 import { formatInternalThought } from "../src/jsonThought.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-  someTool,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders, someTool } from "../test_helpers.ts";
 
 runForAllProviders(
   "agent does not emit own_utterance with empty text",
@@ -25,7 +20,6 @@ runForAllProviders(
         `You are an AI assistant. Always think through your approach before taking action. Use ${
           formatInternalThought("...")
         } to think.`,
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     const emptyUtterances = mockHistory.filter(

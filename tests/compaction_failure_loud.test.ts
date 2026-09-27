@@ -3,7 +3,6 @@ import {
   participantUtteranceTurn,
   scheduleHistoryCompaction,
 } from "../src/agent.ts";
-import { noopRewriteHistory } from "../test_helpers.ts";
 
 // A compaction failure swallowed with console.error lets history grow
 // unbounded while looking healthy in logs, silently multiplying token spend
@@ -23,7 +22,6 @@ Deno.test("scheduleHistoryCompaction surfaces compactHistory failure as an unhan
       tools: [],
       maxIterations: 1,
       timezoneIANA: "UTC",
-      rewriteHistory: noopRewriteHistory,
       compactHistory: () => Promise.reject(compactionError),
       historyCompactionTokenThreshold: 1,
     },
@@ -48,7 +46,6 @@ Deno.test("scheduleHistoryCompaction does not run compaction under the threshold
       tools: [],
       maxIterations: 1,
       timezoneIANA: "UTC",
-      rewriteHistory: noopRewriteHistory,
       compactHistory: () => {
         compacted = true;
         return Promise.resolve();

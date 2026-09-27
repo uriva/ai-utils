@@ -43,26 +43,11 @@ runForAllProviders(
       }),
     ];
 
-    let rewriteHistoryCalled = false;
-    const mockRewriteHistory = (
-      replacements: Record<string, HistoryEvent>,
-    ) => {
-      rewriteHistoryCalled = true;
-      for (const [id, replacement] of Object.entries(replacements)) {
-        const index = mockHistory.findIndex((e) => e.id === id);
-        if (index !== -1) {
-          mockHistory[index] = replacement;
-        }
-      }
-      return Promise.resolve();
-    };
-
     await agentDeps(mockHistory)(runAgentWithProvider)({
       maxIterations: 3,
       tools: [],
       prompt:
         "You are a helpful assistant. If the user sent a corrupted, missing or unsupported file, explain that gracefully and ask them to re-send.",
-      rewriteHistory: mockRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -72,19 +57,6 @@ runForAllProviders(
     } catch {
       // expected on abort
     }
-
-    // Verify rewriteHistory was called and updated the attachment with the placeholder
-    assert(rewriteHistoryCalled, "rewriteHistory should have been called");
-
-    // Verify placeholder is present in the text
-    const updatedUserMsg = mockHistory.find((e) =>
-      e.type === "participant_utterance"
-    );
-    assert(updatedUserMsg, "User message should be in history");
-    assert(
-      updatedUserMsg.text?.includes("corrupted or unsupported"),
-      `User message text should contain the corrupted placeholder. Text: ${updatedUserMsg.text}`,
-    );
 
     // Verify AI replied gracefully about the corrupted/unsupported file
     const aiResponse = mockHistory.find((e) => e.type === "own_utterance");

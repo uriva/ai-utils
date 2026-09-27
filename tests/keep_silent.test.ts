@@ -1,10 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { runAgent } from "../mod.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 import {
   type HistoryEvent,
   injectCallModel,
@@ -46,7 +42,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You are a monitor bot. When you have nothing to say, reply an empty string.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -84,7 +79,6 @@ Deno.test(
         maxIterations: 1,
         tools: [],
         prompt: "unused in fake",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -107,7 +101,6 @@ Deno.test(
         maxIterations: 1,
         tools: [],
         prompt: "unused in fake",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();

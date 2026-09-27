@@ -102,7 +102,6 @@ Deno.test({
           if (event.type === "own_utterance") outputTexts.push(event.text);
           return writeArtifact(event);
         },
-        rewriteHistory: async () => {},
       });
 
       await testEndpoint.sendData({

@@ -19,7 +19,6 @@ import {
 import {
   agentDeps,
   learnedSkillCall,
-  noopRewriteHistory,
   someTool,
   toolResult,
 } from "../test_helpers.ts";
@@ -36,7 +35,6 @@ runForAllProviders(
       maxIterations: 5,
       tools: [someTool],
       prompt: `You are an AI assistant.`,
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     assert(
@@ -65,7 +63,6 @@ runForAllProviders(
       tools: [someTool],
       prompt:
         `You are an AI assistant. Always explain what you're doing before using tools.`,
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     const firstTextIndex = mockHistory.findIndex((event) =>
@@ -107,7 +104,6 @@ runForAllProviders(
       tools: [slowTool],
       prompt:
         "You are an AI assistant. When the user asks for slowTool, call slowTool before answering. If a new user message arrives while a tool is running, respond to that new message on the next iteration.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -198,7 +194,6 @@ Deno.test(
           }],
         }],
         prompt: "You are an AI assistant.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -279,7 +274,6 @@ Deno.test(
           }],
         }],
         prompt: "You are an AI assistant.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -313,7 +307,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You are a helpful but concise assistant. When a conversation has clearly ended (goodbyes exchanged), do not respond further. A thumbs up or similar acknowledgment after goodbyes does not require a response.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     assertEquals(mockHistory[mockHistory.length - 1].type, "do_nothing");
@@ -347,7 +340,6 @@ runForAllProviders(
       tools: [deferredTool],
       prompt:
         "You are an assistant. When asked, call the timeout-wakeup tool with the requested parameters.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     assert(
@@ -393,7 +385,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [someTool],
       prompt: "You are an AI assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -422,7 +413,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [someTool],
       prompt: "You are an AI assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -463,7 +453,6 @@ runForAllProviders(
       tools: [deferredTool],
       prompt:
         "You are an assistant. When asked to wait, call the timeout-wakeup tool.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     assert(
@@ -491,7 +480,6 @@ runForAllProviders(
       tools: [deferredTool],
       prompt:
         "You are a helpful assistant. Always answer the user's latest question.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     const newEvents = mockHistory.slice(beforeLen);
@@ -533,7 +521,6 @@ runForAllProviders(
       maxIterations: 5,
       tools: [searchTool],
       prompt: "You are an AI assistant. Call tools exactly as the user asks.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -620,7 +607,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [someTool],
       prompt: "You are an AI assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -666,7 +652,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [someTool],
       prompt: "You are an AI assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -689,7 +674,6 @@ runForAllProviders(
       tools: [someTool],
       prompt:
         "You are an AI assistant. Before any tool call, first say exactly 'Checking now.' in a normal message, then call the tool.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -742,7 +726,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [someTool],
       prompt: "You are an AI assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -775,7 +758,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [someTool],
       prompt: "You are an AI assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -824,7 +806,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [someTool],
       prompt: "You are an AI assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -881,7 +862,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [someTool],
       prompt: "You are an AI assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   },
@@ -924,7 +904,6 @@ Deno.test(
         maxIterations: 1,
         tools: [testTool],
         prompt: "You are an AI assistant.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -976,7 +955,6 @@ Deno.test(
     const spec = {
       prompt: "Hello",
       tools: [badTool],
-      rewriteHistory: async () => {},
       compactHistory: async () => {},
     };
 

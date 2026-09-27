@@ -7,12 +7,7 @@ import {
   tool,
 } from "../mod.ts";
 import type { HistoryEvent } from "../src/agent.ts";
-import {
-  agentDeps,
-  injectSecrets,
-  noopRewriteHistory,
-  runWithProvider,
-} from "../test_helpers.ts";
+import { agentDeps, injectSecrets, runWithProvider } from "../test_helpers.ts";
 
 const canRunLiveGemini = Deno.env.get("TEST_PROVIDER") === "google" &&
   !!Deno.env.get("GEMINI_API_KEY");
@@ -119,7 +114,6 @@ Deno.test({
       ],
       prompt:
         `You are a web design agent working in a synthetic test project. The project and hotel are fictional. When the user asks whether you are working on the page, continue the work by calling write_landing_page. Do not only send a status update.\n\n${repeatedDesignNotes}`,
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 

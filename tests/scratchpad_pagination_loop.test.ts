@@ -11,7 +11,7 @@ import {
   type ToolOutputScratchPad,
 } from "../src/agent.ts";
 import { compactToolResultsInMemory } from "../src/continuousCompaction.ts";
-import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
+import { agentDeps } from "../test_helpers.ts";
 import { pipe } from "gamla";
 
 Deno.test(
@@ -261,7 +261,6 @@ Deno.test(
         maxIterations: 8,
         tools: [searchTool, dummyTool],
         prompt: "You are an events assistant.",
-        rewriteHistory: noopRewriteHistory,
         toolOutputScratchPad: scratchPad,
         timezoneIANA: "UTC",
       });

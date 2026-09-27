@@ -723,7 +723,6 @@ const callAnthropic = async (
 };
 
 const callAnthropicWithFixHistory = (
-  _rewriteHistory: AgentSpec["rewriteHistory"],
   eventsToRequest: BuildReqFn,
   disableStreaming?: boolean,
 ) =>
@@ -830,7 +829,6 @@ export const anthropicAgentCaller = ({
   tools,
   skills,
   allSkills,
-  rewriteHistory,
   timezoneIANA,
   maxOutputTokens,
   disableStreaming,
@@ -843,7 +841,6 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicHistoryEvent[]> => {
   ].join("\n\n");
 
   const anthropicOutput = await callAnthropicWithFixHistory(
-    rewriteHistory,
     buildReq(
       enhancedPrompt,
       tools,

@@ -8,7 +8,7 @@ import {
 } from "../src/agent.ts";
 import { injectDecisionModel } from "../src/decisionModel.ts";
 import { injectJevToken } from "../src/jev.ts";
-import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
+import { agentDeps } from "../test_helpers.ts";
 
 Deno.test(
   "hallucination gate - intercepts off-topic utterance and re-invokes model with correctional thought",
@@ -63,7 +63,6 @@ Deno.test(
           maxIterations: 3,
           prompt: "You are a travel assistant.",
           tools: [],
-          rewriteHistory: noopRewriteHistory,
           timezoneIANA: "UTC",
         });
       }),
@@ -130,7 +129,6 @@ Deno.test(
           maxIterations: 3,
           prompt: "You are a travel assistant.",
           tools: [],
-          rewriteHistory: noopRewriteHistory,
           timezoneIANA: "UTC",
         });
       }),

@@ -550,7 +550,6 @@ const callKimi = async (
 };
 
 const callKimiWithFixHistory = (
-  _rewriteHistory: AgentSpec["rewriteHistory"],
   eventsToRequest: BuildReqFn,
   disableStreaming?: boolean,
 ) =>
@@ -647,7 +646,6 @@ export const kimiAgentCaller = ({
   tools,
   skills,
   allSkills,
-  rewriteHistory,
   timezoneIANA,
   maxOutputTokens,
   disableStreaming,
@@ -660,7 +658,6 @@ async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
   ].join("\n\n");
 
   const kimiOutput = await callKimiWithFixHistory(
-    rewriteHistory,
     buildReq(
       enhancedPrompt,
       tools,

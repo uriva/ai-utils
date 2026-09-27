@@ -1,9 +1,5 @@
 import { assertEquals } from "@std/assert";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 import {
   type HistoryEvent,
   participantUtteranceTurn,
@@ -37,7 +33,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You are a specialized movie scene finder bot. If the user asks if you are done or ready, and you are still active, reply saying you are active and ready to help. But if you have already stopped, output exactly [no response] and nothing else.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 

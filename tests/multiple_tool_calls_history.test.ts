@@ -1,10 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import type { HistoryEvent } from "../src/agent.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 const createHistoryWithMultipleToolCalls = (): HistoryEvent[] => [
   {
@@ -87,7 +83,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You are a helpful assistant. Respond to the user with a natural, helpful message.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 

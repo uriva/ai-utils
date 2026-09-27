@@ -60,7 +60,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You are a helpful assistant. Answer the user's question using the information available in the conversation history.",
-      rewriteHistory: () => Promise.resolve(),
       timezoneIANA: "UTC",
     });
 

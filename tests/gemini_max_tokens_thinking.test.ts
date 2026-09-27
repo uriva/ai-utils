@@ -60,7 +60,6 @@ Deno.test(
       maxIterations: 5,
       tools: [],
       prompt: "You are a coding assistant.",
-      rewriteHistory: () => Promise.resolve(),
       timezoneIANA: "UTC",
     });
 
@@ -109,7 +108,6 @@ Deno.test(
       maxIterations: 5,
       tools: [],
       prompt: "You are a coding assistant.",
-      rewriteHistory: () => Promise.resolve(),
       timezoneIANA: "UTC",
     });
 

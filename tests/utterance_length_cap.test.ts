@@ -7,7 +7,7 @@ import {
   ownUtteranceTurn,
   participantUtteranceTurn,
 } from "../src/agent.ts";
-import { agentDeps, noopRewriteHistory } from "../test_helpers.ts";
+import { agentDeps } from "../test_helpers.ts";
 
 // Provider-agnostic: enforces the runAbstractAgent invariant that any
 // own_utterance emitted to the outside world fits within the protocol cap
@@ -38,7 +38,6 @@ Deno.test(
         maxIterations: 1,
         tools: [],
         prompt: "unused in fake",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();

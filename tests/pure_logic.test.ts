@@ -29,7 +29,7 @@ import {
 } from "../src/agent.ts";
 import {
   buildReq,
-  filterAndRewriteInvalidToolCalls,
+  computeInvalidToolCallReplacements,
   filterOrphanedToolResults,
   geminiMalformedFunctionCallError,
   geminiOutputToHistoryEvents,
@@ -283,7 +283,6 @@ Deno.test(
           tools: [testSkillTool],
         }],
         prompt: "test",
-        rewriteHistory: async () => {},
         timezoneIANA: "UTC",
       },
       mockCallModel,
@@ -345,7 +344,6 @@ Deno.test(
           tools: [testSkillTool],
         }],
         prompt: "test",
-        rewriteHistory: async () => {},
         timezoneIANA: "UTC",
       },
       mockCallModel,
@@ -405,27 +403,22 @@ Deno.test("stripEmbeddedThoughtPatterns returns empty for empty JSON thought pre
 });
 
 Deno.test("invalid Gemini tool calls rewrite to useful thoughts without internals", () => {
-  const replacements: Record<string, HistoryEvent> = {};
-  const filter = filterAndRewriteInvalidToolCalls((r) => {
-    Object.assign(replacements, r);
-    return Promise.resolve();
-  });
-  const history: Parameters<typeof filter>[0] = [
+  const history = [
     {
-      type: "tool_call",
+      type: "tool_call" as const,
       isOwn: true,
       id: "call-id",
       timestamp: 1,
       name: "run_command",
       parameters: { command: "x", params: { query: "abc" } },
       modelMetadata: {
-        type: "gemini",
+        type: "gemini" as const,
         responseId: "resp",
         thoughtSignature: "",
       },
     },
     {
-      type: "tool_result",
+      type: "tool_result" as const,
       isOwn: true,
       id: "result-id",
       timestamp: 2,
@@ -434,7 +427,10 @@ Deno.test("invalid Gemini tool calls rewrite to useful thoughts without internal
     },
   ];
 
-  const filtered = filter(history);
+  const { filtered, replacements } = computeInvalidToolCallReplacements(
+    // deno-lint-ignore no-explicit-any
+    history as any,
+  );
 
   assertEquals(filtered.length, 0);
   assertEquals(replacements["call-id"].type, "own_thought");
@@ -473,39 +469,34 @@ Deno.test(
 Deno.test(
   "filterAndRewriteInvalidToolCalls preserves tool_call when sibling thought in same response has thoughtSignature",
   () => {
-    const replacements: Record<string, HistoryEvent> = {};
-    const filter = filterAndRewriteInvalidToolCalls((r) => {
-      Object.assign(replacements, r);
-      return Promise.resolve();
-    });
-    const history: Parameters<typeof filter>[0] = [
+    const history = [
       {
-        type: "own_thought",
+        type: "own_thought" as const,
         isOwn: true,
         id: "thought-id",
         timestamp: 1,
         text: "Thinking...",
         modelMetadata: {
-          type: "gemini",
+          type: "gemini" as const,
           responseId: "resp-1",
           thoughtSignature: "sig-from-thought",
         },
       },
       {
-        type: "tool_call",
+        type: "tool_call" as const,
         isOwn: true,
         id: "call-id",
         timestamp: 1,
         name: "run_command",
         parameters: { command: "x" },
         modelMetadata: {
-          type: "gemini",
+          type: "gemini" as const,
           responseId: "resp-1",
           thoughtSignature: "",
         },
       },
       {
-        type: "tool_result",
+        type: "tool_result" as const,
         isOwn: true,
         id: "result-id",
         timestamp: 2,
@@ -514,7 +505,10 @@ Deno.test(
       },
     ];
 
-    const filtered = filter(history);
+    const { filtered, replacements } = computeInvalidToolCallReplacements(
+      // deno-lint-ignore no-explicit-any
+      history as any,
+    );
     assertEquals(filtered.length, 3);
     assertEquals(Object.keys(replacements).length, 0);
   },
@@ -678,7 +672,6 @@ Deno.test(
             maxIterations: 10,
             tools: [],
             prompt: "test",
-            rewriteHistory: async () => {},
             timezoneIANA: "UTC",
           },
           mockCallModel,
@@ -728,7 +721,6 @@ Deno.test(
         maxIterations: 10,
         tools: [],
         prompt: "test",
-        rewriteHistory: async () => {},
         timezoneIANA: "UTC",
       },
       mockCallModel,
@@ -884,7 +876,6 @@ Deno.test(
             maxIterations: 10,
             tools: [],
             prompt: "test",
-            rewriteHistory: async () => {},
             timezoneIANA: "UTC",
           },
           mockCallModel,
@@ -934,7 +925,6 @@ Deno.test(
         maxIterations: 10,
         tools: [],
         prompt: "test",
-        rewriteHistory: async () => {},
         timezoneIANA: "UTC",
       },
       mockCallModel,
@@ -986,7 +976,6 @@ Deno.test(
         maxIterations: 5,
         tools: [],
         prompt: "test",
-        rewriteHistory: async () => {},
         timezoneIANA: "UTC",
       },
       mockCallModel,
@@ -1045,7 +1034,6 @@ Deno.test(
         maxIterations: 5,
         tools: [],
         prompt: "test",
-        rewriteHistory: async () => {},
         timezoneIANA: "UTC",
       },
       mockCallModel,
@@ -1091,7 +1079,6 @@ Deno.test(
         maxIterations: 2,
         tools: [],
         prompt: "test",
-        rewriteHistory: async () => {},
         timezoneIANA: "UTC",
       },
       mockCallModel,
@@ -1132,7 +1119,6 @@ Deno.test(
         maxIterations: 5,
         tools: [],
         prompt: "test",
-        rewriteHistory: async () => {},
         timezoneIANA: "UTC",
       },
       mockCallModel,
@@ -1172,7 +1158,6 @@ Deno.test(
         maxIterations: 5,
         tools: [],
         prompt: "test",
-        rewriteHistory: async () => {},
         timezoneIANA: "UTC",
       },
       mockCallModel,
@@ -1463,8 +1448,6 @@ Deno.test({
     tools: [],
     skills: [],
     maxIterations: 5,
-    rewriteHistory: (_replacements: Record<string, HistoryEvent>) =>
-      Promise.resolve(),
     timezoneIANA: "UTC",
   };
 

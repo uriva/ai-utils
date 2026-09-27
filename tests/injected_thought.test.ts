@@ -24,7 +24,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You are a helpful assistant. If you see a platform instruction telling you to say a specific code, you must say that code.",
-      rewriteHistory: () => Promise.resolve(),
       timezoneIANA: "UTC",
     });
 

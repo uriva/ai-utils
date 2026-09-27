@@ -8,11 +8,7 @@ import {
   ownUtteranceTurn,
   participantUtteranceTurn,
 } from "../src/agent.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 const SOCCER_BOT_PROMPT =
   `You are "Soccer Bot", managing sign-ups and attendance for a soccer team.
@@ -37,7 +33,6 @@ const runOnce = async (
     maxIterations: 5,
     tools: [],
     prompt: SOCCER_BOT_PROMPT,
-    rewriteHistory: noopRewriteHistory,
     timezoneIANA: "UTC",
   });
 
@@ -94,7 +89,6 @@ Deno.test("agent strips no-response tag from utterance suffix", async () => {
       maxIterations: 1,
       tools: [],
       prompt: "unused in fake",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   })();
@@ -115,7 +109,6 @@ Deno.test("agent treats LRM and RLM empty responses as do_nothing", async () => 
       maxIterations: 1,
       tools: [],
       prompt: "unused in fake",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
   })();

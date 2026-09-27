@@ -5,11 +5,7 @@ import {
   participantUtteranceTurn,
   tool,
 } from "../../src/agent.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-} from "../../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../../test_helpers.ts";
 import {
   appendEvalRecord,
   currentProvider,
@@ -43,7 +39,6 @@ runForAllProviders(
         "You are a grocery shopping assistant.",
         "When a user asks about multiple items, fetch all of them concurrently in the same turn.",
       ].join(" "),
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     const toolCalls = mockHistory.filter((e) => e.type === "tool_call");

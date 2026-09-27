@@ -17,7 +17,6 @@ import {
   agentDeps,
   learnedSkillCall,
   multiplication,
-  noopRewriteHistory,
   runForAllProviders,
   weatherSkill,
 } from "../test_helpers.ts";
@@ -41,7 +40,6 @@ runForAllProviders(
       }],
       prompt:
         "You are a math assistant. Use the available skill tools to answer questions.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -76,7 +74,6 @@ runForAllProviders(
       tools: [],
       skills: [weatherSkill],
       prompt: "You are a helpful assistant.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -113,7 +110,6 @@ runForAllProviders(
       skills: [localWeatherSkill],
       prompt:
         `You are a helpful assistant. When asked about skills, use ${learnSkillToolName} to get information.`,
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -184,7 +180,6 @@ Deno.test(
         tools: [],
         skills: [calendarSkill],
         prompt: "unused in fake",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -250,7 +245,6 @@ Deno.test(
         tools: [realTool],
         skills: [calendarSkill],
         prompt: "unused in fake",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -314,7 +308,6 @@ Deno.test(
         tools: [],
         skills: [calendarSkill],
         prompt: "unused",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -377,7 +370,6 @@ Deno.test(
         tools: [],
         skills: [calendarSkill],
         prompt: "unused",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -472,7 +464,6 @@ runForAllProviders(
       skills: [skillTool],
       prompt:
         "You are a helpful assistant. You have a regular tool called regularTool and a skill called skillset. Use both when asked.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 

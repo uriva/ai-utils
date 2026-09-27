@@ -37,7 +37,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [doNothingTool],
       prompt: "You are a helpful assistant.",
-      rewriteHistory: () => Promise.resolve(),
       timezoneIANA: "UTC",
     });
 

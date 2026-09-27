@@ -8,11 +8,7 @@ import {
   toolResultTurn,
   toolUseTurn,
 } from "../mod.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 const saveError = "Error: Malformed JSON in request body.";
 
@@ -84,7 +80,6 @@ const singleAttempt = async (
     timezoneIANA: "Asia/Jerusalem",
     prompt: syncPrompt,
     tools: [fetchRemoteItemsTool, saveItemsTool],
-    rewriteHistory: noopRewriteHistory,
   });
   const newEvents = history.slice(initialLength);
   const saveAttempted = newEvents.some((e) =>

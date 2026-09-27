@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { runAgent } from "../mod.ts";
-import { agentDeps, noopRewriteHistory, someTool } from "../test_helpers.ts";
+import { agentDeps, someTool } from "../test_helpers.ts";
 import {
   doNothingEvent,
   doNothingToolName,
@@ -50,7 +50,6 @@ Deno.test(
         maxIterations: 10,
         tools: [someTool],
         prompt: "You are an agent builder.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -98,7 +97,6 @@ Deno.test(
         maxIterations: 10,
         tools: [someTool],
         prompt: "You are a helpful assistant.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -167,7 +165,6 @@ Deno.test(
         tools: [someTool],
         prompt:
           "You check emails. If user asks to stay silent when no emails, call do_nothing.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -222,7 +219,6 @@ Deno.test(
         tools: [someTool],
         prompt:
           "You check emails. If user asks to stay silent when no emails, stay silent.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();

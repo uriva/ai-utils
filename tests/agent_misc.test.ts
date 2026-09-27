@@ -8,11 +8,7 @@ import {
   overrideTime,
   participantUtteranceTurn,
 } from "../src/agent.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 runForAllProviders(
   "returns valid result for hello schema",
@@ -62,7 +58,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You are an AI that strictly follows formatting instructions. When asked to list speakers, reply exactly as instructed without extra text.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -96,7 +91,6 @@ runForAllProviders(
         tools: [],
         prompt:
           "You are a helpful assistant. When asked about the time, look at the timestamp shown in brackets before the user's message.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "America/New_York",
       });
 

@@ -2,11 +2,7 @@ import { assert } from "@std/assert";
 import { z } from "zod/v4";
 import { tool } from "../mod.ts";
 import type { HistoryEvent } from "../src/agent.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 // Gemini-specific: thoughtSignature is a Gemini concept. The bug this test
 // reproduces is that `geminiOutputPartToHistoryEvent` emits tool_call events
@@ -39,7 +35,6 @@ runForAllProviders(
       tools: [weatherTool],
       prompt:
         "You are a helpful assistant. You MUST use the provided tools to answer questions about the weather — never guess. When asked about weather, always call get_weather with the city.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 

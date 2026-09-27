@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { pipe } from "gamla";
 import { runAgent } from "../mod.ts";
-import { agentDeps, noopRewriteHistory, someTool } from "../test_helpers.ts";
+import { agentDeps, someTool } from "../test_helpers.ts";
 import {
   type HistoryEvent,
   injectCallModel,
@@ -84,7 +84,6 @@ Deno.test(
         maxIterations: 5,
         tools: [someTool],
         prompt: "You are a helpful assistant.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
       });
     })();
@@ -170,7 +169,6 @@ Deno.test(
         maxIterations: 5,
         tools: [someTool],
         prompt: "You are a helpful assistant.",
-        rewriteHistory: noopRewriteHistory,
         timezoneIANA: "UTC",
         historyCompactionTokenThreshold: 50_000, // Explicitly higher than the ~20k tokens in history
       });

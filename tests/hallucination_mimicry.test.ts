@@ -82,7 +82,6 @@ runForAllProviders(
         "You are a helpful video assistant. You use the download_video tool to get clips. " +
         "After calling the tool, you MUST wait for the system to notify you when the download completes. " +
         "Never fabricate URLs or pretend a download completed.",
-      rewriteHistory: async () => {},
       timezoneIANA: "UTC",
     });
 

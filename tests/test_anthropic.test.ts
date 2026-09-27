@@ -3,7 +3,6 @@ import { type HistoryEvent, participantUtteranceTurn } from "../src/agent.ts";
 import {
   agentDeps,
   findTextualAnswer,
-  noopRewriteHistory,
   runForAllProviders,
 } from "../test_helpers.ts";
 
@@ -21,7 +20,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helpful assistant. Answer briefly.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -48,7 +46,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helpful assistant. Think carefully before answering.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
       maxOutputTokens: 2048,
     });
@@ -76,7 +73,6 @@ runForAllProviders(
       maxIterations: 1,
       tools: [],
       prompt: "You are a helpful assistant. Think carefully before answering.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
       maxOutputTokens: 4000,
     });

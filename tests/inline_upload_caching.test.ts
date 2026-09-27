@@ -11,7 +11,6 @@ import {
   agentDeps,
   b64,
   injectSecrets,
-  noopRewriteHistory,
   runWithProvider,
 } from "../test_helpers.ts";
 
@@ -57,7 +56,6 @@ const baseSpec = (): Omit<AgentSpec, "provider"> => ({
     },
   ],
   prompt: "You can see images attached by the user. Reply briefly.",
-  rewriteHistory: noopRewriteHistory,
   timezoneIANA: "UTC",
 });
 

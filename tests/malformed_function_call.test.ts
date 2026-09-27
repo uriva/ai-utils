@@ -90,7 +90,6 @@ Deno.test("MALFORMED_FUNCTION_CALL with garbage parts is retried, not leaked to 
     maxIterations: 5,
     tools: [updateUserField],
     prompt: "You are a nutrition assistant.",
-    rewriteHistory: () => Promise.resolve(),
     timezoneIANA: "UTC",
   });
 

@@ -5,11 +5,7 @@ import {
   participantUtteranceTurn,
   safetyWarningText,
 } from "../mod.ts";
-import {
-  agentDeps,
-  noopRewriteHistory,
-  runForAllProviders,
-} from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 runForAllProviders(
   "agent handles reaction event on message with strong language without triggering safety refusal",
@@ -35,7 +31,6 @@ runForAllProviders(
       tools: [],
       prompt: "You are a friendly search assistant.",
       maxIterations: 2,
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 
@@ -62,7 +57,6 @@ runForAllProviders(
       prompt:
         "You are a movie scene search bot. Search for requested scenes or converse naturally.",
       maxIterations: 2,
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
 

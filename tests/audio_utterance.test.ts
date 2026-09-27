@@ -68,7 +68,6 @@ Deno.test({
         outputEvents.push(event);
         return Promise.resolve();
       },
-      rewriteHistory: async () => {},
     });
 
     await testEndpoint.sendData({
@@ -148,7 +147,6 @@ Deno.test({
         outputEvents.push(event);
         return Promise.resolve();
       },
-      rewriteHistory: async () => {},
     });
 
     await testEndpoint.sendData({
@@ -229,7 +227,6 @@ Deno.test({
         outputEvents.push(event);
         return Promise.resolve();
       },
-      rewriteHistory: async () => {},
     });
 
     await testEndpoint.sendData({
@@ -326,7 +323,6 @@ const runTwoBotExchange = async (): Promise<
       aliceEvents.push(event);
       return Promise.resolve();
     },
-    rewriteHistory: async () => {},
   });
 
   const bobTask = runAgent({
@@ -345,7 +341,6 @@ const runTwoBotExchange = async (): Promise<
       bobEvents.push(event);
       return Promise.resolve();
     },
-    rewriteHistory: async () => {},
   });
 
   const aliceSpoke = () => aliceEvents.some((e) => e.type === "own_utterance");
@@ -646,7 +641,6 @@ Deno.test({
         outputEvents.push(event);
         return Promise.resolve();
       },
-      rewriteHistory: async () => {},
     });
 
     await testEndpoint.sendData({
@@ -737,7 +731,6 @@ Deno.test({
           outputEvents.push(event);
           return Promise.resolve();
         },
-        rewriteHistory: async () => {},
       });
 
       await testEndpoint.sendData({
@@ -803,7 +796,6 @@ Deno.test({
           outputEvents.push(event);
           return Promise.resolve();
         },
-        rewriteHistory: async () => {},
       });
 
       await testEndpoint.sendData({

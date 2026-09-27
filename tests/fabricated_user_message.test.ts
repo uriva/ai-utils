@@ -43,7 +43,6 @@ runForAllProviders(
       prompt:
         "You are a sales assistant for a home appliance store. Continue the conversation naturally in English. " +
         "The customer is asking about ovens. Be helpful and provide recommendations.",
-      rewriteHistory: async () => {},
       timezoneIANA: "Asia/Jerusalem",
     });
 

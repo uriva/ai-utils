@@ -7,7 +7,6 @@ import {
 import {
   agentDeps,
   b64,
-  noopRewriteHistory,
   recognizedTheDog,
   runForAllProviders,
 } from "../test_helpers.ts";
@@ -30,7 +29,6 @@ runForAllProviders(
       tools: [],
       prompt:
         "You can see images attached alongside internal thoughts. Describe what you see.",
-      rewriteHistory: noopRewriteHistory,
       timezoneIANA: "UTC",
     });
     assert(

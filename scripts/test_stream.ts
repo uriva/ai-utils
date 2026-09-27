@@ -14,7 +14,6 @@ const runner = injectGeminiToken(Deno.env.get("GEMINI_API_KEY")!)(
         return Promise.resolve();
       },
       maxIterations: 1,
-      rewriteHistory: () => Promise.resolve(),
       timezoneIANA: "UTC",
     })
   ),

@@ -37,11 +37,8 @@ const providerCaller = (spec: AgentSpecForTurn): CallModel => {
 };
 
 // Provider-specific pre-filter that runs OUTSIDE the cached `callModel`
-// boundary. Any history normalization that has an observable side effect
-// (e.g. `rewriteHistory`) must live here — otherwise cached test runs replay
-// the cache and skip the side effect entirely. Inside the provider caller
-// the same filters still run for correctness; the duplication is an
-// idempotent no-op on an already-prepared history.
+// boundary. Inside the provider caller the same filters still run for correctness;
+// the duplication is an idempotent no-op on an already-prepared history.
 // deno-lint-ignore no-explicit-any
 const widenPrepare = (fn: (events: any) => Promise<any>) =>
   fn as (events: HistoryEvent[]) => Promise<HistoryEvent[]>;
@@ -51,7 +48,7 @@ const prepareHistory =
     if (spec.provider === "moonshot" || spec.provider === "anthropic") {
       return Promise.resolve(events);
     }
-    return widenPrepare(prepareGeminiHistory(spec.rewriteHistory))(events);
+    return widenPrepare(prepareGeminiHistory)(events);
   };
 
 // Picks the CallModel to use for this agent run.
@@ -208,6 +205,7 @@ export {
 export { injectAnthropicToken } from "./src/anthropicAgent.ts";
 export { injectCacher } from "./src/cacher.ts";
 export {
+  applyCleanActiveMemoryDirectives,
   compactionRetentionTokens,
   eventsToPlainText,
   eventToPlainText,
@@ -219,9 +217,9 @@ export {
   summarizeSegmentToHistoryEvent,
 } from "./src/compaction.ts";
 export {
+  compactToolResultsInMemory,
   defaultDeterministicTLDR,
   getSpillThreshold,
-  runToolResultCompaction,
 } from "./src/continuousCompaction.ts";
 export { createDuplexPair, type DuplexMessage } from "./src/duplex.ts";
 export {
