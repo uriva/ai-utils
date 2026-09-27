@@ -691,6 +691,15 @@ export const runAudioAgentLoop = async (
           }).catch(() => {});
         } else if (message.type === "text") {
           state.session.sendText(message.text).catch(() => {});
+        } else if (message.type === "flush") {
+          if (audioInputBuffer.length > 0) {
+            state.session.streamAudioChunks([{
+              mimeType: "audio/pcm;rate=16000",
+              dataBase64: bytesToBase64(audioInputBuffer),
+            }]);
+            audioInputBuffer = new Uint8Array(0);
+          }
+          state.session.commitTurn();
         } else if (message.type === "audio") {
           if (!loggedFirstAudioIn) {
             loggedFirstAudioIn = true;

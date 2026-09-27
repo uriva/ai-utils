@@ -510,7 +510,11 @@ export const createAudioSession = async ({
       }
     },
     commitTurn: () => {
-      // Gemini Live natively detects turn completion via server-side VAD
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          clientContent: { turnComplete: true },
+        }));
+      }
     },
     continueTurn: async () => {
       if (!activeTurn) return [];
