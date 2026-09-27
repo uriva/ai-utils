@@ -189,7 +189,9 @@ export {
   searchPastHistoryTool,
   type Skill,
   skillAutoLoadMarker,
+  skillLearnedSuccessMessage,
   skillLoadedResultText,
+  skillUnlearnedSuccessMessage,
   stopThoughtPrefix,
   systemNotificationPrefix,
   thinkingTokenExhaustionWarningText,
@@ -295,6 +297,7 @@ export { injectKimiToken, kimiGenJsonFromConvo } from "./src/kimiJson.ts";
 export {
   accessJevToken,
   callJevDecisionModel,
+  decideSkillsWithJev,
   formatAgentStateForJev,
   injectJevToken,
   jevApiUrl,

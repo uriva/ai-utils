@@ -44,6 +44,7 @@ import {
   stripJsonThought,
 } from "./jsonThought.ts";
 import { isDecisionModelInjected } from "./decisionModel.ts";
+import { decideSkillsWithJev } from "./jev.ts";
 import {
   auditUtteranceForHallucination,
   hallucinationCorrectionText,
@@ -2541,7 +2542,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
           }
         }
 
-        return `Skill "${skill.name}" learned successfully. Its tools and instructions are now active and available in your system prompt and tools.`;
+        return skillLearnedSuccessMessage(skill.name);
       },
     }),
     tool({
@@ -2555,12 +2556,74 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         ),
       }),
       handler: ({ skillName, spinnerText: _spinnerText }) => {
-        return Promise.resolve(
-          `Successfully deactivated/unlearned the skill "${skillName}". Its tools have been removed from your active context.`,
-        );
+        return Promise.resolve(skillUnlearnedSuccessMessage(skillName));
       },
     }),
   ];
+};
+
+export const skillLearnedSuccessMessage = (skillName: string): string =>
+  `Skill "${skillName}" learned successfully. Its tools and instructions are now active and available in your system prompt and tools.`;
+
+export const skillUnlearnedSuccessMessage = (skillName: string): string =>
+  `Successfully deactivated/unlearned the skill "${skillName}". Its tools have been removed from your active context.`;
+
+const adjustActiveSkillsWithJev = async (
+  prompt: string,
+  skills: Skill[],
+): Promise<void> => {
+  const history = await getHistory();
+  const activeNames = activeSkillNames(history);
+  const { toLearn, toUnlearn } = await decideSkillsWithJev(
+    prompt,
+    history,
+    skills,
+    activeNames,
+  );
+  for (const skill of toLearn) {
+    const callId = `auto-learn-${generateId()}`;
+    await outputEvent({
+      id: callId,
+      timestamp: Date.now(),
+      type: "tool_call",
+      isOwn: true,
+      name: learnSkillToolName,
+      parameters: {
+        skillName: skill.name,
+        spinnerText: `Loading ${skill.name}...`,
+      },
+    });
+    await outputEvent({
+      id: `${callId}-result`,
+      timestamp: Date.now(),
+      toolCallId: callId,
+      type: "tool_result",
+      isOwn: true,
+      result: skillLearnedSuccessMessage(skill.name),
+    });
+  }
+  for (const skill of toUnlearn) {
+    const callId = `auto-unlearn-${generateId()}`;
+    await outputEvent({
+      id: callId,
+      timestamp: Date.now(),
+      type: "tool_call",
+      isOwn: true,
+      name: unlearnSkillToolName,
+      parameters: {
+        skillName: skill.name,
+        spinnerText: `Deactivating ${skill.name}...`,
+      },
+    });
+    await outputEvent({
+      id: `${callId}-result`,
+      timestamp: Date.now(),
+      toolCallId: callId,
+      type: "tool_result",
+      isOwn: true,
+      result: skillUnlearnedSuccessMessage(skill.name),
+    });
+  }
 };
 
 export const resolveToolDescription = (
@@ -2787,6 +2850,12 @@ export const runAbstractAgent = (
       c++;
       if (c > 200) {
         throw new Error("Agent turn limit safety threshold (200) exceeded.");
+      }
+      if (
+        c === 1 && skillsArr.length > 0 &&
+        (!isMockModelInjected() || isDecisionModelInjected())
+      ) {
+        await adjustActiveSkillsWithJev(spec.prompt, skillsArr);
       }
       const history = await getHistory();
       let normalizedHistory = await projectModelContext(

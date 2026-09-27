@@ -1,8 +1,17 @@
 import { context, type Injection, type Injector } from "@uri/inject";
 import { cache } from "rmmbr";
-import type { HistoryEvent } from "./agent.ts";
+import type { HistoryEvent, Skill } from "./agent.ts";
 import { makeCache } from "./cacher.ts";
-import type { DecisionAnswer, DecisionQuestion } from "./decisionModel.ts";
+import {
+  callDecisionModel,
+  type DecisionAnswer,
+  type DecisionQuestion,
+  isDecisionModelInjected,
+} from "./decisionModel.ts";
+import {
+  lastParticipantUtterance,
+  verifiedToolFacts,
+} from "./hallucinationGate.ts";
 import type { ModelTier } from "./utils.ts";
 
 export const jevApiUrl = "https://api.typesafe.ai/v1/systemone";
@@ -231,4 +240,91 @@ export const callJevDecisionModel = async (
     expiresAt: Date.now() + memoryTtlMs,
   });
   return answers;
+};
+
+export const decideSkillsWithJev = async (
+  prompt: string,
+  history: HistoryEvent[],
+  candidateSkills: Skill[],
+  currentlyActiveSkills: Set<string>,
+): Promise<{ toLearn: Skill[]; toUnlearn: Skill[] }> => {
+  const token = accessJevToken();
+  if (!token && !isDecisionModelInjected()) {
+    return { toLearn: [], toUnlearn: [] };
+  }
+  if (candidateSkills.length === 0) {
+    return { toLearn: [], toUnlearn: [] };
+  }
+  const lastUser = lastParticipantUtterance(history);
+  if (!lastUser || typeof lastUser.text !== "string" || !lastUser.text.trim()) {
+    return { toLearn: [], toUnlearn: [] };
+  }
+
+  const recentDialogue = history
+    .filter((e) =>
+      e.type === "participant_utterance" || e.type === "own_utterance"
+    )
+    .slice(-4)
+    .map((e) =>
+      `${e.type === "participant_utterance" ? "User" : "Assistant"}: ${
+        "text" in e && typeof e.text === "string" ? e.text : ""
+      }`
+    )
+    .join("\n");
+
+  const facts = verifiedToolFacts(history);
+
+  const state = {
+    agent_role: prompt.slice(0, 1000),
+    verified_conversation_facts_and_history:
+      (recentDialogue + (facts ? `\n\nFacts:\n${facts}` : "")).slice(-10000),
+    current_user_request: lastUser.text,
+  };
+
+  const questions = Object.fromEntries(
+    candidateSkills.map((s) => [
+      s.name,
+      {
+        type: "noul" as const,
+        instructions:
+          `Does answering this turn or executing the user request directly require the '${s.name}' skill (${s.description})?`,
+      },
+    ]),
+  );
+
+  try {
+    const answers = await callDecisionModel(state, questions);
+    const scores = Object.fromEntries(
+      candidateSkills.map((s) => {
+        const ans = answers[s.name];
+        return [s.name, ans && ans.type === "noul" ? ans.noul : 0];
+      }),
+    );
+
+    const candidateToLearn = candidateSkills
+      .filter((s) => !currentlyActiveSkills.has(s.name.toLowerCase()))
+      .filter((s) => (scores[s.name] ?? 0) >= 0.60)
+      .sort((a, b) => (scores[b.name] ?? 0) - (scores[a.name] ?? 0));
+
+    const toLearn = candidateToLearn.length > 0
+      ? [
+        candidateToLearn[0],
+        ...candidateToLearn.slice(1).filter((s) =>
+          (scores[s.name] ?? 0) >= 0.80
+        ),
+      ]
+      : [];
+
+    const toUnlearn = candidateSkills
+      .filter((s) => currentlyActiveSkills.has(s.name.toLowerCase()))
+      .filter((s) => (scores[s.name] ?? 1) < 0.20);
+
+    return { toLearn, toUnlearn };
+  } catch (err) {
+    console.warn(
+      "[jev-skills] skill decision check failed, failing open:",
+      err,
+    );
+    return { toLearn: [], toUnlearn: [] };
+  }
 };
