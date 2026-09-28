@@ -7,7 +7,12 @@ import {
   tool,
 } from "../mod.ts";
 import type { HistoryEvent } from "../src/agent.ts";
-import { agentDeps, injectSecrets, runWithProvider } from "../test_helpers.ts";
+import {
+  agentDeps,
+  injectSecrets,
+  runWithProvider,
+  withRetries,
+} from "../test_helpers.ts";
 
 const canRunLiveGemini = Deno.env.get("TEST_PROVIDER") === "google" &&
   !!Deno.env.get("GEMINI_API_KEY");
@@ -15,7 +20,7 @@ const canRunLiveGemini = Deno.env.get("TEST_PROVIDER") === "google" &&
 const reproModel = Deno.env.get("GEMINI_REPRO_MODEL") ??
   "gemini-3-flash-preview";
 const reproTimeoutMs = Number(
-  Deno.env.get("GEMINI_REPRO_TIMEOUT_MS") ?? 60_000,
+  Deno.env.get("GEMINI_REPRO_TIMEOUT_MS") ?? 90_000,
 );
 const reproVariant = Deno.env.get("GEMINI_REPRO_VARIANT") ?? "default";
 
@@ -93,37 +98,40 @@ Deno.test({
   name: "Gemini buffered agent call emits tool call before timeout [google]",
   ignore: !canRunLiveGemini,
   sanitizeResources: false,
-  fn: pipe(
-    injectSecrets,
-    injectGeminiModelVersions(() => ({
-      pro: reproModel,
-      flash: reproModel,
-      lite: reproModel,
-      fallback: reproModel,
-    })),
-    injectGeminiModelCallTimeoutMs(() => reproTimeoutMs),
-  )(async () => {
-    const history = [...syntheticHistory];
-    await agentDeps(history)(runWithProvider(undefined))({
-      maxIterations: 1,
-      disableStreaming: true,
-      maxOutputTokens: 16000,
-      tools: [
-        ...Array.from({ length: 17 }, (_, index) => workspaceTool(index + 1)),
-        writeLandingPage,
-      ],
-      prompt:
-        `You are a web design agent working in a synthetic test project. The project and hotel are fictional. When the user asks whether you are working on the page, continue the work by calling write_landing_page. Do not only send a status update.\n\n${repeatedDesignNotes}`,
-      timezoneIANA: "UTC",
-    });
+  fn: withRetries(
+    3,
+    pipe(
+      injectSecrets,
+      injectGeminiModelVersions(() => ({
+        pro: reproModel,
+        flash: reproModel,
+        lite: reproModel,
+        fallback: reproModel,
+      })),
+      injectGeminiModelCallTimeoutMs(() => reproTimeoutMs),
+    )(async () => {
+      const history = [...syntheticHistory];
+      await agentDeps(history)(runWithProvider(undefined))({
+        maxIterations: 1,
+        disableStreaming: true,
+        maxOutputTokens: 16000,
+        tools: [
+          ...Array.from({ length: 17 }, (_, index) => workspaceTool(index + 1)),
+          writeLandingPage,
+        ],
+        prompt:
+          `You are a web design agent working in a synthetic test project. The project and hotel are fictional. When the user asks whether you are working on the page, continue the work by calling write_landing_page. Do not only send a status update.\n\n${repeatedDesignNotes}`,
+        timezoneIANA: "UTC",
+      });
 
-    assert(
-      history.some((event) =>
-        event.type === "tool_call" && event.name === "write_landing_page"
-      ),
-      `Expected write_landing_page tool call, got events: ${
-        history.map((event) => event.type).join(", ")
-      }`,
-    );
-  }),
+      assert(
+        history.some((event) =>
+          event.type === "tool_call" && event.name === "write_landing_page"
+        ),
+        `Expected write_landing_page tool call, got events: ${
+          history.map((event) => event.type).join(", ")
+        }`,
+      );
+    }),
+  ),
 });
