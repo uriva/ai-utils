@@ -2,6 +2,7 @@ import { z } from "zod/v4";
 import type { HistoryEvent, ParticipantUtterance } from "./agent.ts";
 import { decide } from "./decisionModel.ts";
 import { accessJevToken } from "./jev.ts";
+import { accessRespanToken } from "./respan.ts";
 
 export const maxHallucinationRetries = 2;
 
@@ -49,7 +50,7 @@ export const auditUtteranceForHallucination = async (
   assistantResponse: string,
   verifiedFacts?: string,
 ): Promise<boolean> => {
-  const token = accessJevToken();
+  const token = accessRespanToken() || accessJevToken();
   if (!token) return false;
   try {
     const result = await decide(

@@ -8,6 +8,7 @@ import {
   injectGeminiToken,
   injectKimiToken,
   injectOpenAiToken,
+  injectRespanToken,
   overrideIdGenerator,
   runAgent,
   tool,
@@ -130,6 +131,7 @@ export const injectSecrets = pipe(
   injectGeminiToken(requireEnv("GEMINI_API_KEY")),
   injectKimiToken(requireEnv("KIMI_API_KEY")),
   injectAnthropicToken(requireEnv("ANTHROPIC_API_KEY")),
+  injectRespanToken(Deno.env.get("RESPAN_API_KEY") ?? ""),
 );
 
 export const agentDeps = (inMemoryHistory: HistoryEvent[]): Injector =>

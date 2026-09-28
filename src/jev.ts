@@ -1,4 +1,5 @@
 import { context, type Injection, type Injector } from "@uri/inject";
+import { pipe } from "gamla";
 import { cache } from "rmmbr";
 import type { HistoryEvent, Skill } from "./agent.ts";
 import { makeCache } from "./cacher.ts";
@@ -13,6 +14,7 @@ import {
   verifiedToolFacts,
 } from "./hallucinationGate.ts";
 import { cleanActiveMemoryToolName, type ModelTier } from "./utils.ts";
+import { accessRespanToken, injectRespanToken } from "./respan.ts";
 
 export const jevApiUrl = "https://api.typesafe.ai/v1/systemone";
 const rmmbrUrl = "https://rmmbr.net";
@@ -22,8 +24,13 @@ const jevToken: Injection<() => string | undefined> = context(
 );
 
 export const accessJevToken = jevToken.access;
-export const injectJevToken = (token: string): Injector =>
-  jevToken.inject(() => token);
+export const injectJevToken = (token: string): Injector => {
+  const injectJev = jevToken.inject(() => token);
+  if (token === "") {
+    return pipe(injectRespanToken(""), injectJev);
+  }
+  return injectJev;
+};
 
 const eventContent = (event: HistoryEvent): string | undefined => {
   if ("text" in event && typeof event.text === "string") return event.text;
@@ -248,7 +255,7 @@ export const decideSkillsWithJev = async (
   candidateSkills: Skill[],
   currentlyActiveSkills: Set<string>,
 ): Promise<{ toLearn: Skill[]; toUnlearn: Skill[] }> => {
-  const token = accessJevToken();
+  const token = accessRespanToken() || accessJevToken();
   if (!token && !isDecisionModelInjected()) {
     return { toLearn: [], toUnlearn: [] };
   }
@@ -413,7 +420,7 @@ export const decideCleanupWithJev = async (
   prompt: string,
   history: HistoryEvent[],
 ): Promise<PastToolEpisode[]> => {
-  const token = accessJevToken();
+  const token = accessRespanToken() || accessJevToken();
   if (!token && !isDecisionModelInjected()) {
     return [];
   }

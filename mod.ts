@@ -20,7 +20,7 @@ import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
 import { geminiAgentCaller, prepareGeminiHistory } from "./src/geminiAgent.ts";
 import { validateZodSchema } from "./src/gemini.ts";
 import { inspectMediaUrlTool } from "./src/inspectMediaTool.ts";
-import { formatAgentStateForJev, routeTaskWithJev } from "./src/jev.ts";
+import { formatAgentStateForRespan, routeTask } from "./src/respan.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
 import { ThinkingLevel } from "@google/genai";
 
@@ -106,8 +106,8 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
 
   const dynamicCallModel = async (history: HistoryEvent[]) => {
     const specForTurn = getSpecForTurn(specWithBuiltins, history);
-    const routedTier = await routeTaskWithJev(
-      formatAgentStateForJev(specForTurn.prompt, history, specForTurn.tools),
+    const routedTier = await routeTask(
+      formatAgentStateForRespan(specForTurn.prompt, history, specForTurn.tools),
     );
     const thinkingLevel = routedTier === "lite"
       ? ThinkingLevel.LOW
@@ -279,19 +279,24 @@ export {
   toolsToDeclarations,
 } from "./src/geminiLiveSession.ts";
 export {
+  accessDecisionProvider,
   callDecisionModel,
   type ChoiceDecisionAnswer,
   type ChoiceDecisionQuestion,
   decide,
   type DecisionAnswer,
   type DecisionModelCaller,
+  type DecisionProvider,
   type DecisionQuestion,
   genDecision,
   injectDecisionModel,
+  injectDecisionProvider,
   isDecisionField,
+  isDecisionModelAvailable,
   isStringField,
   type NoulDecisionAnswer,
   type NoulDecisionQuestion,
+  resolveDecisionProvider,
   type ScoreDecisionAnswer,
   type ScoreDecisionQuestion,
 } from "./src/decisionModel.ts";
@@ -303,6 +308,19 @@ export {
   invalidGenJsonMessage,
 } from "./src/genJson.ts";
 export { injectKimiToken, kimiGenJsonFromConvo } from "./src/kimiJson.ts";
+export {
+  accessRespanToken,
+  callRespanDecisionModel,
+  decideCleanupWithRespan,
+  decideSkillsWithRespan,
+  defaultRespanModel,
+  formatAgentStateForRespan,
+  injectRespanToken,
+  proRespanModel,
+  respanApiUrl,
+  routeTask,
+  routeTaskWithRespan,
+} from "./src/respan.ts";
 export {
   accessJevToken,
   callJevDecisionModel,

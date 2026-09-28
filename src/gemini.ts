@@ -26,7 +26,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z, type ZodType } from "zod/v4";
 import type { MediaAttachment } from "./agent.ts";
 import { makeCache } from "./cacher.ts";
-import { routeTaskWithJev } from "./jev.ts";
+import { routeTask } from "./respan.ts";
 
 import { pruneDefaultsFromRequired } from "./toolTyping.ts";
 
@@ -292,7 +292,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
   zodType: T,
   attachments?: MediaAttachment[],
 ): Promise<z.infer<T>> => {
-  const resolvedTier = tier ?? await routeTaskWithJev(messages);
+  const resolvedTier = tier ?? await routeTask(messages);
   const cacher = makeCache("geminiCompletionResponseText-v4");
   const execGenJson = (req: GenerateContentParameters) =>
     conditionalRetry(isRetryableError)(
@@ -385,7 +385,7 @@ export const geminiGenText = async (
   prompt: string,
   attachments: MediaAttachment[] = [],
 ): Promise<string> => {
-  const resolvedTier = tier ?? await routeTaskWithJev(prompt);
+  const resolvedTier = tier ?? await routeTask(prompt);
   const req = (model: string) => ({
     model,
     config: {

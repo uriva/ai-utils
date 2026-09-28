@@ -1,7 +1,8 @@
 import { context, type Injection, type Injector } from "@uri/inject";
 import { empty } from "gamla";
 import type { z, ZodType } from "zod/v4";
-import { callJevDecisionModel } from "./jev.ts";
+import { accessJevToken, callJevDecisionModel } from "./jev.ts";
+import { accessRespanToken, callRespanDecisionModel } from "./respan.ts";
 import { type ModelOpts, validateAgainstSchema } from "./utils.ts";
 
 export type ChoiceDecisionQuestion = {
@@ -57,6 +58,27 @@ export type DecisionModelCaller = (
   questions: Record<string, DecisionQuestion>,
 ) => Promise<Record<string, DecisionAnswer>>;
 
+export type DecisionProvider = "respan" | "jev";
+
+const decisionProviderInjection: Injection<() => DecisionProvider | undefined> =
+  context((): DecisionProvider | undefined => {
+    const env = Deno.env.get("DECISION_PROVIDER");
+    if (env === "jev" || env === "respan") return env;
+    return undefined;
+  });
+
+export const accessDecisionProvider = decisionProviderInjection.access;
+export const injectDecisionProvider = (provider: DecisionProvider): Injector =>
+  decisionProviderInjection.inject(() => provider);
+
+export const resolveDecisionProvider = (): DecisionProvider => {
+  const configured = accessDecisionProvider();
+  if (configured) return configured;
+  if (accessRespanToken()) return "respan";
+  if (accessJevToken()) return "jev";
+  return "respan";
+};
+
 const decisionModelOverrideInjection: Injection<
   () => DecisionModelCaller | null
 > = context((): DecisionModelCaller | null => null);
@@ -68,6 +90,13 @@ export const injectDecisionModel = (
 export const isDecisionModelInjected = (): boolean =>
   Boolean(decisionModelOverrideInjection.access());
 
+export const isDecisionModelAvailable = (): boolean => {
+  if (decisionModelOverrideInjection.access()) return true;
+  const provider = resolveDecisionProvider();
+  if (provider === "jev") return Boolean(accessJevToken());
+  return Boolean(accessRespanToken());
+};
+
 export const callDecisionModel = (
   state: unknown,
   questions: Record<string, DecisionQuestion>,
@@ -76,7 +105,11 @@ export const callDecisionModel = (
   if (override) {
     return override(state, questions);
   }
-  return callJevDecisionModel(state, questions);
+  const provider = resolveDecisionProvider();
+  if (provider === "jev") {
+    return callJevDecisionModel(state, questions);
+  }
+  return callRespanDecisionModel(state, questions);
 };
 
 const isRecord = (val: unknown): val is Record<string, unknown> =>

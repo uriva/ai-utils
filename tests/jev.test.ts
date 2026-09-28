@@ -1,21 +1,25 @@
 import { assertEquals } from "@std/assert";
 import {
+  type DecisionProvider,
   formatAgentStateForJev,
   geminiFlashVersion,
   geminiModelVersion,
   geminiProVersion,
+  injectDecisionProvider,
   injectJevToken,
+  injectRespanToken,
   participantUtteranceTurn,
-  routeTaskWithJev,
+  routeTask,
   ThinkingLevel,
   toolResultTurn,
 } from "../mod.ts";
 import { buildReq } from "../src/geminiAgent.ts";
 import type { HistoryEvent } from "../src/agent.ts";
 
-const testJevToken = Deno.env.get("JEV_API_KEY") ||
-  "apikey_2323b4352d1a3ea4a0787a1689e16cabcd9_096712d3a92df92963ceec3b230db7e9551e027e997111bd989ace89f4716c75";
-const withTestJevToken = injectJevToken(testJevToken);
+const decisionProviders: DecisionProvider[] = [
+  ...(Deno.env.get("RESPAN_API_KEY") ? ["respan" as const] : []),
+  ...(Deno.env.get("JEV_API_KEY") ? ["jev" as const] : []),
+];
 
 Deno.test("geminiModelVersions eliminates 3.7-flash and aligns pro with 3.8-flash", () => {
   assertEquals(geminiProVersion, "gemini-3.8-flash");
@@ -28,77 +32,81 @@ Deno.test("geminiModelVersion resolves lite, pro, and flash", () => {
   assertEquals(geminiModelVersion("flash"), "gemini-3.8-flash");
 });
 
-Deno.test("routeTaskWithJev falls back to flash when no token is present", async () => {
-  await injectJevToken("")(async () => {
-    const tier = await routeTaskWithJev("Hello, what is your name?");
-    assertEquals(tier, "flash");
-  })();
-});
-
-Deno.test("routeTaskWithJev routes simple greeting to lite", async () => {
-  await withTestJevToken(async () => {
-    const tier = await routeTaskWithJev("Hi, what time does the venue open?");
-    assertEquals(tier, "lite");
-  })();
-});
-
-Deno.test("routeTaskWithJev routes complex coding/architecture to flash", async () => {
-  await withTestJevToken(async () => {
-    const tier = await routeTaskWithJev(
-      "Implement a distributed Byzantine fault tolerant consensus algorithm in Rust with formal TLA+ specification and unit tests.",
-    );
-    assertEquals(tier, "flash");
-  })();
-});
-
-Deno.test("routeTaskWithJev routes tool action request to flash", async () => {
-  await withTestJevToken(async () => {
-    const state = formatAgentStateForJev(
-      "You are a media editing assistant that processes videos.",
-      [
-        participantUtteranceTurn({
-          name: "User",
-          text: "continue this video for 90 more seconds",
-        }),
-      ],
-      [{ name: "download_clip" }, { name: "extract_frame" }],
-    );
-    const tier = await routeTaskWithJev(state);
-    assertEquals(tier, "flash");
-  })();
-});
-
-Deno.test("routeTaskWithJev routes post-tool-result turn with constraints to flash", async () => {
-  await withTestJevToken(async () => {
-    const callEvent: HistoryEvent = {
-      type: "tool_call",
-      id: "call-1",
-      timestamp: Date.now(),
-      isOwn: true,
-      name: "download_clip",
-      parameters: { start: "00:01:00", end: "00:02:00" },
-    };
-    const resultEvent = toolResultTurn({
-      result:
-        "Download complete and delivered. Do NOT download further continuations.",
-      toolCallId: "call-1",
+Deno.test("routeTask falls back to flash when no token is present", async () => {
+  await injectRespanToken("")(async () => {
+    await injectJevToken("")(async () => {
+      const tier = await routeTask("Hello, what is your name?");
+      assertEquals(tier, "flash");
     });
-    const state = formatAgentStateForJev(
-      "You are a media assistant. Deliver requested clips without extra continuations.",
-      [
-        participantUtteranceTurn({
-          name: "User",
-          text: "Start at 00:01:00 and continue for 1 minute.",
-        }),
-        callEvent,
-        resultEvent,
-      ],
-      [{ name: "download_clip" }],
-    );
-    const tier = await routeTaskWithJev(state);
-    assertEquals(tier, "flash");
-  })();
+  });
 });
+
+for (const provider of decisionProviders) {
+  Deno.test(`routeTask routes simple greeting to lite [${provider}]`, async () => {
+    await injectDecisionProvider(provider)(async () => {
+      const tier = await routeTask("Hi, what time does the venue open?");
+      assertEquals(tier, "lite");
+    });
+  });
+
+  Deno.test(`routeTask routes complex coding/architecture to flash [${provider}]`, async () => {
+    await injectDecisionProvider(provider)(async () => {
+      const tier = await routeTask(
+        "Implement a distributed Byzantine fault tolerant consensus algorithm in Rust with formal TLA+ specification and unit tests.",
+      );
+      assertEquals(tier, "flash");
+    });
+  });
+
+  Deno.test(`routeTask routes tool action request to flash [${provider}]`, async () => {
+    await injectDecisionProvider(provider)(async () => {
+      const state = formatAgentStateForJev(
+        "You are a media editing assistant that processes videos.",
+        [
+          participantUtteranceTurn({
+            name: "User",
+            text: "continue this video for 90 more seconds",
+          }),
+        ],
+        [{ name: "download_clip" }, { name: "extract_frame" }],
+      );
+      const tier = await routeTask(state);
+      assertEquals(tier, "flash");
+    });
+  });
+
+  Deno.test(`routeTask routes post-tool-result turn with constraints to flash [${provider}]`, async () => {
+    await injectDecisionProvider(provider)(async () => {
+      const callEvent: HistoryEvent = {
+        type: "tool_call",
+        id: "call-1",
+        timestamp: Date.now(),
+        isOwn: true,
+        name: "download_clip",
+        parameters: { start: "00:01:00", end: "00:02:00" },
+      };
+      const resultEvent = toolResultTurn({
+        result:
+          "Download complete and delivered. Do NOT download further continuations.",
+        toolCallId: "call-1",
+      });
+      const state = formatAgentStateForJev(
+        "You are a media assistant. Deliver requested clips without extra continuations.",
+        [
+          participantUtteranceTurn({
+            name: "User",
+            text: "Start at 00:01:00 and continue for 1 minute.",
+          }),
+          callEvent,
+          resultEvent,
+        ],
+        [{ name: "download_clip" }],
+      );
+      const tier = await routeTask(state);
+      assertEquals(tier, "flash");
+    });
+  });
+}
 
 Deno.test("formatAgentStateForJev extracts user request and tool names", () => {
   const state = formatAgentStateForJev(

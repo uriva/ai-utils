@@ -38,6 +38,7 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       RMMBR_TOKEN: ${{ secrets.RMMBR_TOKEN }}
       JEV_API_KEY: ${{ secrets.JEV_API_KEY }}
+      RESPAN_API_KEY: ${{ secrets.RESPAN_API_KEY }}
       TEST_PROVIDER: ${{ matrix.stage.provider }}
     name: test (${{ matrix.stage.name }})
     steps:
