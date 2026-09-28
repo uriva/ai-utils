@@ -1188,6 +1188,41 @@ const textToOwnThought = (e: GeminiHistoryEvent): GeminiHistoryEvent => ({
   text: "text" in e ? (e.text as string) : "",
 });
 
+const responseIdToThoughtSignature = (
+  history: GeminiHistoryEvent[],
+): Map<string, string> => {
+  const map = new Map<string, string>();
+  for (const e of history) {
+    if (eventHasThoughtSignature(e) && "modelMetadata" in e) {
+      const sig = e.modelMetadata?.thoughtSignature?.trim();
+      const id = getOriginalId(e);
+      if (sig && id && !map.has(id)) {
+        map.set(id, sig);
+      }
+    }
+  }
+  return map;
+};
+
+const inheritSiblingSignature =
+  (signaturesByResponseId: Map<string, string>) =>
+  (e: GeminiHistoryEvent): GeminiHistoryEvent => {
+    if (e.type !== "tool_call" || eventHasThoughtSignature(e)) return e;
+    const respId = getOriginalId(e);
+    const sig = signaturesByResponseId.get(respId);
+    if (!sig) return e;
+    return {
+      ...e,
+      modelMetadata: {
+        ...("modelMetadata" in e && e.modelMetadata
+          ? e.modelMetadata
+          : { type: "gemini" as const }),
+        responseId: respId,
+        thoughtSignature: sig,
+      },
+    };
+  };
+
 export const computeInvalidToolCallReplacements = (
   history: GeminiHistoryEvent[],
 ): {
@@ -1204,12 +1239,7 @@ export const computeInvalidToolCallReplacements = (
     }
   }
 
-  const signaturesByResponseId = new Set<string>();
-  for (const e of history) {
-    if (eventHasThoughtSignature(e)) {
-      signaturesByResponseId.add(getOriginalId(e));
-    }
-  }
+  const signaturesByResponseId = responseIdToThoughtSignature(history);
 
   // A response group is tainted if it contains tool calls, but NONE of the events
   // in that response group have a thoughtSignature.
@@ -1220,34 +1250,41 @@ export const computeInvalidToolCallReplacements = (
     if (!hasSignature) taintedResponseIds.add(responseId);
   }
 
+  const inheritSignature = inheritSiblingSignature(signaturesByResponseId);
+
   if (taintedResponseIds.size === 0) {
-    return { filtered: history, replacements: {} };
+    return {
+      filtered: history.map(inheritSignature),
+      replacements: {},
+    };
   }
 
   const isTainted = (e: GeminiHistoryEvent) =>
     taintedResponseIds.has(getOriginalId(e));
 
   const replacements: Record<string, GeminiHistoryEvent> = {};
-  const filtered = history.filter((e) => {
-    if (e.type === "tool_call" && isTainted(e)) {
-      replacements[e.id] = toolCallToOwnThought(e);
-      return false;
-    }
-    if (e.type === "tool_result" && "toolCallId" in e && e.toolCallId) {
-      const parentCall = history.find((h) => h.id === e.toolCallId);
-      if (parentCall && isTainted(parentCall)) {
-        replacements[e.id] = toolResultToOwnThought(e);
+  const filtered = history
+    .filter((e) => {
+      if (e.type === "tool_call" && isTainted(e)) {
+        replacements[e.id] = toolCallToOwnThought(e);
         return false;
       }
-    }
-    if (
-      (e.type === "own_utterance" || e.type === "own_thought") && isTainted(e)
-    ) {
-      replacements[e.id] = textToOwnThought(e);
-      return false;
-    }
-    return true;
-  });
+      if (e.type === "tool_result" && "toolCallId" in e && e.toolCallId) {
+        const parentCall = history.find((h) => h.id === e.toolCallId);
+        if (parentCall && isTainted(parentCall)) {
+          replacements[e.id] = toolResultToOwnThought(e);
+          return false;
+        }
+      }
+      if (
+        (e.type === "own_utterance" || e.type === "own_thought") && isTainted(e)
+      ) {
+        replacements[e.id] = textToOwnThought(e);
+        return false;
+      }
+      return true;
+    })
+    .map(inheritSignature);
 
   return { filtered, replacements };
 };

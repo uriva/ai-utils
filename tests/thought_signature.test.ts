@@ -1,7 +1,14 @@
-import { assert } from "@std/assert";
-import { buildReq } from "../src/geminiAgent.ts";
+import { assert, assertEquals } from "@std/assert";
+import {
+  buildReq,
+  filterInvalidToolCalls,
+  type GeminiHistoryEvent,
+} from "../src/geminiAgent.ts";
 import { ThinkingLevel } from "@google/genai";
 import { z } from "zod/v4";
+import { tool } from "../mod.ts";
+import type { HistoryEvent } from "../src/agent.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 Deno.test(
   "thought_signature propagation to functionCall in buildReq",
@@ -253,4 +260,163 @@ Deno.test(
       }
     }
   },
+);
+
+Deno.test(
+  "filterInvalidToolCalls populates sibling thoughtSignature from response group onto signature-less tool_call",
+  () => {
+    // When multiple parallel tool calls occurred in a response group, only the
+    // first might have received an inline signature in historical data. Even
+    // after history normalization separates them into separate content blocks,
+    // the signature-less tool_call must inherit its response group's signature.
+    const history: GeminiHistoryEvent[] = [
+      {
+        type: "participant_utterance",
+        id: "user-1",
+        timestamp: 100,
+        isOwn: false,
+        name: "user",
+        text: "Check both cities",
+      },
+      {
+        type: "tool_call",
+        id: "call-1",
+        timestamp: 101,
+        isOwn: true,
+        name: "get_status",
+        parameters: { city: "Paris" },
+        modelMetadata: {
+          type: "gemini",
+          responseId: "resp-group-1",
+          thoughtSignature: "sig-from-group",
+        },
+      },
+      {
+        type: "tool_result",
+        id: "res-1",
+        timestamp: 102,
+        isOwn: true,
+        toolCallId: "call-1",
+        result: "Paris is fine",
+      },
+      {
+        type: "tool_call",
+        id: "call-2",
+        timestamp: 103,
+        isOwn: true,
+        name: "get_status",
+        parameters: { city: "London" },
+        modelMetadata: {
+          type: "gemini",
+          responseId: "resp-group-1",
+          thoughtSignature: "",
+        },
+      },
+      {
+        type: "tool_result",
+        id: "res-2",
+        timestamp: 104,
+        isOwn: true,
+        toolCallId: "call-2",
+        result: "London is fine",
+      },
+    ];
+
+    const filtered = filterInvalidToolCalls(history);
+    const call2 = filtered.find((e) => e.id === "call-2");
+    assert(call2, "call-2 should be preserved in filtered history");
+    assertEquals(
+      "modelMetadata" in call2 && call2.modelMetadata?.thoughtSignature,
+      "sig-from-group",
+      "call-2 must inherit the thoughtSignature from its response group",
+    );
+  },
+);
+
+runForAllProviders(
+  "parallel tool_call with empty thoughtSignature inherits sibling signature and model answers",
+  async (runAgent) => {
+    const history: HistoryEvent[] = [
+      {
+        type: "participant_utterance",
+        id: "user-1",
+        timestamp: 100,
+        isOwn: false,
+        name: "user",
+        text: "Check both cities",
+      },
+      {
+        type: "tool_call",
+        id: "call-1",
+        timestamp: 101,
+        isOwn: true,
+        name: "get_status",
+        parameters: { city: "Paris" },
+        modelMetadata: {
+          type: "gemini",
+          responseId: "resp-group-1",
+          thoughtSignature:
+            "EroCCrcCARFNMg8ob59DpboVq7ShbsmWPz/NHlxTDLN1HAmS8cKXGAg7y2mS0JthbuG3kH7v9B5jrsa98rAL+sQfSib73A+SBEnzth4lTzTXyhjpO4mlWaVUsZLHpR0fYj1MzMpyOR2f1i80GK0HGl/BAQPJ7qKrmRuyDpMJjseSPm/ksmJYkGd56TgZ/Uign7y/Y+1iVNbV8qhWo3r4/btt8kojTbGjeTwATmvCBC5HFD2wZPleHf1Tr/rJT8+72VhJ6+5nXg6LjyI6OGViEXEGsnh7wN1e+/YHkxRVsPg0KdjnYDNdIA7fGPtOr5TH5Rs8aFTN1q6BEjf4KBwgmCHc41eZPTWWh+7AtgbHPUMIPfWdUnEgpZymb5YNyvKPvt+rTPtETK3Iev7NYNdlvxD0NR9fIxrC6FE0Zuc=",
+        },
+      },
+      {
+        type: "tool_result",
+        id: "res-1",
+        timestamp: 102,
+        isOwn: true,
+        toolCallId: "call-1",
+        result: "Paris is fine",
+      },
+      {
+        type: "tool_call",
+        id: "call-2",
+        timestamp: 103,
+        isOwn: true,
+        name: "get_status",
+        parameters: { city: "London" },
+        modelMetadata: {
+          type: "gemini",
+          responseId: "resp-group-1",
+          thoughtSignature: "",
+        },
+      },
+      {
+        type: "tool_result",
+        id: "res-2",
+        timestamp: 104,
+        isOwn: true,
+        toolCallId: "call-2",
+        result: "London is fine",
+      },
+      {
+        type: "participant_utterance",
+        id: "user-2",
+        timestamp: 105,
+        isOwn: false,
+        name: "user",
+        text: "Thanks, please summarize in one word",
+      },
+    ];
+
+    const statusTool = tool({
+      name: "get_status",
+      description: "Get city status",
+      parameters: z.object({ city: z.string() }),
+      handler: ({ city }: { city: string }) =>
+        Promise.resolve(`${city} status ok`),
+    });
+
+    await agentDeps(history)(runAgent)({
+      maxIterations: 1,
+      tools: [statusTool],
+      prompt: "You are a helpful assistant.",
+      timezoneIANA: "UTC",
+    });
+
+    const lastUtterance = history.find((e) => e.type === "own_utterance");
+    assert(lastUtterance, "Expected an own_utterance from model");
+  },
+  3,
+  true,
+  false,
 );
