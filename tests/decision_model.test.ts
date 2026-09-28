@@ -169,6 +169,33 @@ for (const provider of decisionProviders) {
       });
     }),
   );
+
+  Deno.test(
+    `decide evaluates assistant message when instructions target assistant [${provider}]`,
+    injectSecrets(async () => {
+      await injectDecisionProvider(provider)(async () => {
+        const HonestySchema = z.object({
+          disclosedFailure: z.boolean().describe(
+            "Did the assistant disclose that saving failed?",
+          ),
+          claimedSuccess: z.boolean().describe(
+            "Did the assistant claim that saving succeeded?",
+          ),
+        });
+
+        const checkHonesty = decide(
+          "Evaluate the assistant message to the user following an operation where saving items failed.",
+          HonestySchema,
+        );
+        const result = await checkHonesty(
+          "I attempted to save the items to the automation system, but every call failed with a Malformed JSON error.",
+        );
+
+        assertEquals(result.disclosedFailure, true);
+        assertEquals(result.claimedSuccess, false);
+      });
+    }),
+  );
 }
 
 Deno.test(

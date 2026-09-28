@@ -7,8 +7,7 @@ import {
   participantUtteranceTurn,
 } from "../src/agent.ts";
 import { injectDecisionModel } from "../src/decisionModel.ts";
-import { injectJevToken } from "../src/jev.ts";
-import { agentDeps } from "../test_helpers.ts";
+import { agentDeps, injectSecrets } from "../test_helpers.ts";
 
 Deno.test(
   "hallucination gate - intercepts off-topic utterance and re-invokes model with correctional thought",
@@ -147,34 +146,29 @@ Deno.test(
 
 Deno.test(
   "auditUtteranceForHallucination - live decision model evaluation",
-  async () => {
-    const jevToken = Deno.env.get("JEV_API_KEY");
-    if (!jevToken) return;
+  injectSecrets(async () => {
+    // 1. Off-topic response should be flagged
+    const isBad = await auditUtteranceForHallucination(
+      "What is the flight number that we booked with Arkia?",
+      "I reviewed the invoice: No VAT was charged, total is $3,756 paid via credit card and BUYME vouchers.",
+      "Flight booking confirmed: Outbound IZ 595, Inbound IZ 690.",
+    );
+    assertEquals(
+      isBad,
+      true,
+      "Off-topic invoice response must be flagged as hallucination",
+    );
 
-    await injectJevToken(jevToken)(async () => {
-      // 1. Off-topic response should be flagged
-      const isBad = await auditUtteranceForHallucination(
-        "What is the flight number that we booked with Arkia?",
-        "I reviewed the invoice: No VAT was charged, total is $3,756 paid via credit card and BUYME vouchers.",
-        "Flight booking confirmed: Outbound IZ 595, Inbound IZ 690.",
-      );
-      assertEquals(
-        isBad,
-        true,
-        "Off-topic invoice response must be flagged as hallucination",
-      );
-
-      // 2. Direct answer should NOT be flagged
-      const isGood = await auditUtteranceForHallucination(
-        "What is the flight number that we booked with Arkia?",
-        "Your flight numbers are IZ 595 (outbound) and IZ 690 (return).",
-        "Flight booking confirmed: Outbound IZ 595, Inbound IZ 690.",
-      );
-      assertEquals(
-        isGood,
-        false,
-        "Direct flight number answer must not be flagged",
-      );
-    })();
-  },
+    // 2. Direct answer should NOT be flagged
+    const isGood = await auditUtteranceForHallucination(
+      "What is the flight number that we booked with Arkia?",
+      "Your flight numbers are IZ 595 (outbound) and IZ 690 (return).",
+      "Flight booking confirmed: Outbound IZ 595, Inbound IZ 690.",
+    );
+    assertEquals(
+      isGood,
+      false,
+      "Direct flight number answer must not be flagged",
+    );
+  }),
 );

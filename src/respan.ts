@@ -228,13 +228,25 @@ export const stateToSpan = (state: unknown): RespanSpan => {
         "user_query" in record && typeof record.user_query === "string"
           ? record.user_query
           : "";
-      const facts = "verified_facts_and_tool_outputs" in record &&
+      const facts = ("verified_facts_and_tool_outputs" in record &&
           typeof record.verified_facts_and_tool_outputs === "string"
         ? record.verified_facts_and_tool_outputs
-        : "";
+        : undefined) ??
+        ("verified_facts_from_tools" in record &&
+            typeof record.verified_facts_from_tools === "string"
+          ? record.verified_facts_from_tools
+          : "");
+      const sysParts = [
+        "instructions" in record && typeof record.instructions === "string"
+          ? record.instructions
+          : "",
+        facts ? `Facts:\n${facts}` : "",
+      ].filter(Boolean);
       return {
         input: [
-          ...(facts ? [{ role: "system" as const, content: facts }] : []),
+          ...(sysParts.length > 0
+            ? [{ role: "system" as const, content: sysParts.join("\n\n") }]
+            : []),
           { role: "user" as const, content: userQuery },
         ],
         output: {
@@ -251,12 +263,16 @@ export const stateToSpan = (state: unknown): RespanSpan => {
       const cont = typeof record.content === "string"
         ? record.content
         : JSON.stringify(record.content);
+      const isAssistant = /\bassistant\b/i.test(instr);
       return {
         input: [
           ...(instr ? [{ role: "system" as const, content: instr }] : []),
-          { role: "user" as const, content: cont },
+          ...(!isAssistant ? [{ role: "user" as const, content: cont }] : []),
         ],
-        output: { role: "assistant", content: "" },
+        output: {
+          role: "assistant",
+          content: isAssistant ? cont : "",
+        },
       };
     }
 
@@ -483,6 +499,7 @@ const rawCallRespanScores = async (
   });
 
   if (response.status === 402 && payload.includes(proRespanModel)) {
+    await response.body?.cancel();
     const freePayload = payload.replaceAll(proRespanModel, defaultRespanModel);
     response = await fetch(respanApiUrl, {
       method: "POST",
@@ -588,6 +605,7 @@ const rawCallRespanRoute = async (
   });
 
   if (response.status === 402 && payload.includes(proRespanModel)) {
+    await response.body?.cancel();
     const freePayload = payload.replaceAll(proRespanModel, defaultRespanModel);
     response = await fetch(respanApiUrl, {
       method: "POST",
@@ -600,7 +618,10 @@ const rawCallRespanRoute = async (
     });
   }
 
-  if (!response.ok) return "flash";
+  if (!response.ok) {
+    await response.body?.cancel();
+    return "flash";
+  }
   const data = await response.json();
   const result = (data?.results as RespanBehaviorResult[] | undefined)?.find(
     (r) => r.id === "requires_flash",

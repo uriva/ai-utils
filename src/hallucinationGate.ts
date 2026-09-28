@@ -40,6 +40,9 @@ export const verifiedToolFacts = (history: HistoryEvent[]): string =>
     .flatMap((e) => {
       if (e.type === "tool_result") return [e.result];
       if (e.type === "external_event") return [e.text];
+      if (e.type === "own_thought" && typeof e.text === "string") {
+        return [e.text];
+      }
       return [];
     })
     .join("\n\n")
@@ -59,7 +62,12 @@ export const auditUtteranceForHallucination = async (
     )({
       user_query: userQuery,
       assistant_response: assistantResponse,
-      ...(verifiedFacts ? { verified_facts_from_tools: verifiedFacts } : {}),
+      ...(verifiedFacts
+        ? {
+          verified_facts_and_tool_outputs: verifiedFacts,
+          verified_facts_from_tools: verifiedFacts,
+        }
+        : {}),
     });
     return result.is_hallucination;
   } catch (err) {
