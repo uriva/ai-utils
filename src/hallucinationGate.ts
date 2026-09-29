@@ -10,13 +10,17 @@ import {
 
 export { lastParticipantUtterance, verifiedToolFacts };
 
-export const maxHallucinationRetries = 2;
+export const maxHallucinationRetries = 1;
+
+export const cleanUserQuery = (text: string): string =>
+  text.replace(/^\[(?:replying to you|quoted reply):[^\]]*\]\s*/i, "").trim() ||
+  text;
 
 export const HallucinationDecisionSchema: z.ZodObject<{
   is_hallucination: z.ZodBoolean;
 }> = z.object({
   is_hallucination: z.boolean().describe(
-    "True if the assistant response is an off-topic hallucination, invents unprompted claims or user concerns, or completely fails to address what the user asked. False if the assistant legitimately answers, addresses the user request, clarifies, greets, or explains it could not find the information.",
+    "True if the assistant response is an off-topic hallucination, invents unprompted claims or user concerns, or completely fails to address what the user asked. False if the assistant legitimately answers, addresses the user request, provides relevant options or recommendations, clarifies, greets, or explains it could not find the information.",
   ),
 });
 

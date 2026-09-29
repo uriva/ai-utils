@@ -183,15 +183,18 @@ Deno.test(
 );
 
 Deno.test(
-  "runAgent respects explicit spec.thinkingLevel and bypasses routeTask",
+  "dynamicCallModel routes standard queries to ThinkingLevel.LOW via decision model without caller config",
   async () => {
     let capturedThinkingLevel: ThinkingLevel | undefined;
     const history: HistoryEvent[] = [
-      participantUtteranceTurn({ name: "user", text: "Hello" }),
+      participantUtteranceTurn({
+        name: "user",
+        text: "What parties are there tonight?",
+      }),
     ];
 
     await injectCallModel((_events) =>
-      Promise.resolve([ownUtteranceTurn("Hello there!")])
+      Promise.resolve([ownUtteranceTurn("Here are some parties.")])
     )(() =>
       injectCallModelWrapper(({ thinkingLevel, inner }) => {
         capturedThinkingLevel = thinkingLevel;
@@ -199,10 +202,9 @@ Deno.test(
       })(() =>
         agentDeps(history)(runAgent)({
           maxIterations: 1,
-          prompt: "You are a helpful assistant.",
+          prompt: "You are an events guide.",
           tools: [],
           timezoneIANA: "UTC",
-          thinkingLevel: ThinkingLevel.LOW,
         })
       )()
     )();

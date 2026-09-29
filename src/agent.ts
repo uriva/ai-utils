@@ -53,11 +53,11 @@ import {
 } from "./decisionModel.ts";
 import {
   auditUtteranceForHallucination,
+  cleanUserQuery,
   hallucinationCorrectionText,
   isUserPromptedTurn,
   lastParticipantUtterance,
   maxHallucinationRetries,
-  recentUserQueriesText,
   verifiedToolFacts,
 } from "./hallucinationGate.ts";
 export const stopThoughtPrefix =
@@ -2757,8 +2757,6 @@ export type AgentSpec = AgentInputs & {
   enableCleanActiveMemory?: boolean;
   enableAutoMemoryCleanup?: boolean;
   enableHistorySearch?: boolean;
-  enableHallucinationAudit?: boolean;
-  thinkingLevel?: import("@google/genai").ThinkingLevel;
   timezoneIANA: string;
   maxOutputTokens?: number;
   transport?: {
@@ -3061,7 +3059,6 @@ export const runAbstractAgent = (
 
       const concludingTexts = concludingUtteranceTexts(emit);
       if (
-        spec.enableHallucinationAudit &&
         (!isMockModelInjected() || isDecisionModelInjected()) &&
         nonempty(concludingTexts) &&
         isUserPromptedTurn(history) &&
@@ -3069,11 +3066,10 @@ export const runAbstractAgent = (
       ) {
         const lastUser = lastParticipantUtterance(normalizedHistory);
         if (lastUser && lastUser.text) {
-          const userQueries = recentUserQueriesText(normalizedHistory) ||
-            lastUser.text;
+          const userQuery = cleanUserQuery(lastUser.text);
           const facts = verifiedToolFacts(normalizedHistory);
           const isHallucinated = await auditUtteranceForHallucination(
-            userQueries,
+            userQuery,
             concludingTexts.join("\n"),
             facts || undefined,
           );
@@ -3084,7 +3080,7 @@ export const runAbstractAgent = (
             );
             ephemeralHistory = [
               ...ephemeralHistory,
-              ownThoughtTurn(hallucinationCorrectionText(lastUser.text)),
+              ownThoughtTurn(hallucinationCorrectionText(userQuery)),
             ];
             continue;
           }

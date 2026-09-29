@@ -451,18 +451,21 @@ export const lastParticipantUtterance = (
     e.type === "participant_utterance"
   );
 
-export const verifiedToolFacts = (history: HistoryEvent[]): string =>
-  history
+export const verifiedToolFacts = (history: HistoryEvent[]): string => {
+  const toolResults = history
+    .flatMap((e) => e.type === "tool_result" ? [e.result] : [])
+    .join("\n\n");
+  const otherFacts = history
     .flatMap((e) => {
-      if (e.type === "tool_result") return [e.result];
       if (e.type === "external_event") return [e.text];
       if (e.type === "own_thought" && typeof e.text === "string") {
         return [e.text];
       }
       return [];
     })
-    .join("\n\n")
-    .slice(0, 10000);
+    .join("\n\n");
+  return `${toolResults}\n\n${otherFacts}`.slice(-10000).trim();
+};
 
 export const eventContent = (event: HistoryEvent): string | undefined => {
   if ("text" in event && typeof event.text === "string") return event.text;

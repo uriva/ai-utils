@@ -110,19 +110,16 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
 
   const dynamicCallModel = async (history: HistoryEvent[]) => {
     const specForTurn = getSpecForTurn(specWithBuiltins, history);
-    let thinkingLevel = specForTurn.thinkingLevel;
-    if (thinkingLevel === undefined) {
-      const routedTier = await routeTask(
-        formatAgentStateForDecisionModel(
-          specForTurn.prompt,
-          history,
-          specForTurn.tools,
-        ),
-      );
-      thinkingLevel = routedTier === "lite"
-        ? ThinkingLevel.LOW
-        : ThinkingLevel.HIGH;
-    }
+    const routedTier = await routeTask(
+      formatAgentStateForDecisionModel(
+        specForTurn.prompt,
+        history,
+        specForTurn.tools,
+      ),
+    );
+    const thinkingLevel = routedTier === "lite"
+      ? ThinkingLevel.LOW
+      : ThinkingLevel.HIGH;
     return await resolveCallModel({
       ...specForTurn,
       thinkingLevel,

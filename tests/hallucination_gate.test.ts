@@ -64,7 +64,6 @@ Deno.test(
           prompt: "You are a travel assistant.",
           tools: [],
           timezoneIANA: "UTC",
-          enableHallucinationAudit: true,
         });
       }),
     )();
@@ -131,7 +130,6 @@ Deno.test(
           prompt: "You are a travel assistant.",
           tools: [],
           timezoneIANA: "UTC",
-          enableHallucinationAudit: true,
         });
       }),
     )();
@@ -187,7 +185,6 @@ Deno.test(
           prompt: "You are a personal assistant.",
           tools: [],
           timezoneIANA: "UTC",
-          enableHallucinationAudit: true,
         });
       }),
     )();
@@ -250,7 +247,6 @@ Deno.test(
           prompt: "You are a personal assistant.",
           tools: [],
           timezoneIANA: "UTC",
-          enableHallucinationAudit: true,
         });
       }),
     )();
@@ -275,28 +271,30 @@ Deno.test(
 );
 
 Deno.test(
-  "hallucination gate - default spec skips hallucination audit without decision model calls or retry loops",
+  "hallucination gate - cleans quoted WhatsApp replies and evaluates actual user query against verified facts",
   async () => {
-    const userQuery = "What is my flight number?";
+    const rawUserMsg =
+      '[replying to you: "בדקתי, ולשבוע הקרוב אין כרגע במאגר מסיבות"]\nמסיבות 30+ במרכז';
     const history: HistoryEvent[] = [
-      participantUtteranceTurn({ name: "user", text: userQuery }),
+      participantUtteranceTurn({ name: "user", text: rawUserMsg }),
     ];
     let callCount = 0;
-    let decisionModelCalled = false;
+    let auditedQuery: string | undefined;
 
     const scriptedModel = () => {
       callCount++;
       return Promise.resolve([
-        ownUtteranceTurn("Here is the answer."),
+        ownUtteranceTurn("הנה מסיבות במרכז: Oktoberfest Beerfest."),
       ]);
     };
 
-    const mockDecisionModel = () => {
-      decisionModelCalled = true;
+    const mockDecisionModel = (state: unknown) => {
+      const stateObj = state as { user_query?: string };
+      auditedQuery = stateObj?.user_query;
       return Promise.resolve({
         is_hallucination: {
           type: "choice" as const,
-          choice: "true",
+          choice: "false",
         },
       });
     };
@@ -305,7 +303,7 @@ Deno.test(
       injectCallModel(scriptedModel)(async () => {
         await agentDeps(history)(runAgent)({
           maxIterations: 3,
-          prompt: "You are a travel assistant.",
+          prompt: "You are an events guide.",
           tools: [],
           timezoneIANA: "UTC",
         });
@@ -313,10 +311,7 @@ Deno.test(
     )();
 
     assertEquals(callCount, 1);
-    assertEquals(decisionModelCalled, false);
-    const emitted = history.filter((e) => e.type === "own_utterance");
-    assertEquals(emitted.length, 1);
-    assertEquals(emitted[0].text, "Here is the answer.");
+    assertEquals(auditedQuery, "מסיבות 30+ במרכז");
   },
 );
 

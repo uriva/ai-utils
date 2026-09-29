@@ -539,7 +539,7 @@ export const callRespanDecisionModel = async (
 };
 
 export const respanModelSelectionInstructions =
-  "The user request or turn requires tool execution, action requests (such as downloading, cutting, editing, media processing, or booking), recent tool activity, system notifications, negative constraints, coding, or complex multi-step reasoning.";
+  "The user request or turn requires complex multi-step reasoning, mathematical problem solving, writing code or complex scripts, or hard logic puzzles.";
 
 export const respanModelRoutingBehavior: RespanBehavior = {
   id: "requires_flash",
