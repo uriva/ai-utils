@@ -2813,13 +2813,27 @@ const maxDoNothingRetries = 2;
 export const unansweredUserCorrectionText =
   "[SYSTEM NOTICE]: The user is waiting for a response to their message, but you have not yet sent a reply or taken action. Please proceed to answer the user's request or take the next required action now.";
 
+export const safetyWarningText =
+  "I am sorry, but I cannot fulfill this request as it violates content safety guidelines.";
+
+export const isSafetyBlockUtterance = (event: HistoryEvent): boolean =>
+  event.type === "own_utterance" &&
+  (Boolean(
+    event.modelMetadata &&
+      typeof event.modelMetadata === "object" &&
+      "isSafetyBlock" in event.modelMetadata &&
+      event.modelMetadata.isSafetyBlock,
+  ) || event.text === safetyWarningText);
+
 // A response concludes the turn when it carries user-facing utterances with no
 // pending tool calls — the loop returns right after emitting it. Only then is
 // grounding verification needed: a response with tool calls is followed by
 // tool results and another model pass, whose eventual concluding reply gets
 // verified instead.
 const concludingUtteranceTexts = (emit: HistoryEvent[]): string[] =>
-  emit.some((event) => event.type === "tool_call")
+  emit.some((event) =>
+      event.type === "tool_call" || isSafetyBlockUtterance(event)
+    )
     ? []
     : emit.flatMap((event) =>
       event.type === "own_utterance" ? [event.text] : []
@@ -3075,6 +3089,7 @@ export const runAbstractAgent = (
       if (
         (!isMockModelInjected() || isDecisionModelInjected()) &&
         nonempty(concludingTexts) &&
+        !emit.some(isSafetyBlockUtterance) &&
         isUserPromptedTurn(history) &&
         retryCounts.hallucination < maxHallucinationRetries
       ) {

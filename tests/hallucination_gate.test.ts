@@ -1,10 +1,15 @@
 import { assert, assertEquals } from "@std/assert";
-import { auditUtteranceForHallucination, runAgent } from "../mod.ts";
+import {
+  auditUtteranceForHallucination,
+  runAgent,
+  safetyWarningText,
+} from "../mod.ts";
 import {
   type HistoryEvent,
   injectCallModel,
   ownThoughtTurn,
   ownUtteranceTurn,
+  ownUtteranceTurnWithMetadata,
   participantUtteranceTurn,
   toolResultTurn,
 } from "../src/agent.ts";
@@ -353,4 +358,63 @@ Deno.test(
       "Direct flight number answer must not be flagged",
     );
   }),
+);
+
+Deno.test(
+  "hallucination gate - does not audit or retry safety block utterances",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Generate prohibited content",
+      }),
+    ];
+    let callCount = 0;
+
+    const scriptedModel = () => {
+      callCount++;
+      return Promise.resolve([
+        ownUtteranceTurnWithMetadata(
+          safetyWarningText,
+          { isSafetyBlock: true },
+        ),
+      ]);
+    };
+
+    let decisionModelCalled = false;
+    const mockDecisionModel = () => {
+      decisionModelCalled = true;
+      return Promise.resolve({
+        is_hallucination: {
+          type: "choice" as const,
+          choice: "true",
+        },
+      });
+    };
+
+    await injectDecisionModel(mockDecisionModel)(
+      injectCallModel(scriptedModel)(async () => {
+        await agentDeps(history)(runAgent)({
+          maxIterations: 3,
+          prompt: "You are a helpful assistant.",
+          tools: [],
+          timezoneIANA: "UTC",
+        });
+      }),
+    )();
+
+    assertEquals(
+      decisionModelCalled,
+      false,
+      "Decision model should never be called for safety block utterances",
+    );
+    assertEquals(
+      callCount,
+      1,
+      "Model should only be called once when safety block occurs without retrying",
+    );
+    const emitted = history.filter((e) => e.type === "own_utterance");
+    assertEquals(emitted.length, 1);
+    assertEquals(emitted[0].text, safetyWarningText);
+  },
 );

@@ -174,6 +174,7 @@ export {
   injectTimerMs,
   injectToolNotFound,
   isRecord,
+  isSafetyBlockUtterance,
   learnSkillToolName,
   maxToolOutputChars,
   maxUtteranceChars,

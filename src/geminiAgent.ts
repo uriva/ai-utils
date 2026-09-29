@@ -49,6 +49,7 @@ import {
   ownUtteranceTurnWithMetadata,
   type ParticipantEditMessage,
   type ParticipantUtterance,
+  safetyWarningText,
   systemInstructionTail,
   thinkingTokenExhaustionWarningText,
   type Tool,
@@ -1616,8 +1617,7 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
   }
 };
 
-export const safetyWarningText =
-  "I am sorry, but I cannot fulfill this request as it violates content safety guidelines.";
+export { safetyWarningText };
 
 const maxHistoryTokens = 800_000;
 
