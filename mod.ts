@@ -72,6 +72,7 @@ const resolveCallModel = (spec: AgentSpecForTurn): CallModel => {
   const wrapped = accessCallModelWrapper({
     provider: spec.provider,
     systemPrompt: spec.prompt,
+    thinkingLevel: spec.thinkingLevel,
     inner: base,
   });
   const prepare = prepareHistory(spec);
@@ -109,16 +110,19 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
 
   const dynamicCallModel = async (history: HistoryEvent[]) => {
     const specForTurn = getSpecForTurn(specWithBuiltins, history);
-    const routedTier = await routeTask(
-      formatAgentStateForDecisionModel(
-        specForTurn.prompt,
-        history,
-        specForTurn.tools,
-      ),
-    );
-    const thinkingLevel = routedTier === "lite"
-      ? ThinkingLevel.LOW
-      : ThinkingLevel.HIGH;
+    let thinkingLevel = specForTurn.thinkingLevel;
+    if (thinkingLevel === undefined) {
+      const routedTier = await routeTask(
+        formatAgentStateForDecisionModel(
+          specForTurn.prompt,
+          history,
+          specForTurn.tools,
+        ),
+      );
+      thinkingLevel = routedTier === "lite"
+        ? ThinkingLevel.LOW
+        : ThinkingLevel.HIGH;
+    }
     return await resolveCallModel({
       ...specForTurn,
       thinkingLevel,

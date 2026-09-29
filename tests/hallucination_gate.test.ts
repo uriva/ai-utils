@@ -64,6 +64,7 @@ Deno.test(
           prompt: "You are a travel assistant.",
           tools: [],
           timezoneIANA: "UTC",
+          enableHallucinationAudit: true,
         });
       }),
     )();
@@ -130,6 +131,7 @@ Deno.test(
           prompt: "You are a travel assistant.",
           tools: [],
           timezoneIANA: "UTC",
+          enableHallucinationAudit: true,
         });
       }),
     )();
@@ -185,6 +187,7 @@ Deno.test(
           prompt: "You are a personal assistant.",
           tools: [],
           timezoneIANA: "UTC",
+          enableHallucinationAudit: true,
         });
       }),
     )();
@@ -247,6 +250,7 @@ Deno.test(
           prompt: "You are a personal assistant.",
           tools: [],
           timezoneIANA: "UTC",
+          enableHallucinationAudit: true,
         });
       }),
     )();
@@ -267,6 +271,52 @@ Deno.test(
       emitted[0].text,
       "Good morning! Wishing you a wonderful and energetic day ahead!",
     );
+  },
+);
+
+Deno.test(
+  "hallucination gate - default spec skips hallucination audit without decision model calls or retry loops",
+  async () => {
+    const userQuery = "What is my flight number?";
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: userQuery }),
+    ];
+    let callCount = 0;
+    let decisionModelCalled = false;
+
+    const scriptedModel = () => {
+      callCount++;
+      return Promise.resolve([
+        ownUtteranceTurn("Here is the answer."),
+      ]);
+    };
+
+    const mockDecisionModel = () => {
+      decisionModelCalled = true;
+      return Promise.resolve({
+        is_hallucination: {
+          type: "choice" as const,
+          choice: "true",
+        },
+      });
+    };
+
+    await injectDecisionModel(mockDecisionModel)(
+      injectCallModel(scriptedModel)(async () => {
+        await agentDeps(history)(runAgent)({
+          maxIterations: 3,
+          prompt: "You are a travel assistant.",
+          tools: [],
+          timezoneIANA: "UTC",
+        });
+      }),
+    )();
+
+    assertEquals(callCount, 1);
+    assertEquals(decisionModelCalled, false);
+    const emitted = history.filter((e) => e.type === "own_utterance");
+    assertEquals(emitted.length, 1);
+    assertEquals(emitted[0].text, "Here is the answer.");
   },
 );
 

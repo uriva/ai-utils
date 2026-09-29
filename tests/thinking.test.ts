@@ -4,9 +4,10 @@ import {
   type GenerateContentResponse,
   ThinkingLevel,
 } from "@google/genai";
-import { runAgent } from "../mod.ts";
+import { injectCallModelWrapper, runAgent } from "../mod.ts";
 import {
   getStreamThinkingChunk,
+  type HistoryEvent,
   injectCallModel,
   ownThoughtTurn,
   ownUtteranceTurn,
@@ -178,5 +179,34 @@ Deno.test(
       capturedReq?.config?.thinkingConfig?.thinkingLevel,
       ThinkingLevel.LOW,
     );
+  },
+);
+
+Deno.test(
+  "runAgent respects explicit spec.thinkingLevel and bypasses routeTask",
+  async () => {
+    let capturedThinkingLevel: ThinkingLevel | undefined;
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "Hello" }),
+    ];
+
+    await injectCallModel((_events) =>
+      Promise.resolve([ownUtteranceTurn("Hello there!")])
+    )(() =>
+      injectCallModelWrapper(({ thinkingLevel, inner }) => {
+        capturedThinkingLevel = thinkingLevel;
+        return inner;
+      })(() =>
+        agentDeps(history)(runAgent)({
+          maxIterations: 1,
+          prompt: "You are a helpful assistant.",
+          tools: [],
+          timezoneIANA: "UTC",
+          thinkingLevel: ThinkingLevel.LOW,
+        })
+      )()
+    )();
+
+    assertEquals(capturedThinkingLevel, ThinkingLevel.LOW);
   },
 );

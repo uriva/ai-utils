@@ -780,6 +780,7 @@ export type Provider = "google" | "moonshot" | "anthropic" | undefined;
 export type CallModelWrapper = (args: {
   provider: Provider;
   systemPrompt: string;
+  thinkingLevel?: import("@google/genai").ThinkingLevel;
   inner: CallModel;
 }) => CallModel;
 
@@ -2756,6 +2757,8 @@ export type AgentSpec = AgentInputs & {
   enableCleanActiveMemory?: boolean;
   enableAutoMemoryCleanup?: boolean;
   enableHistorySearch?: boolean;
+  enableHallucinationAudit?: boolean;
+  thinkingLevel?: import("@google/genai").ThinkingLevel;
   timezoneIANA: string;
   maxOutputTokens?: number;
   transport?: {
@@ -3058,6 +3061,7 @@ export const runAbstractAgent = (
 
       const concludingTexts = concludingUtteranceTexts(emit);
       if (
+        spec.enableHallucinationAudit &&
         (!isMockModelInjected() || isDecisionModelInjected()) &&
         nonempty(concludingTexts) &&
         isUserPromptedTurn(history) &&
