@@ -50,6 +50,7 @@ import {
   decideCleanupWithDecisionModel,
   decideSkillsWithDecisionModel,
   isDecisionModelInjected,
+  type PastToolEpisode,
 } from "./decisionModel.ts";
 import {
   auditUtteranceForHallucination,
@@ -2613,18 +2614,10 @@ export const skillLearnedSuccessMessage = (skillName: string): string =>
 export const skillUnlearnedSuccessMessage = (skillName: string): string =>
   `Successfully deactivated/unlearned the skill "${skillName}". Its tools have been removed from your active context.`;
 
-const adjustActiveSkillsWithDecisionModel = async (
-  prompt: string,
-  skills: Skill[],
+const emitSkillAdjustmentEvents = async (
+  toLearn: Skill[],
+  toUnlearn: Skill[],
 ): Promise<void> => {
-  const history = await getHistory();
-  const activeNames = activeSkillNames(history);
-  const { toLearn, toUnlearn } = await decideSkillsWithDecisionModel(
-    prompt,
-    history,
-    skills,
-    activeNames,
-  );
   for (const skill of toLearn) {
     const callId = `auto-learn-${generateId()}`;
     await outputEvent({
@@ -2671,14 +2664,9 @@ const adjustActiveSkillsWithDecisionModel = async (
   }
 };
 
-const maybeCleanupActiveMemoryWithDecisionModel = async (
-  prompt: string,
+const emitCleanupEvents = async (
+  toCompact: PastToolEpisode[],
 ): Promise<void> => {
-  const history = await getHistory();
-  if (history.length < 12) return;
-  if (sum(history.map(estimateTokensLocal)) < 5000) return;
-
-  const toCompact = await decideCleanupWithDecisionModel(prompt, history);
   for (const ep of toCompact) {
     const callId = `auto-clean-${generateId()}`;
     const toolNames = [...new Set(ep.toolCalls.map((t) => t.name))].join(", ");
@@ -2708,6 +2696,45 @@ const maybeCleanupActiveMemoryWithDecisionModel = async (
         `Successfully summarized ${ep.eventsCount} events from ${ep.startTimeStr} to ${ep.endTimeStr} with summary: "${summary}"`,
     });
   }
+};
+
+const runPreModelDecisions = async (
+  spec: AgentSpec,
+  skills: Skill[],
+): Promise<void> => {
+  const shouldDecide = !isMockModelInjected() || isDecisionModelInjected();
+  if (!shouldDecide) return;
+
+  const shouldAdjustSkills = nonempty(skills);
+  const shouldCleanup = spec.enableAutoMemoryCleanup !== false;
+  if (!shouldAdjustSkills && !shouldCleanup) return;
+
+  const history = await getHistory();
+  const canCleanup = shouldCleanup &&
+    history.length >= 12 &&
+    sum(history.map(estimateTokensLocal)) >= 5000;
+
+  if (!shouldAdjustSkills && !canCleanup) return;
+
+  const [skillsAdjustment, cleanupDecisions] = await Promise.all([
+    shouldAdjustSkills
+      ? decideSkillsWithDecisionModel(
+        spec.prompt,
+        history,
+        skills,
+        activeSkillNames(history),
+      )
+      : Promise.resolve({ toLearn: [], toUnlearn: [] }),
+    canCleanup
+      ? decideCleanupWithDecisionModel(spec.prompt, history)
+      : Promise.resolve([]),
+  ]);
+
+  await emitSkillAdjustmentEvents(
+    skillsAdjustment.toLearn,
+    skillsAdjustment.toUnlearn,
+  );
+  await emitCleanupEvents(cleanupDecisions);
 };
 
 export const resolveToolDescription = (
@@ -2959,18 +2986,8 @@ export const runAbstractAgent = (
       if (c > 200) {
         throw new Error("Agent turn limit safety threshold (200) exceeded.");
       }
-      if (
-        c === 1 && skillsArr.length > 0 &&
-        (!isMockModelInjected() || isDecisionModelInjected())
-      ) {
-        await adjustActiveSkillsWithDecisionModel(spec.prompt, skillsArr);
-      }
-      if (
-        c === 1 &&
-        (!isMockModelInjected() || isDecisionModelInjected()) &&
-        spec.enableAutoMemoryCleanup !== false
-      ) {
-        await maybeCleanupActiveMemoryWithDecisionModel(spec.prompt);
+      if (c === 1) {
+        await runPreModelDecisions(spec, skillsArr);
       }
       const history = await getHistory();
       let normalizedHistory = await projectModelContext(
