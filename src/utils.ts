@@ -215,3 +215,13 @@ export const collapseDuplicatedText = (text: string): string => {
 };
 
 export const cleanActiveMemoryToolName = "clean_active_memory";
+
+export const decisionModelSelectionInstructions =
+  "Which model tier should handle this task? Choose 'lite' for conversational turns, greetings, basic FAQ, or general information questions; choose 'flash' for tool execution, action requests (such as downloading, cutting, editing, or booking), recent tool activity, system notifications, negative constraints, coding, or multi-step logic.";
+
+export const decisionModelSelectionCriteria = {
+  lite:
+    "Conversational greeting, general FAQ, information question, or pleasantry without tool actions",
+  flash:
+    "Action request (downloading, cutting, media processing, external actions), recent tool activity, system notification, negative constraint adherence, coding, or complex reasoning",
+};

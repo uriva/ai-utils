@@ -46,8 +46,11 @@ import {
   internalThoughtMarker,
   stripJsonThought,
 } from "./jsonThought.ts";
-import { isDecisionModelInjected } from "./decisionModel.ts";
-import { decideCleanupWithJev, decideSkillsWithJev } from "./jev.ts";
+import {
+  decideCleanupWithDecisionModel,
+  decideSkillsWithDecisionModel,
+  isDecisionModelInjected,
+} from "./decisionModel.ts";
 import {
   auditUtteranceForHallucination,
   hallucinationCorrectionText,
@@ -2612,13 +2615,13 @@ export const skillLearnedSuccessMessage = (skillName: string): string =>
 export const skillUnlearnedSuccessMessage = (skillName: string): string =>
   `Successfully deactivated/unlearned the skill "${skillName}". Its tools have been removed from your active context.`;
 
-const adjustActiveSkillsWithJev = async (
+const adjustActiveSkillsWithDecisionModel = async (
   prompt: string,
   skills: Skill[],
 ): Promise<void> => {
   const history = await getHistory();
   const activeNames = activeSkillNames(history);
-  const { toLearn, toUnlearn } = await decideSkillsWithJev(
+  const { toLearn, toUnlearn } = await decideSkillsWithDecisionModel(
     prompt,
     history,
     skills,
@@ -2670,14 +2673,14 @@ const adjustActiveSkillsWithJev = async (
   }
 };
 
-const maybeCleanupActiveMemoryWithJev = async (
+const maybeCleanupActiveMemoryWithDecisionModel = async (
   prompt: string,
 ): Promise<void> => {
   const history = await getHistory();
   if (history.length < 12) return;
   if (sum(history.map(estimateTokensLocal)) < 5000) return;
 
-  const toCompact = await decideCleanupWithJev(prompt, history);
+  const toCompact = await decideCleanupWithDecisionModel(prompt, history);
   for (const ep of toCompact) {
     const callId = `auto-clean-${generateId()}`;
     const toolNames = [...new Set(ep.toolCalls.map((t) => t.name))].join(", ");
@@ -2962,14 +2965,14 @@ export const runAbstractAgent = (
         c === 1 && skillsArr.length > 0 &&
         (!isMockModelInjected() || isDecisionModelInjected())
       ) {
-        await adjustActiveSkillsWithJev(spec.prompt, skillsArr);
+        await adjustActiveSkillsWithDecisionModel(spec.prompt, skillsArr);
       }
       if (
         c === 1 &&
         (!isMockModelInjected() || isDecisionModelInjected()) &&
         spec.enableAutoMemoryCleanup !== false
       ) {
-        await maybeCleanupActiveMemoryWithJev(spec.prompt);
+        await maybeCleanupActiveMemoryWithDecisionModel(spec.prompt);
       }
       const history = await getHistory();
       let normalizedHistory = await projectModelContext(

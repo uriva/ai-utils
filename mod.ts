@@ -20,7 +20,10 @@ import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
 import { geminiAgentCaller, prepareGeminiHistory } from "./src/geminiAgent.ts";
 import { validateZodSchema } from "./src/gemini.ts";
 import { inspectMediaUrlTool } from "./src/inspectMediaTool.ts";
-import { formatAgentStateForRespan, routeTask } from "./src/respan.ts";
+import {
+  formatAgentStateForDecisionModel,
+  routeTask,
+} from "./src/decisionModel.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
 import { ThinkingLevel } from "@google/genai";
 
@@ -107,7 +110,11 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
   const dynamicCallModel = async (history: HistoryEvent[]) => {
     const specForTurn = getSpecForTurn(specWithBuiltins, history);
     const routedTier = await routeTask(
-      formatAgentStateForRespan(specForTurn.prompt, history, specForTurn.tools),
+      formatAgentStateForDecisionModel(
+        specForTurn.prompt,
+        history,
+        specForTurn.tools,
+      ),
     );
     const thinkingLevel = routedTier === "lite"
       ? ThinkingLevel.LOW
@@ -284,19 +291,28 @@ export {
   type ChoiceDecisionAnswer,
   type ChoiceDecisionQuestion,
   decide,
+  decideCleanupWithDecisionModel,
+  decideSkillsWithDecisionModel,
   type DecisionAnswer,
   type DecisionModelCaller,
+  decisionModelSelectionCriteria,
+  decisionModelSelectionInstructions,
   type DecisionProvider,
   type DecisionQuestion,
+  extractCandidateToolEpisodes,
+  formatAgentStateForDecisionModel,
   genDecision,
   injectDecisionModel,
   injectDecisionProvider,
   isDecisionField,
   isDecisionModelAvailable,
+  isDecisionModelInjected,
   isStringField,
   type NoulDecisionAnswer,
   type NoulDecisionQuestion,
+  type PastToolEpisode,
   resolveDecisionProvider,
+  routeTask,
   type ScoreDecisionAnswer,
   type ScoreDecisionQuestion,
 } from "./src/decisionModel.ts";
@@ -318,7 +334,6 @@ export {
   injectRespanToken,
   proRespanModel,
   respanApiUrl,
-  routeTask,
   routeTaskWithRespan,
 } from "./src/respan.ts";
 export {
@@ -326,7 +341,6 @@ export {
   callJevDecisionModel,
   decideCleanupWithJev,
   decideSkillsWithJev,
-  extractCandidateToolEpisodes,
   formatAgentStateForJev,
   injectJevToken,
   jevApiUrl,

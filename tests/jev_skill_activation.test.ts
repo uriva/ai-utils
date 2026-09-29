@@ -22,7 +22,7 @@ const calculatorSkill = {
 };
 
 runForAllProviders(
-  "jev skill activation: agent invokes skill tool directly on turn 1 without wasting a turn on learn_skill",
+  "decision model skill activation: agent invokes skill tool directly on turn 1 without wasting a turn on learn_skill",
   async (runAgentWithProvider) => {
     const history: HistoryEvent[] = [
       participantUtteranceTurn({
@@ -32,7 +32,7 @@ runForAllProviders(
     ];
 
     // In a budget-constrained scenario, wasting turn 1 on learn_skill delays execution.
-    // With Jev auto-activation, turn 1 must execute the skill tool directly.
+    // With decision model auto-activation, turn 1 must execute the skill tool directly.
     await agentDeps(history)(runAgentWithProvider)({
       maxIterations: 5,
       tools: [],
@@ -41,11 +41,14 @@ runForAllProviders(
       timezoneIANA: "UTC",
     });
 
-    // Verify Jev auto-injected the synthetic learn_skill event before model execution
+    // Verify decision model auto-injected the synthetic learn_skill event before model execution
     const autoLearnCall = history.find(
       (e) => e.type === "tool_call" && e.id.startsWith("auto-learn-"),
     );
-    assert(autoLearnCall, "Should have auto-injected learn_skill from Jev");
+    assert(
+      autoLearnCall,
+      "Should have auto-injected learn_skill from decision model",
+    );
 
     // Verify the agent NEVER wasted a turn calling learn_skill on its own
     const explicitLearnCalls = history.filter(
@@ -57,7 +60,7 @@ runForAllProviders(
     assertEquals(
       explicitLearnCalls.length,
       0,
-      `Agent should not call learn_skill explicitly when Jev auto-activates. Found: ${
+      `Agent should not call learn_skill explicitly when decision model auto-activates. Found: ${
         JSON.stringify(explicitLearnCalls)
       }`,
     );
@@ -71,7 +74,7 @@ runForAllProviders(
 );
 
 runForAllProviders(
-  "jev skill deactivation: skill is automatically turned off when conversation topic changes",
+  "decision model skill deactivation: skill is automatically turned off when conversation topic changes",
   async (runAgentWithProvider) => {
     // Turn 1: user asks a math question -> calculator is used
     const turn1History: HistoryEvent[] = [

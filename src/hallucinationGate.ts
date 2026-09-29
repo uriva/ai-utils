@@ -1,9 +1,14 @@
 import { z } from "zod/v4";
 import type { HistoryEvent, ParticipantUtterance } from "./agent.ts";
 import { isCompactedSummaryText } from "./compaction.ts";
-import { decide } from "./decisionModel.ts";
-import { accessJevToken } from "./jev.ts";
-import { accessRespanToken } from "./respan.ts";
+import {
+  decide,
+  isDecisionModelAvailable,
+  lastParticipantUtterance,
+  verifiedToolFacts,
+} from "./decisionModel.ts";
+
+export { lastParticipantUtterance, verifiedToolFacts };
 
 export const maxHallucinationRetries = 2;
 
@@ -19,13 +24,6 @@ export const hallucinationCorrectionText = (userQuery: string): string =>
   `SYSTEM AUDIT: Your proposed response was flagged as an off-topic hallucination or unprompted diversion. The user explicitly asked: "${
     userQuery.slice(0, 300)
   }". Do NOT address unprompted topics or invent concerns. Directly answer the user's explicit question using only facts verified by your tools or memory.`;
-
-export const lastParticipantUtterance = (
-  history: HistoryEvent[],
-): ParticipantUtterance | undefined =>
-  [...history].reverse().find((e): e is ParticipantUtterance =>
-    e.type === "participant_utterance"
-  );
 
 export const isUserPromptedTurn = (history: HistoryEvent[]): boolean => {
   const lastUserIndex = history.findLastIndex(
@@ -60,26 +58,12 @@ export const recentUserQueriesText = (history: HistoryEvent[]): string =>
     .map((e) => (e.name ? `${e.name}: ${e.text}` : e.text))
     .join("\n");
 
-export const verifiedToolFacts = (history: HistoryEvent[]): string =>
-  history
-    .flatMap((e) => {
-      if (e.type === "tool_result") return [e.result];
-      if (e.type === "external_event") return [e.text];
-      if (e.type === "own_thought" && typeof e.text === "string") {
-        return [e.text];
-      }
-      return [];
-    })
-    .join("\n\n")
-    .slice(0, 10000);
-
 export const auditUtteranceForHallucination = async (
   userQuery: string,
   assistantResponse: string,
   verifiedFacts?: string,
 ): Promise<boolean> => {
-  const token = accessRespanToken() || accessJevToken();
-  if (!token) return false;
+  if (!isDecisionModelAvailable()) return false;
   try {
     const result = await decide(
       "Audit assistant response for hallucination or off-topic diversion from the user request.",

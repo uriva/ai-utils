@@ -1,30 +1,27 @@
 import { context, type Injection, type Injector } from "@uri/inject";
 import { empty } from "gamla";
 import { cache } from "rmmbr";
-import type { HistoryEvent, Skill } from "./agent.ts";
 import { makeCache } from "./cacher.ts";
 import {
-  callDecisionModel,
   type ChoiceDecisionAnswer,
+  decideCleanupWithDecisionModel,
+  decideSkillsWithDecisionModel,
   type DecisionAnswer,
   type DecisionQuestion,
-  isDecisionModelInjected,
+  formatAgentStateForDecisionModel,
   type NoulDecisionAnswer,
   type NoulDecisionQuestion,
-  resolveDecisionProvider,
+  routeTask,
   type ScoreDecisionAnswer,
 } from "./decisionModel.ts";
-import {
-  lastParticipantUtterance,
-  verifiedToolFacts,
-} from "./hallucinationGate.ts";
-import {
-  accessJevToken,
-  extractCandidateToolEpisodes,
-  type PastToolEpisode,
-  routeTaskWithJev,
-} from "./jev.ts";
 import type { ModelTier } from "./utils.ts";
+
+export {
+  decideCleanupWithDecisionModel as decideCleanupWithRespan,
+  decideSkillsWithDecisionModel as decideSkillsWithRespan,
+  formatAgentStateForDecisionModel as formatAgentStateForRespan,
+  routeTask,
+};
 
 export const respanApiUrl = "https://api.respan.ai/api/v1/scores";
 export const defaultRespanModel = "span-01-free";
@@ -66,47 +63,6 @@ export type RespanScoreResponse = {
   results: RespanBehaviorResult[];
   usage?: {
     input_tokens: number;
-  };
-};
-
-const eventContent = (event: HistoryEvent): string | undefined => {
-  if ("text" in event && typeof event.text === "string") return event.text;
-  if ("result" in event && typeof event.result === "string") {
-    return event.result;
-  }
-  if (event.type === "tool_call") {
-    return `${event.name}(${JSON.stringify(event.parameters ?? {})})`;
-  }
-  return undefined;
-};
-
-export const formatAgentStateForRespan = (
-  prompt: string,
-  history: HistoryEvent[],
-  tools?: { name: string }[],
-): Record<string, unknown> => {
-  const lastEvent = history[history.length - 1];
-  const lastUserMsg = [...history]
-    .reverse()
-    .find((e) => e.type === "participant_utterance");
-  const lastEventText = lastEvent ? eventContent(lastEvent) : undefined;
-  const triggerContent = lastEventText
-    ? lastEventText.slice(0, 1000)
-    : (lastUserMsg && "text" in lastUserMsg &&
-        typeof lastUserMsg.text === "string"
-      ? lastUserMsg.text.slice(0, 1000)
-      : "Empty user request");
-  const triggerType = lastEvent ? lastEvent.type : "conversation_start";
-  const recentEvents = history.slice(-4).map((e) => ({
-    type: e.type,
-    text: eventContent(e)?.slice(0, 300),
-  }));
-  return {
-    trigger_type: triggerType,
-    trigger_content: triggerContent,
-    agent_role: prompt.slice(0, 500),
-    tools_available: (tools ?? []).map((t) => t.name).slice(0, 15),
-    recent_turns: recentEvents,
   };
 };
 
@@ -685,169 +641,5 @@ export const routeTaskWithRespan = async (
     return tier;
   } catch {
     return "flash";
-  }
-};
-
-export const routeTask = async (
-  state: string | Record<string, unknown> | unknown[],
-): Promise<ModelTier> => {
-  const provider = resolveDecisionProvider();
-  if (provider === "jev") {
-    return await routeTaskWithJev(state);
-  }
-  return await routeTaskWithRespan(state);
-};
-
-export const decideSkillsWithRespan = async (
-  prompt: string,
-  history: HistoryEvent[],
-  candidateSkills: Skill[],
-  currentlyActiveSkills: Set<string>,
-): Promise<{ toLearn: Skill[]; toUnlearn: Skill[] }> => {
-  const token = accessRespanToken() || accessJevToken();
-  if (!token && !isDecisionModelInjected()) {
-    return { toLearn: [], toUnlearn: [] };
-  }
-  if (empty(candidateSkills)) {
-    return { toLearn: [], toUnlearn: [] };
-  }
-  const lastUser = lastParticipantUtterance(history);
-  if (!lastUser || typeof lastUser.text !== "string" || !lastUser.text.trim()) {
-    return { toLearn: [], toUnlearn: [] };
-  }
-
-  const recentDialogue = history
-    .filter((e) =>
-      e.type === "participant_utterance" || e.type === "own_utterance"
-    )
-    .slice(-4)
-    .map((e) =>
-      `${e.type === "participant_utterance" ? "User" : "Assistant"}: ${
-        "text" in e && typeof e.text === "string" ? e.text : ""
-      }`
-    )
-    .join("\n");
-
-  const facts = verifiedToolFacts(history);
-
-  const state = {
-    agent_role: prompt.slice(0, 1000),
-    verified_conversation_facts_and_history:
-      (recentDialogue + (facts ? `\n\nFacts:\n${facts}` : "")).slice(-10000),
-    current_user_request: lastUser.text,
-  };
-
-  const questions = Object.fromEntries(
-    candidateSkills.map((s) => [
-      s.name,
-      {
-        type: "noul" as const,
-        instructions:
-          `Does answering this turn or executing the user request directly require the '${s.name}' skill (${s.description})?`,
-      },
-    ]),
-  );
-
-  try {
-    const answers = await callDecisionModel(state, questions);
-    const scores = Object.fromEntries(
-      candidateSkills.map((s) => {
-        const ans = answers[s.name];
-        return [s.name, ans && ans.type === "noul" ? ans.noul : 0];
-      }),
-    );
-
-    const candidateToLearn = candidateSkills
-      .filter((s) => !currentlyActiveSkills.has(s.name.toLowerCase()))
-      .filter((s) => (scores[s.name] ?? 0) >= 0.60)
-      .sort((a, b) => (scores[b.name] ?? 0) - (scores[a.name] ?? 0));
-
-    const toLearn = candidateToLearn.length > 0
-      ? [
-        candidateToLearn[0],
-        ...candidateToLearn.slice(1).filter((s) =>
-          (scores[s.name] ?? 0) >= 0.80
-        ),
-      ]
-      : [];
-
-    const toUnlearn = candidateSkills
-      .filter((s) => currentlyActiveSkills.has(s.name.toLowerCase()))
-      .filter((s) => (scores[s.name] ?? 1) < 0.20);
-
-    return { toLearn, toUnlearn };
-  } catch (err) {
-    console.warn(
-      "[respan-skills] skill decision check failed, failing open:",
-      err,
-    );
-    return { toLearn: [], toUnlearn: [] };
-  }
-};
-
-export const decideCleanupWithRespan = async (
-  prompt: string,
-  history: HistoryEvent[],
-): Promise<PastToolEpisode[]> => {
-  const token = accessRespanToken() || accessJevToken();
-  if (!token && !isDecisionModelInjected()) {
-    return [];
-  }
-
-  const candidateEpisodes = extractCandidateToolEpisodes(history);
-  if (empty(candidateEpisodes)) return [];
-
-  const lastUser = lastParticipantUtterance(history);
-  const currentUserRequest = lastUser && typeof lastUser.text === "string"
-    ? lastUser.text
-    : "No prompt";
-
-  const state = {
-    agent_role: prompt.slice(0, 1000),
-    current_user_request: currentUserRequest,
-    past_tool_episodes: candidateEpisodes.map((ep) => ({
-      turn_id: `turn_${ep.turnIndex}`,
-      user_request: ep.userText.slice(0, 150),
-      tools_invoked: ep.toolCalls.map((t) => t.name).join(", "),
-      tool_results_preview: ep.toolResultsSummary.slice(0, 2).join(" | ")
-        .slice(0, 200),
-      bot_response: ep.botText.slice(0, 150),
-    })),
-  };
-
-  const questions = Object.fromEntries(
-    candidateEpisodes.map((ep) => [
-      `compact_turn_${ep.turnIndex}`,
-      {
-        type: "noul" as const,
-        instructions:
-          `Should the intermediate tool execution logs of Turn ${ep.turnIndex} ("${
-            ep.userText.slice(0, 60)
-          }") be compacted into a summary?`,
-        criteria: {
-          true:
-            `The action or subtask in Turn ${ep.turnIndex} has been completed and responded to. The current user request ("${
-              currentUserRequest.slice(0, 60)
-            }") does not require re-inspecting the exact raw tool output, error stack traces, or intermediate line numbers from Turn ${ep.turnIndex}.`,
-          false:
-            `The current user request is directly asking about, debugging, or relying on specific raw details from Turn ${ep.turnIndex} that would be lost if summarized.`,
-        },
-      },
-    ]),
-  );
-
-  try {
-    const answers = await callDecisionModel(state, questions);
-    return candidateEpisodes.filter((ep) => {
-      const ans = answers[`compact_turn_${ep.turnIndex}`];
-      const score = ans && ans.type === "noul" ? ans.noul : 0;
-      return score >= 0.60;
-    });
-  } catch (err) {
-    console.warn(
-      "[respan-cleanup] active memory cleanup check failed, failing open:",
-      err,
-    );
-    return [];
   }
 };

@@ -26,7 +26,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { z, type ZodType } from "zod/v4";
 import type { MediaAttachment } from "./agent.ts";
 import { makeCache } from "./cacher.ts";
-import { routeTask } from "./respan.ts";
+import { routeTask } from "./decisionModel.ts";
 
 import { pruneDefaultsFromRequired } from "./toolTyping.ts";
 

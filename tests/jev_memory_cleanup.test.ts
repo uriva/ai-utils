@@ -154,7 +154,7 @@ Deno.test("extractCandidateToolEpisodes: excludes episodes that are already comp
   assertEquals(candidates[0].turnIndex, 2);
 });
 
-Deno.test("runAgent auto-cleanup with Jev: automatically emits clean_active_memory for concluded episodes", async () => {
+Deno.test("runAgent auto-cleanup with decision model: automatically emits clean_active_memory for concluded episodes", async () => {
   const baseTime = 1700000000000;
   // Generate filler tool output so total tokens exceeds the 8,000 token pre-gate
   const filler = "verbose diagnostic log output line from build system ".repeat(
