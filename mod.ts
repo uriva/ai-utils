@@ -337,6 +337,7 @@ export {
   auditUtteranceForHallucination,
   hallucinationCorrectionText,
   HallucinationDecisionSchema,
+  isUserPromptedTurn,
 } from "./src/hallucinationGate.ts";
 export { searchPastHistoryToolName } from "./src/historySearch.ts";
 export {

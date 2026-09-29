@@ -1,5 +1,6 @@
 import { z } from "zod/v4";
 import type { HistoryEvent, ParticipantUtterance } from "./agent.ts";
+import { isCompactedSummaryText } from "./compaction.ts";
 import { decide } from "./decisionModel.ts";
 import { accessJevToken } from "./jev.ts";
 import { accessRespanToken } from "./respan.ts";
@@ -25,6 +26,30 @@ export const lastParticipantUtterance = (
   [...history].reverse().find((e): e is ParticipantUtterance =>
     e.type === "participant_utterance"
   );
+
+export const isUserPromptedTurn = (history: HistoryEvent[]): boolean => {
+  const lastUserIndex = history.findLastIndex(
+    (e) =>
+      e.type === "participant_utterance" ||
+      e.type === "participant_edit_message",
+  );
+  if (lastUserIndex === -1) return false;
+  const subsequentEvents = history.slice(lastUserIndex + 1);
+  const hadInterveningReply = subsequentEvents.some(
+    (e) => e.type === "own_utterance" || e.type === "own_edit_message",
+  );
+  if (hadInterveningReply) return false;
+  const hadInterveningPlatformEvent = subsequentEvents.some(
+    (e) =>
+      e.type === "external_event" ||
+      (e.type === "own_thought" &&
+        !("modelMetadata" in e && e.modelMetadata) &&
+        typeof e.text === "string" &&
+        !isCompactedSummaryText(e.text)),
+  );
+  if (hadInterveningPlatformEvent) return false;
+  return true;
+};
 
 export const recentUserQueriesText = (history: HistoryEvent[]): string =>
   history

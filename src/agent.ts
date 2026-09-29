@@ -51,6 +51,7 @@ import { decideCleanupWithJev, decideSkillsWithJev } from "./jev.ts";
 import {
   auditUtteranceForHallucination,
   hallucinationCorrectionText,
+  isUserPromptedTurn,
   lastParticipantUtterance,
   maxHallucinationRetries,
   recentUserQueriesText,
@@ -3056,6 +3057,7 @@ export const runAbstractAgent = (
       if (
         (!isMockModelInjected() || isDecisionModelInjected()) &&
         nonempty(concludingTexts) &&
+        isUserPromptedTurn(history) &&
         retryCounts.hallucination < maxHallucinationRetries
       ) {
         const lastUser = lastParticipantUtterance(normalizedHistory);

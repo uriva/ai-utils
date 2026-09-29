@@ -3,6 +3,7 @@ import { auditUtteranceForHallucination, runAgent } from "../mod.ts";
 import {
   type HistoryEvent,
   injectCallModel,
+  ownThoughtTurn,
   ownUtteranceTurn,
   participantUtteranceTurn,
 } from "../src/agent.ts";
@@ -141,6 +142,131 @@ Deno.test(
     const emitted = history.filter((e) => e.type === "own_utterance");
     assertEquals(emitted.length, 1);
     assertEquals(emitted[0].text, "Your flight number is IZ 595.");
+  },
+);
+
+Deno.test(
+  "hallucination gate - does not evaluate scheduled proactive tasks against stale user messages",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Here is a photo of my dinner",
+      }),
+      ownUtteranceTurn("Looks delicious! Enjoy your evening!"),
+      ownThoughtTurn("PROACTIVE TASK: Send a warm morning greeting."),
+    ];
+    let callCount = 0;
+
+    const scriptedModel = () => {
+      callCount++;
+      return Promise.resolve([
+        ownUtteranceTurn(
+          "Good morning! Wishing you a wonderful and energetic day ahead!",
+        ),
+      ]);
+    };
+
+    let decisionModelCalled = false;
+    const mockDecisionModel = () => {
+      decisionModelCalled = true;
+      return Promise.resolve({
+        is_hallucination: {
+          type: "choice" as const,
+          choice: "true",
+        },
+      });
+    };
+
+    await injectDecisionModel(mockDecisionModel)(
+      injectCallModel(scriptedModel)(async () => {
+        await agentDeps(history)(runAgent)({
+          maxIterations: 3,
+          prompt: "You are a personal assistant.",
+          tools: [],
+          timezoneIANA: "UTC",
+        });
+      }),
+    )();
+
+    assertEquals(
+      decisionModelCalled,
+      false,
+      "Decision model should NOT be called to audit a proactive task against stale user messages",
+    );
+    assertEquals(
+      callCount,
+      1,
+      "Model should only be called once without being blocked by hallucination gate",
+    );
+    const emitted = history.filter((e) => e.type === "own_utterance");
+    assertEquals(emitted.length, 2);
+    assertEquals(
+      emitted[1].text,
+      "Good morning! Wishing you a wonderful and energetic day ahead!",
+    );
+  },
+);
+
+Deno.test(
+  "hallucination gate - does not evaluate proactive tasks when intervening platform task follows unanswered user message",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Here is a photo of my dinner",
+      }),
+      ownThoughtTurn("PROACTIVE TASK: Send a warm morning greeting."),
+    ];
+    let callCount = 0;
+
+    const scriptedModel = () => {
+      callCount++;
+      return Promise.resolve([
+        ownUtteranceTurn(
+          "Good morning! Wishing you a wonderful and energetic day ahead!",
+        ),
+      ]);
+    };
+
+    let decisionModelCalled = false;
+    const mockDecisionModel = () => {
+      decisionModelCalled = true;
+      return Promise.resolve({
+        is_hallucination: {
+          type: "choice" as const,
+          choice: "true",
+        },
+      });
+    };
+
+    await injectDecisionModel(mockDecisionModel)(
+      injectCallModel(scriptedModel)(async () => {
+        await agentDeps(history)(runAgent)({
+          maxIterations: 3,
+          prompt: "You are a personal assistant.",
+          tools: [],
+          timezoneIANA: "UTC",
+        });
+      }),
+    )();
+
+    assertEquals(
+      decisionModelCalled,
+      false,
+      "Decision model should NOT be called to audit a proactive task even if past user message had no reply",
+    );
+    assertEquals(
+      callCount,
+      1,
+      "Model should only be called once without being blocked by hallucination gate",
+    );
+    const emitted = history.filter((e) => e.type === "own_utterance");
+    assertEquals(emitted.length, 1);
+    assertEquals(
+      emitted[0].text,
+      "Good morning! Wishing you a wonderful and energetic day ahead!",
+    );
   },
 );
 
