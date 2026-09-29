@@ -1,7 +1,12 @@
 import { z } from "zod/v4";
-import type { HistoryEvent, ParticipantUtterance } from "./agent.ts";
+import {
+  type HistoryEvent,
+  type ParticipantUtterance,
+  participantUtteranceTurn,
+} from "./agent.ts";
 import { isCompactedSummaryText } from "./compaction.ts";
 import {
+  cleanHistoryEventForDecision,
   decide,
   isDecisionModelAvailable,
   lastParticipantUtterance,
@@ -63,17 +68,25 @@ export const recentUserQueriesText = (history: HistoryEvent[]): string =>
     .join("\n");
 
 export const auditUtteranceForHallucination = async (
-  userQuery: string,
+  historyOrQuery: HistoryEvent[] | string,
   assistantResponse: string,
   verifiedFacts?: string,
 ): Promise<boolean> => {
   if (!isDecisionModelAvailable()) return false;
   try {
+    const isArrayHistory = Array.isArray(historyOrQuery);
+    const historyEvents = isArrayHistory
+      ? historyOrQuery
+      : [participantUtteranceTurn({ name: "user", text: historyOrQuery })];
+    const events = [
+      ...historyEvents.map(cleanHistoryEventForDecision).filter(Boolean),
+      { type: "own_utterance", text: assistantResponse },
+    ];
     const result = await decide(
-      "Audit assistant response for hallucination or off-topic diversion from the user request.",
+      "Audit the assistant's proposed response in conversation_history_events for hallucination or ungrounded off-topic diversion against the conversation history and tool outputs.",
       HallucinationDecisionSchema,
     )({
-      user_query: userQuery,
+      conversation_history_events: events,
       assistant_response: assistantResponse,
       ...(verifiedFacts
         ? {

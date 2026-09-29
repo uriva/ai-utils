@@ -6,6 +6,7 @@ import {
   ownThoughtTurn,
   ownUtteranceTurn,
   participantUtteranceTurn,
+  toolResultTurn,
 } from "../src/agent.ts";
 import { injectDecisionModel } from "../src/decisionModel.ts";
 import { agentDeps, injectSecrets } from "../test_helpers.ts";
@@ -271,7 +272,7 @@ Deno.test(
 );
 
 Deno.test(
-  "hallucination gate - cleans quoted WhatsApp replies and evaluates actual user query against verified facts",
+  "hallucination gate - sends exact projected history events to decision model without false positives",
   async () => {
     const rawUserMsg =
       '[replying to you: "בדקתי, ולשבוע הקרוב אין כרגע במאגר מסיבות"]\nמסיבות 30+ במרכז';
@@ -279,7 +280,7 @@ Deno.test(
       participantUtteranceTurn({ name: "user", text: rawUserMsg }),
     ];
     let callCount = 0;
-    let auditedQuery: string | undefined;
+    let auditedEvents: unknown[] | undefined;
 
     const scriptedModel = () => {
       callCount++;
@@ -289,8 +290,8 @@ Deno.test(
     };
 
     const mockDecisionModel = (state: unknown) => {
-      const stateObj = state as { user_query?: string };
-      auditedQuery = stateObj?.user_query;
+      const stateObj = state as { conversation_history_events?: unknown[] };
+      auditedEvents = stateObj?.conversation_history_events;
       return Promise.resolve({
         is_hallucination: {
           type: "choice" as const,
@@ -311,7 +312,7 @@ Deno.test(
     )();
 
     assertEquals(callCount, 1);
-    assertEquals(auditedQuery, "מסיבות 30+ במרכז");
+    assertEquals(auditedEvents?.length, 2);
   },
 );
 
@@ -320,9 +321,11 @@ Deno.test(
   injectSecrets(async () => {
     // 1. Off-topic response should be flagged
     const isBad = await auditUtteranceForHallucination(
-      "What is the flight number that we booked with Arkia?",
+      [participantUtteranceTurn({
+        name: "user",
+        text: "What is the flight number that we booked with Arkia?",
+      })],
       "I reviewed the invoice: No VAT was charged, total is $3,756 paid via credit card and BUYME vouchers.",
-      "Flight booking confirmed: Outbound IZ 595, Inbound IZ 690.",
     );
     assertEquals(
       isBad,
@@ -332,9 +335,17 @@ Deno.test(
 
     // 2. Direct answer should NOT be flagged
     const isGood = await auditUtteranceForHallucination(
-      "What is the flight number that we booked with Arkia?",
+      [
+        participantUtteranceTurn({
+          name: "user",
+          text: "What is the flight number that we booked with Arkia?",
+        }),
+        toolResultTurn({
+          toolCallId: "call_1",
+          result: "Flight booking confirmed: Outbound IZ 595, Inbound IZ 690.",
+        }),
+      ],
       "Your flight numbers are IZ 595 (outbound) and IZ 690 (return).",
-      "Flight booking confirmed: Outbound IZ 595, Inbound IZ 690.",
     );
     assertEquals(
       isGood,

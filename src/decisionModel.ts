@@ -467,6 +467,41 @@ export const verifiedToolFacts = (history: HistoryEvent[]): string => {
   return `${toolResults}\n\n${otherFacts}`.slice(-10000).trim();
 };
 
+export const cleanHistoryEventForDecision = (e: HistoryEvent) => {
+  if (e.type === "participant_utterance") {
+    return { type: e.type, ...(e.name ? { name: e.name } : {}), text: e.text };
+  }
+  if (e.type === "own_utterance") {
+    return { type: e.type, text: e.text };
+  }
+  if (e.type === "tool_call") {
+    return { type: e.type, name: e.name, parameters: e.parameters };
+  }
+  if (e.type === "tool_result") {
+    return {
+      type: e.type,
+      ...(e.toolCallId ? { toolCallId: e.toolCallId } : {}),
+      result: e.result,
+    };
+  }
+  if (e.type === "own_thought" && typeof e.text === "string") {
+    return { type: e.type, text: e.text };
+  }
+  if ("text" in e && typeof e.text === "string") {
+    return { type: e.type, text: e.text };
+  }
+  return undefined;
+};
+
+export const historyEventsToDecisionJson = (
+  prompt: string,
+  history: HistoryEvent[],
+): string =>
+  JSON.stringify({
+    system_prompt: prompt,
+    history: history.map(cleanHistoryEventForDecision).filter(Boolean),
+  });
+
 export const eventContent = (event: HistoryEvent): string | undefined => {
   if ("text" in event && typeof event.text === "string") return event.text;
   if ("result" in event && typeof event.result === "string") {

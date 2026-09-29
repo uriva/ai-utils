@@ -144,6 +144,14 @@ export const stateToSpan = (state: unknown): RespanSpan => {
   if (isRespanSpan(state)) return state;
 
   if (typeof state === "string") {
+    try {
+      const parsed = JSON.parse(state);
+      if (typeof parsed === "object" && parsed !== null) {
+        return stateToSpan(parsed);
+      }
+    } catch {
+      // plain text string, fall through
+    }
     return {
       input: [{ role: "user", content: state }],
       output: { role: "assistant", content: "" },
@@ -175,6 +183,43 @@ export const stateToSpan = (state: unknown): RespanSpan => {
 
   if (typeof state === "object" && state !== null) {
     const record = state as Record<string, unknown>;
+
+    const historyList = ("conversation_history_events" in record &&
+        Array.isArray(record.conversation_history_events)
+      ? record.conversation_history_events
+      : undefined) ??
+      ("history" in record && Array.isArray(record.history)
+        ? record.history
+        : undefined);
+
+    if (historyList) {
+      const rawMessages = historyList
+        .map(toRespanMessage)
+        .filter((m): m is RespanMessage => Boolean(m));
+      const sysPrompt = "system_prompt" in record &&
+          typeof record.system_prompt === "string"
+        ? record.system_prompt
+        : "";
+      const allMessages = sysPrompt
+        ? [{ role: "system" as const, content: sysPrompt }, ...rawMessages]
+        : rawMessages;
+      const lastMsg = allMessages[allMessages.length - 1];
+      if (lastMsg && lastMsg.role === "assistant") {
+        const input = allMessages.slice(0, -1);
+        return {
+          input: empty(input)
+            ? [{ role: "user" as const, content: "Context" }]
+            : input,
+          output: lastMsg,
+        };
+      }
+      return {
+        input: empty(allMessages)
+          ? [{ role: "user" as const, content: "Empty request" }]
+          : allMessages,
+        output: { role: "assistant", content: "" },
+      };
+    }
 
     if (
       "assistant_response" in record &&

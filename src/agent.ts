@@ -53,12 +53,9 @@ import {
 } from "./decisionModel.ts";
 import {
   auditUtteranceForHallucination,
-  cleanUserQuery,
   hallucinationCorrectionText,
   isUserPromptedTurn,
-  lastParticipantUtterance,
   maxHallucinationRetries,
-  verifiedToolFacts,
 } from "./hallucinationGate.ts";
 export const stopThoughtPrefix =
   "I'm working on this for some time and not making progress.";
@@ -3064,26 +3061,27 @@ export const runAbstractAgent = (
         isUserPromptedTurn(history) &&
         retryCounts.hallucination < maxHallucinationRetries
       ) {
-        const lastUser = lastParticipantUtterance(normalizedHistory);
-        if (lastUser && lastUser.text) {
-          const userQuery = cleanUserQuery(lastUser.text);
-          const facts = verifiedToolFacts(normalizedHistory);
-          const isHallucinated = await auditUtteranceForHallucination(
-            userQuery,
-            concludingTexts.join("\n"),
-            facts || undefined,
+        const isHallucinated = await auditUtteranceForHallucination(
+          normalizedHistory,
+          concludingTexts.join("\n"),
+        );
+        if (isHallucinated) {
+          retryCounts.hallucination++;
+          console.warn(
+            `[hallucination-gate] blocked hallucinated/off-topic utterance (attempt ${retryCounts.hallucination}/${maxHallucinationRetries})`,
           );
-          if (isHallucinated) {
-            retryCounts.hallucination++;
-            console.warn(
-              `[hallucination-gate] blocked hallucinated/off-topic utterance (attempt ${retryCounts.hallucination}/${maxHallucinationRetries})`,
-            );
-            ephemeralHistory = [
-              ...ephemeralHistory,
-              ownThoughtTurn(hallucinationCorrectionText(userQuery)),
-            ];
-            continue;
-          }
+          const lastUser = [...normalizedHistory].reverse().find(
+            (e) => e.type === "participant_utterance",
+          );
+          const userQuery =
+            lastUser && "text" in lastUser && typeof lastUser.text === "string"
+              ? lastUser.text.slice(0, 300)
+              : "your request";
+          ephemeralHistory = [
+            ...ephemeralHistory,
+            ownThoughtTurn(hallucinationCorrectionText(userQuery)),
+          ];
+          continue;
         }
       }
 
