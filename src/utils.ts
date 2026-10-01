@@ -8,6 +8,7 @@ export type ModelOpts = {
   maxOutputTokens?: number;
   provider?: "google" | "openai" | "gemini";
   disableThinking?: boolean;
+  disableDecisionRouting?: boolean;
 };
 
 const typeAdherenceError = throwerCatcher("AI refused to adhere to typing");

@@ -174,8 +174,13 @@ Deno.test(
     };
 
     let decisionModelCalled = false;
-    const mockDecisionModel = () => {
-      decisionModelCalled = true;
+    const mockDecisionModel = (
+      _state?: unknown,
+      questions?: Record<string, unknown>,
+    ) => {
+      if (questions && "is_hallucination" in questions) {
+        decisionModelCalled = true;
+      }
       return Promise.resolve({
         is_hallucination: {
           type: "choice" as const,
@@ -236,8 +241,13 @@ Deno.test(
     };
 
     let decisionModelCalled = false;
-    const mockDecisionModel = () => {
-      decisionModelCalled = true;
+    const mockDecisionModel = (
+      _state?: unknown,
+      questions?: Record<string, unknown>,
+    ) => {
+      if (questions && "is_hallucination" in questions) {
+        decisionModelCalled = true;
+      }
       return Promise.resolve({
         is_hallucination: {
           type: "choice" as const,
@@ -382,8 +392,13 @@ Deno.test(
     };
 
     let decisionModelCalled = false;
-    const mockDecisionModel = () => {
-      decisionModelCalled = true;
+    const mockDecisionModel = (
+      _state?: unknown,
+      questions?: Record<string, unknown>,
+    ) => {
+      if (questions && "is_hallucination" in questions) {
+        decisionModelCalled = true;
+      }
       return Promise.resolve({
         is_hallucination: {
           type: "choice" as const,

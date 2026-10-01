@@ -78,7 +78,7 @@ export const genJson =
       );
     }
 
-    if (isDecisionField(zodType)) {
+    if (!opts.disableDecisionRouting && isDecisionField(zodType)) {
       try {
         return await decide(systemMsg, zodType)(userMsg);
       } catch {
@@ -91,7 +91,8 @@ export const genJson =
       }
     }
 
-    const isObj = isRecord(zodType) && isRecord(zodType.shape);
+    const isObj = !opts.disableDecisionRouting && isRecord(zodType) &&
+      isRecord(zodType.shape);
     if (isObj) {
       const shape = zodType.shape as Record<string, ZodType>;
       const stringKeys = Object.keys(shape).filter((k) =>
