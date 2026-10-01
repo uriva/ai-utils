@@ -549,6 +549,21 @@ export const formatAgentStateForJev = formatAgentStateForDecisionModel;
 export const routeTask = async (
   state: string | Record<string, unknown> | unknown[],
 ): Promise<ModelTier> => {
+  const override = decisionModelOverrideInjection.access();
+  if (override) {
+    const answers = await override(state, {
+      requires_flash: {
+        type: "choice",
+        criteria: decisionModelSelectionCriteria,
+        instructions: decisionModelSelectionInstructions,
+      },
+    });
+    const ans = answers.requires_flash;
+    if (ans && ans.type === "choice" && ans.choice === "lite") {
+      return "lite";
+    }
+    return "flash";
+  }
   const provider = resolveDecisionProvider();
   if (provider === "jev") {
     return await routeTaskWithJev(state);

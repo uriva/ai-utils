@@ -1,0 +1,340 @@
+import { assert } from "@std/assert";
+import { pipe } from "gamla";
+import {
+  type HistoryEvent,
+  injectAccessHistory,
+  injectCallModel,
+  injectOutputEvent,
+  ownUtteranceTurn,
+  participantUtteranceTurn,
+  type Skill,
+  toolResultTurn,
+  toolUseTurn,
+} from "../src/agent.ts";
+import { injectDecisionModel } from "../src/decisionModel.ts";
+import { cleanActiveMemoryToolName } from "../src/utils.ts";
+import { runAgent } from "../mod.ts";
+import { z } from "zod/v4";
+
+const inMemoryDeps = (inMemoryHistory: HistoryEvent[]) =>
+  pipe(
+    injectAccessHistory(() => Promise.resolve(inMemoryHistory)),
+    injectOutputEvent((event) => {
+      inMemoryHistory.push(event);
+      return Promise.resolve();
+    }),
+  );
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const sampleSkill: Skill = {
+  name: "data_exporter",
+  description: "Export datasets to external files",
+  instructions: "When asked to export data, use data_exporter.",
+  tools: [],
+};
+
+Deno.test(
+  "pre-model decisions are non-blocking: turn 1 model call starts without waiting for decision model latency, and decisions settle additively",
+  async () => {
+    const baseTime = 1700000000000;
+    const filler = "long log entry with detailed diagnostic context ".repeat(
+      500,
+    );
+
+    // Concluded tool episodes qualifying for memory cleanup
+    const history: HistoryEvent[] = [
+      {
+        ...participantUtteranceTurn({ name: "user", text: "Step 1" }),
+        timestamp: baseTime + 100,
+      },
+      {
+        ...toolUseTurn({ name: "tool1", args: {} }),
+        timestamp: baseTime + 200,
+        id: "c1",
+      },
+      {
+        ...toolResultTurn({ toolCallId: "c1", result: filler }),
+        timestamp: baseTime + 300,
+        id: "r1",
+      },
+      {
+        ...ownUtteranceTurn("Step 1 done."),
+        timestamp: baseTime + 400,
+      },
+      {
+        ...participantUtteranceTurn({ name: "user", text: "Step 2" }),
+        timestamp: baseTime + 1000,
+      },
+      {
+        ...toolUseTurn({ name: "tool2", args: {} }),
+        timestamp: baseTime + 1100,
+        id: "c2",
+      },
+      {
+        ...toolResultTurn({ toolCallId: "c2", result: filler }),
+        timestamp: baseTime + 1200,
+        id: "r2",
+      },
+      {
+        ...ownUtteranceTurn("Step 2 done."),
+        timestamp: baseTime + 1300,
+      },
+      {
+        ...participantUtteranceTurn({ name: "user", text: "Step 3" }),
+        timestamp: baseTime + 1500,
+      },
+      {
+        ...toolUseTurn({ name: "tool3", args: {} }),
+        timestamp: baseTime + 1600,
+        id: "c3",
+      },
+      {
+        ...toolResultTurn({ toolCallId: "c3", result: filler }),
+        timestamp: baseTime + 1700,
+        id: "r3",
+      },
+      {
+        ...ownUtteranceTurn("Step 3 done."),
+        timestamp: baseTime + 1800,
+      },
+      {
+        ...participantUtteranceTurn({
+          name: "user",
+          text: "Export the results now.",
+        }),
+        timestamp: baseTime + 2000,
+      },
+    ];
+
+    const SIMULATED_DECISION_LATENCY_MS = 500;
+    let decisionStartTime = 0;
+    let decisionEndTime = 0;
+    let callModelStartTime = 0;
+    let callModelInvokedWhileDecisionInFlight = false;
+
+    const mockDecisionCaller = async (
+      _state: unknown,
+      // deno-lint-ignore no-explicit-any
+      questions: Record<string, any>,
+      // deno-lint-ignore no-explicit-any
+    ): Promise<Record<string, any>> => {
+      const isPreModelDecision = "data_exporter" in questions ||
+        Object.keys(questions).some((k) => k.startsWith("compact_turn_"));
+      if (isPreModelDecision) {
+        if (decisionStartTime === 0) {
+          decisionStartTime = performance.now();
+        }
+        await delay(SIMULATED_DECISION_LATENCY_MS);
+        decisionEndTime = performance.now();
+      }
+      // deno-lint-ignore no-explicit-any
+      const answers: Record<string, any> = {};
+      for (const key of Object.keys(questions)) {
+        if (key === "is_hallucination") {
+          answers[key] = { type: "noul", noul: 0.05 };
+        } else if (key === "requires_flash") {
+          answers[key] = { type: "choice", choice: "lite" };
+        } else {
+          answers[key] = { type: "noul", noul: 0.95 };
+        }
+      }
+      return answers;
+    };
+
+    const fakeCallModel = (
+      _received: HistoryEvent[],
+    ): Promise<HistoryEvent[]> => {
+      callModelStartTime = performance.now();
+      if (decisionStartTime > 0 && decisionEndTime === 0) {
+        callModelInvokedWhileDecisionInFlight = true;
+      }
+      return Promise.resolve([
+        ownUtteranceTurn("Export initiated immediately."),
+      ]);
+    };
+
+    let agentRunStart = 0;
+
+    await pipe(
+      injectDecisionModel(mockDecisionCaller),
+      injectCallModel(fakeCallModel),
+      inMemoryDeps(history),
+    )(async () => {
+      agentRunStart = performance.now();
+      await runAgent({
+        provider: "anthropic",
+        maxIterations: 5,
+        tools: [],
+        skills: [sampleSkill],
+        prompt: "You are an assistant.",
+        timezoneIANA: "UTC",
+      });
+    })();
+
+    const timeUntilCallModelMs = callModelStartTime - agentRunStart;
+
+    // 1. LATENCY ASSERTION: CallModel must start without waiting for the 500ms decision model
+    assert(
+      timeUntilCallModelMs < 300,
+      `Expected callModel to start without waiting for decision model (< 300ms), but it was blocked for ${
+        Math.round(timeUntilCallModelMs)
+      }ms by pre-model decisions`,
+    );
+
+    // 2. CONCURRENCY ASSERTION: CallModel must be dispatched concurrently while pre-model decisions are still running
+    assert(
+      callModelInvokedWhileDecisionInFlight,
+      "Expected callModel to be invoked while pre-model decisions were in-flight, but callModel waited until after decisions completed",
+    );
+
+    // 3. ADDITIVE ASSERTION: Decisions must complete in the background and additively record skills and memory cleanup to history
+    const autoLearnEvents = history.filter(
+      (e) => e.type === "tool_call" && e.id.startsWith("auto-learn-"),
+    );
+    assert(
+      autoLearnEvents.length > 0,
+      "Expected skill auto-learn event to be additively recorded in history by background task",
+    );
+
+    const autoCleanEvents = history.filter(
+      (e) => e.type === "tool_call" && e.name === cleanActiveMemoryToolName,
+    );
+    assert(
+      autoCleanEvents.length > 0,
+      "Expected memory cleanup event to be additively recorded in history by background task",
+    );
+  },
+);
+
+Deno.test(
+  "additive background decisions: turn 1 initiates model call without delay and subsequent iteration picks up background decisions",
+  async () => {
+    const baseTime = 1700000000000;
+    const filler = "long log entry with detailed diagnostic context ".repeat(
+      500,
+    );
+
+    const history: HistoryEvent[] = [
+      {
+        ...participantUtteranceTurn({ name: "user", text: "Step 1" }),
+        timestamp: baseTime + 100,
+      },
+      {
+        ...toolUseTurn({ name: "tool1", args: {} }),
+        timestamp: baseTime + 200,
+        id: "c1",
+      },
+      {
+        ...toolResultTurn({ toolCallId: "c1", result: filler }),
+        timestamp: baseTime + 300,
+        id: "r1",
+      },
+      {
+        ...ownUtteranceTurn("Step 1 done."),
+        timestamp: baseTime + 400,
+      },
+      {
+        ...participantUtteranceTurn({
+          name: "user",
+          text: "Check status then export.",
+        }),
+        timestamp: baseTime + 2000,
+      },
+    ];
+
+    const SIMULATED_DECISION_LATENCY_MS = 200;
+    let turn1ModelCallTime = 0;
+    let turn1DecisionStartTime = 0;
+    let iterationsCount = 0;
+
+    const mockDecisionCaller = async (
+      _state: unknown,
+      // deno-lint-ignore no-explicit-any
+      questions: Record<string, any>,
+      // deno-lint-ignore no-explicit-any
+    ): Promise<Record<string, any>> => {
+      const isPreModelDecision = "data_exporter" in questions ||
+        Object.keys(questions).some((k) => k.startsWith("compact_turn_"));
+      if (isPreModelDecision) {
+        if (turn1DecisionStartTime === 0) {
+          turn1DecisionStartTime = performance.now();
+        }
+        await delay(SIMULATED_DECISION_LATENCY_MS);
+      }
+      // deno-lint-ignore no-explicit-any
+      const answers: Record<string, any> = {};
+      for (const key of Object.keys(questions)) {
+        if (key === "is_hallucination") {
+          answers[key] = { type: "noul", noul: 0.05 };
+        } else if (key === "requires_flash") {
+          answers[key] = { type: "choice", choice: "lite" };
+        } else {
+          answers[key] = { type: "noul", noul: 0.95 };
+        }
+      }
+      return answers;
+    };
+
+    const fakeCallModel = (
+      _received: HistoryEvent[],
+    ): Promise<HistoryEvent[]> => {
+      iterationsCount++;
+      if (iterationsCount === 1) {
+        turn1ModelCallTime = performance.now();
+        // Turn 1 calls a quick status tool
+        return Promise.resolve([
+          toolUseTurn({ name: "status_check", args: {} }),
+        ]);
+      }
+      // Turn 2 finishes
+      return Promise.resolve([
+        ownUtteranceTurn("Status checked and exported."),
+      ]);
+    };
+
+    let agentRunStart = 0;
+
+    await pipe(
+      injectDecisionModel(mockDecisionCaller),
+      injectCallModel(fakeCallModel),
+      inMemoryDeps(history),
+    )(async () => {
+      agentRunStart = performance.now();
+      await runAgent({
+        provider: "anthropic",
+        maxIterations: 5,
+        tools: [
+          {
+            name: "status_check",
+            description: "Quick status check",
+            parameters: z.object({}),
+            handler: () => Promise.resolve("All good"),
+          },
+        ],
+        skills: [sampleSkill],
+        prompt: "You are an assistant.",
+        timezoneIANA: "UTC",
+      });
+    })();
+
+    const turn1DelayMs = turn1ModelCallTime - agentRunStart;
+
+    // Turn 1 must NOT be blocked by the 200ms decision model
+    assert(
+      turn1DelayMs < 100,
+      `Expected Turn 1 to start immediately (< 100ms), but took ${
+        Math.round(turn1DelayMs)
+      }ms`,
+    );
+
+    // Verify background decisions were additive across iterations
+    const autoLearnEvents = history.filter(
+      (e) => e.type === "tool_call" && e.id.startsWith("auto-learn-"),
+    );
+    assert(
+      autoLearnEvents.length > 0,
+      "Expected skill auto-learn event to be additively recorded in history",
+    );
+  },
+);
