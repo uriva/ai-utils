@@ -2618,7 +2618,14 @@ const emitSkillAdjustmentEvents = async (
   toLearn: Skill[],
   toUnlearn: Skill[],
 ): Promise<void> => {
-  for (const skill of toLearn) {
+  const currentActive = activeSkillNames(await getHistory());
+  const freshToLearn = toLearn.filter(
+    (skill) => !currentActive.has(skill.name.toLowerCase()),
+  );
+  const freshToUnlearn = toUnlearn.filter(
+    (skill) => currentActive.has(skill.name.toLowerCase()),
+  );
+  for (const skill of freshToLearn) {
     const callId = `auto-learn-${generateId()}`;
     await outputEvent({
       id: callId,
@@ -2640,7 +2647,7 @@ const emitSkillAdjustmentEvents = async (
       result: skillLearnedSuccessMessage(skill.name),
     });
   }
-  for (const skill of toUnlearn) {
+  for (const skill of freshToUnlearn) {
     const callId = `auto-unlearn-${generateId()}`;
     await outputEvent({
       id: callId,

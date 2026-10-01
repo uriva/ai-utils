@@ -338,3 +338,89 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "race condition guard: if LLM explicitly learns a skill before background decision completes, duplicate auto-learn is not emitted",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please export the report.",
+      }),
+    ];
+
+    const SIMULATED_DECISION_LATENCY_MS = 200;
+    let iterationsCount = 0;
+
+    const mockDecisionCaller = async (
+      _state: unknown,
+      // deno-lint-ignore no-explicit-any
+      questions: Record<string, any>,
+      // deno-lint-ignore no-explicit-any
+    ): Promise<Record<string, any>> => {
+      if ("data_exporter" in questions) {
+        await delay(SIMULATED_DECISION_LATENCY_MS);
+      }
+      // deno-lint-ignore no-explicit-any
+      const answers: Record<string, any> = {};
+      for (const key of Object.keys(questions)) {
+        if (key === "is_hallucination") {
+          answers[key] = { type: "noul", noul: 0.05 };
+        } else if (key === "requires_flash") {
+          answers[key] = { type: "choice", choice: "lite" };
+        } else {
+          answers[key] = { type: "noul", noul: 0.95 };
+        }
+      }
+      return answers;
+    };
+
+    const fakeCallModel = (
+      _received: HistoryEvent[],
+    ): Promise<HistoryEvent[]> => {
+      iterationsCount++;
+      if (iterationsCount === 1) {
+        // LLM explicitly learned the skill before background decision finished
+        return Promise.resolve([
+          toolUseTurn({
+            name: "learn_skill",
+            args: { skillName: "data_exporter" },
+          }),
+        ]);
+      }
+      return Promise.resolve([
+        ownUtteranceTurn("Report exported."),
+      ]);
+    };
+
+    await pipe(
+      injectDecisionModel(mockDecisionCaller),
+      injectCallModel(fakeCallModel),
+      inMemoryDeps(history),
+    )(async () => {
+      await runAgent({
+        provider: "anthropic",
+        maxIterations: 3,
+        tools: [],
+        skills: [sampleSkill],
+        prompt: "You are an assistant.",
+        timezoneIANA: "UTC",
+      });
+    })();
+
+    // History should have exactly ONE learn_skill call (the explicit LLM one)
+    const learnCalls = history.filter(
+      (e) => e.type === "tool_call" && e.name === "learn_skill",
+    );
+    assert(
+      !history.some((e) =>
+        e.type === "tool_call" && e.id.startsWith("auto-learn-")
+      ),
+      "Should not emit duplicate auto-learn event when LLM already learned the skill",
+    );
+    assert(
+      learnCalls.length === 1,
+      `Expected exactly 1 learn_skill call, found ${learnCalls.length}`,
+    );
+  },
+);
