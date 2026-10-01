@@ -25,12 +25,8 @@ jobs:
         stage:
           - name: core
             provider: ""
-          - name: google
+          - name: gemini
             provider: google
-          - name: moonshot
-            provider: moonshot
-          - name: anthropic
-            provider: anthropic
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
