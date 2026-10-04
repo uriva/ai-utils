@@ -351,7 +351,7 @@ const runTwoBotExchange = async (): Promise<
     text: "Say a short greeting out loud now.",
     from: "tester",
   });
-  await waitForCondition(aliceSpoke, 30_000);
+  await waitForCondition(aliceSpoke, 20_000);
 
   await new Promise((r) => setTimeout(r, 2000));
   await aliceEndpoint.sendData({
@@ -359,7 +359,7 @@ const runTwoBotExchange = async (): Promise<
     text: "Say a short greeting out loud now.",
     from: "tester",
   });
-  await waitForCondition(bobSpoke, 30_000);
+  await waitForCondition(bobSpoke, 20_000);
 
   await Promise.all([
     aliceEndpoint.sendData({ type: "close", from: "tester" }),
@@ -379,7 +379,7 @@ Deno.test({
   sanitizeResources: false,
   fn: injectSecrets(async () => {
     let result: Awaited<ReturnType<typeof runTwoBotExchange>> = "retry";
-    for (let attempt = 0; attempt < 3 && result === "retry"; attempt++) {
+    for (let attempt = 0; attempt < 5 && result === "retry"; attempt++) {
       result = await runTwoBotExchange();
     }
     assert(result !== "retry", "Bots never produced stable speech exchange");

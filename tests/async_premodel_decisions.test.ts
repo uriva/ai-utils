@@ -424,3 +424,81 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "race condition guard: if LLM invokes skill tool via run_command before background decision completes, auto-learn is still emitted",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please export the report.",
+      }),
+    ];
+
+    const SIMULATED_DECISION_LATENCY_MS = 200;
+    let iterationsCount = 0;
+
+    const mockDecisionCaller = async (
+      _state: unknown,
+      // deno-lint-ignore no-explicit-any
+      questions: Record<string, any>,
+      // deno-lint-ignore no-explicit-any
+    ): Promise<Record<string, any>> => {
+      if ("data_exporter" in questions) {
+        await delay(SIMULATED_DECISION_LATENCY_MS);
+      }
+      // deno-lint-ignore no-explicit-any
+      const answers: Record<string, any> = {};
+      for (const key of Object.keys(questions)) {
+        if (key === "is_hallucination") {
+          answers[key] = { type: "noul", noul: 0.05 };
+        } else if (key === "requires_flash") {
+          answers[key] = { type: "choice", choice: "lite" };
+        } else {
+          answers[key] = { type: "noul", noul: 0.95 };
+        }
+      }
+      return answers;
+    };
+
+    const fakeCallModel = (
+      _received: HistoryEvent[],
+    ): Promise<HistoryEvent[]> => {
+      iterationsCount++;
+      if (iterationsCount === 1) {
+        return Promise.resolve([
+          toolUseTurn({
+            name: "run_command",
+            args: { command: "data_exporter/export", params: {} },
+          }),
+        ]);
+      }
+      return Promise.resolve([
+        ownUtteranceTurn("Report exported."),
+      ]);
+    };
+
+    await pipe(
+      injectDecisionModel(mockDecisionCaller),
+      injectCallModel(fakeCallModel),
+      inMemoryDeps(history),
+    )(async () => {
+      await runAgent({
+        provider: "anthropic",
+        maxIterations: 3,
+        tools: [],
+        skills: [sampleSkill],
+        prompt: "You are an assistant.",
+        timezoneIANA: "UTC",
+      });
+    })();
+
+    const autoLearnCalls = history.filter(
+      (e) => e.type === "tool_call" && e.id.startsWith("auto-learn-"),
+    );
+    assert(
+      autoLearnCalls.length === 1,
+      `Expected auto-learn event to be emitted even when LLM executed skill tool via run_command before decision settled. Found: ${autoLearnCalls.length}`,
+    );
+  },
+);

@@ -2390,6 +2390,9 @@ export const tool = <ParametersSchema extends z.ZodObject<z.ZodRawShape>>(
 const isUnlearnToolCall = (e: HistoryEvent) =>
   e.type === "tool_call" && e.name === unlearnSkillToolName;
 
+const isLearnToolCall = (e: HistoryEvent) =>
+  e.type === "tool_call" && e.name === learnSkillToolName;
+
 const skillNamePrefix = (name: string) => name.slice(0, name.indexOf("/"));
 
 const skillNameFromToolCall = (e: HistoryEvent): string | undefined => {
@@ -2433,6 +2436,21 @@ const activeSkillNames = (history: HistoryEvent[]): Set<string> => {
     if (!skillName) continue;
     if (!isUnlearnToolCall(e)) names.add(skillName);
     else if (!refusedUnlearns.has(e.id)) names.delete(skillName);
+  }
+  return names;
+};
+
+const learnedSkillNames = (history: HistoryEvent[]): Set<string> => {
+  const cleaned = applyCleanActiveMemoryDirectives(history);
+  const refusedUnlearns = refusedUnlearnCallIds(cleaned);
+  const names = new Set<string>();
+  for (const e of sortedByTimestamp(cleaned)) {
+    const skillName = skillNameFromToolCall(e);
+    if (!skillName) continue;
+    if (isLearnToolCall(e)) names.add(skillName);
+    else if (isUnlearnToolCall(e) && !refusedUnlearns.has(e.id)) {
+      names.delete(skillName);
+    }
   }
   return names;
 };
@@ -2714,9 +2732,11 @@ const emitSkillAdjustmentEvents = async (
   toLearn: Skill[],
   toUnlearn: Skill[],
 ): Promise<void> => {
-  const currentActive = activeSkillNames(await getHistory());
+  const history = await getHistory();
+  const currentLearned = learnedSkillNames(history);
+  const currentActive = activeSkillNames(history);
   const freshToLearn = toLearn.filter(
-    (skill) => !currentActive.has(skill.name.toLowerCase()),
+    (skill) => !currentLearned.has(skill.name.toLowerCase()),
   );
   const freshToUnlearn = toUnlearn.filter(
     (skill) => currentActive.has(skill.name.toLowerCase()),
