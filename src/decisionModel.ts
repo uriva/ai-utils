@@ -115,7 +115,7 @@ export const isDecisionModelAvailable = (): boolean => {
   return Boolean(accessRespanToken());
 };
 
-export const callDecisionModel = (
+export const callDecisionModel = async (
   state: unknown,
   questions: Record<string, DecisionQuestion>,
 ): Promise<Record<string, DecisionAnswer>> => {
@@ -125,9 +125,31 @@ export const callDecisionModel = (
   }
   const provider = resolveDecisionProvider();
   if (provider === "jev") {
-    return callJevDecisionModel(state, questions);
+    try {
+      return await callJevDecisionModel(state, questions);
+    } catch (err) {
+      if (accessRespanToken()) {
+        console.warn(
+          "[decision-model] Jev failed, falling back to Respan:",
+          err,
+        );
+        return await callRespanDecisionModel(state, questions);
+      }
+      throw err;
+    }
   }
-  return callRespanDecisionModel(state, questions);
+  try {
+    return await callRespanDecisionModel(state, questions);
+  } catch (err) {
+    if (accessJevToken()) {
+      console.warn(
+        "[decision-model] Respan failed, falling back to Jev:",
+        err,
+      );
+      return await callJevDecisionModel(state, questions);
+    }
+    throw err;
+  }
 };
 
 const isRecord = (val: unknown): val is Record<string, unknown> =>

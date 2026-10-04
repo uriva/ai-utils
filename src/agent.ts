@@ -3015,9 +3015,9 @@ const maybeRunProgressCheck = async (
   | { kind: "force-stop" }
 > => {
   const { c, stopAdviceCount, normalizedHistory } = state;
-  const due =
-    (c > 0 && spec.maxIterations > 0 && c % spec.maxIterations === 0) ||
-    stopAdviceCount > 0;
+  const due = hasUnansweredUserMessage(normalizedHistory) &&
+    ((c > 0 && spec.maxIterations > 0 && c % spec.maxIterations === 0) ||
+      stopAdviceCount > 0);
   if (!due) return { kind: "run", stopAdviceCount };
   console.log(
     `[agent-progress-check] c=${c} stopAdviceCount=${stopAdviceCount} - running progress check with the bigger model`,
@@ -3155,7 +3155,9 @@ export const runAbstractAgent = (
           normalizedHistory,
         });
         if (progress.kind === "force-stop") {
-          await outputEvent(ownUtteranceTurn(forcedStopUtterance));
+          if (hasUnansweredUserMessage(normalizedHistory)) {
+            await outputEvent(ownUtteranceTurn(forcedStopUtterance));
+          }
           return;
         }
         stopAdviceCount = progress.stopAdviceCount;
