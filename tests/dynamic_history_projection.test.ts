@@ -329,3 +329,193 @@ Deno.test(
     assertEquals(sanitized[0].id, "p1");
   },
 );
+
+Deno.test(
+  "dynamic history projection - recovers when tool output causes content policy block during session summarization",
+  async () => {
+    const baseTime = Date.now() - 24 * 60 * 60 * 1000;
+    const hourMs = 60 * 60 * 1000;
+    const fillerText =
+      "detailed architectural decisions regarding database migration ".repeat(
+        600,
+      );
+
+    const rawHistory: HistoryEvent[] = [
+      {
+        id: "p-past-1",
+        type: "participant_utterance",
+        isOwn: false,
+        name: "user",
+        text: `Please check the database: ${fillerText}`,
+        timestamp: baseTime,
+      },
+      {
+        id: "call-past-1",
+        type: "tool_call",
+        name: "some_tool",
+        parameters: { query: "lookup" },
+        isOwn: true,
+        timestamp: baseTime + 1000,
+      },
+      {
+        id: "res-past-1",
+        type: "tool_result",
+        toolCallId: "call-past-1",
+        result: "raw external scrape containing prohibited trigger content",
+        isOwn: true,
+        timestamp: baseTime + 2000,
+      },
+      {
+        id: "o-past-1",
+        type: "own_utterance",
+        isOwn: true,
+        text: `Found the details in the database: ${fillerText}`,
+        timestamp: baseTime + 3000,
+      },
+      {
+        id: "p-active",
+        type: "participant_utterance",
+        isOwn: false,
+        name: "user",
+        text: "Can you proceed with the next step?",
+        timestamp: baseTime + 2 * hourMs,
+      },
+    ];
+
+    let receivedHistoryByModel: HistoryEvent[] = [];
+    const fakeGenJson =
+      (_opts: unknown, _sys: string, _zod: unknown) =>
+      (userMsg: string): Promise<Record<string, string>> => {
+        if (userMsg.includes("prohibited trigger content")) {
+          throw new Error(
+            "Gemini request blocked with reason: PROHIBITED_CONTENT",
+          );
+        }
+        return Promise.resolve({
+          entities: "Database service",
+          decisions: "Proceed to next step",
+          actions: "Queried details",
+          pendingItems: "Next step",
+          abandonedItems: "None",
+          context: "Lookup complete",
+        });
+      };
+
+    const inMemoryCache: Record<string, unknown> = {};
+    const mockCacher = memoryCacher(inMemoryCache);
+    const fakeCallModel = (
+      history: HistoryEvent[],
+    ): Promise<HistoryEvent[]> => {
+      receivedHistoryByModel = history;
+      return Promise.resolve([
+        ownUtteranceTurn("Proceeding now."),
+      ]);
+    };
+
+    await injectCacher(mockCacher)(async () => {
+      await genJsonOverride.inject(() => fakeGenJson)(async () => {
+        await injectCallModel(fakeCallModel)(async () => {
+          await agentDeps(rawHistory)(runAgent)({
+            maxIterations: 5,
+            tools: [someTool],
+            prompt: "You are a helpful assistant.",
+            timezoneIANA: "UTC",
+          });
+        })();
+      })();
+    })();
+
+    const summaryEvents = receivedHistoryByModel.filter((e) =>
+      e.type === "own_thought" &&
+      typeof e.text === "string" &&
+      e.text.includes("Past conversation history was compacted")
+    );
+    assertEquals(
+      summaryEvents.length > 0,
+      true,
+      "Expected model context to contain the dynamically projected session summary after recovering from tool-result content block",
+    );
+  },
+);
+
+Deno.test(
+  "dynamic history projection - falls back to safe summary when entire session is blocked by content policy",
+  async () => {
+    const baseTime = Date.now() - 24 * 60 * 60 * 1000;
+    const hourMs = 60 * 60 * 1000;
+    const fillerText =
+      "detailed architectural decisions regarding database migration ".repeat(
+        600,
+      );
+
+    const rawHistory: HistoryEvent[] = [
+      {
+        id: "p-past-1",
+        type: "participant_utterance",
+        isOwn: false,
+        name: "user",
+        text: `Extreme prohibited message: ${fillerText}`,
+        timestamp: baseTime,
+      },
+      {
+        id: "o-past-1",
+        type: "own_utterance",
+        isOwn: true,
+        text: `Extreme prohibited assistant reply: ${fillerText}`,
+        timestamp: baseTime + 1000,
+      },
+      {
+        id: "p-active",
+        type: "participant_utterance",
+        isOwn: false,
+        name: "user",
+        text: "Can you proceed with the next step?",
+        timestamp: baseTime + 2 * hourMs,
+      },
+    ];
+
+    let receivedHistoryByModel: HistoryEvent[] = [];
+    const fakeGenJson =
+      (_opts: unknown, _sys: string, _zod: unknown) =>
+      (_userMsg: string): Promise<Record<string, string>> => {
+        throw new Error(
+          "400 The request was rejected because it was considered high risk",
+        );
+      };
+
+    const inMemoryCache: Record<string, unknown> = {};
+    const mockCacher = memoryCacher(inMemoryCache);
+    const fakeCallModel = (
+      history: HistoryEvent[],
+    ): Promise<HistoryEvent[]> => {
+      receivedHistoryByModel = history;
+      return Promise.resolve([
+        ownUtteranceTurn("Proceeding now."),
+      ]);
+    };
+
+    await injectCacher(mockCacher)(async () => {
+      await genJsonOverride.inject(() => fakeGenJson)(async () => {
+        await injectCallModel(fakeCallModel)(async () => {
+          await agentDeps(rawHistory)(runAgent)({
+            maxIterations: 5,
+            tools: [someTool],
+            prompt: "You are a helpful assistant.",
+            timezoneIANA: "UTC",
+          });
+        })();
+      })();
+    })();
+
+    const summaryEvents = receivedHistoryByModel.filter((e) =>
+      e.type === "own_thought" &&
+      typeof e.text === "string" &&
+      e.text.includes("Omitted due to content safety policy")
+    );
+    assertEquals(
+      summaryEvents.length > 0,
+      true,
+      "Expected model context to contain safe fallback summary when entire session is blocked",
+    );
+  },
+);

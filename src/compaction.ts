@@ -15,7 +15,7 @@ import { accessTokenCounter, type HistoryEvent } from "./agent.ts";
 import { makeCache } from "./cacher.ts";
 import { genJson } from "./genJson.ts";
 import { formatInternalSentTimestamp } from "./internalMessageMetadata.ts";
-import { cleanActiveMemoryToolName } from "./utils.ts";
+import { cleanActiveMemoryToolName, isContentBlockedError } from "./utils.ts";
 
 export type HistorySegment = {
   events: HistoryEvent[];
@@ -340,7 +340,7 @@ const formatStructuredSummary = ({
   pendingItems,
   abandonedItems,
   context,
-}: z.infer<typeof structuredSummarySchema>) =>
+}: z.infer<typeof structuredSummarySchema>): string =>
   [
     "Past conversation history was compacted into a structured summary.",
     "",
@@ -397,9 +397,27 @@ const summarizePlainText = async (text: string): Promise<string> =>
     )(text),
   );
 
+export const contentPolicyFilteredNotice =
+  "Omitted due to content safety policy";
+export const contentPolicyFilteredContext =
+  "This conversation segment was omitted from detailed summarization due to content safety policy restrictions.";
+
+export const fallbackContentFilteredSummary = (): string =>
+  formatStructuredSummary({
+    entities: contentPolicyFilteredNotice,
+    decisions: contentPolicyFilteredNotice,
+    actions: contentPolicyFilteredNotice,
+    pendingItems: "",
+    abandonedItems: "",
+    context: contentPolicyFilteredContext,
+  });
+
+const isToolEvent = (e: HistoryEvent): boolean =>
+  e.type === "tool_call" || e.type === "tool_result";
+
 const inMemorySummaryCache = new Map<string, Promise<string>>();
 
-export const summarizeEvents = (
+export const summarizeEvents = async (
   events: HistoryEvent[],
 ): Promise<string> => {
   const plainText = eventsToPlainText(events);
@@ -409,9 +427,27 @@ export const summarizeEvents = (
   const cachedSummarize = makeCache("settled-session-summaries-v2")(
     (text: string) => summarizePlainText(text),
   );
-  const promise = cachedSummarize(plainText);
-  inMemorySummaryCache.set(plainText, promise);
-  return promise;
+  try {
+    const promise = cachedSummarize(plainText);
+    inMemorySummaryCache.set(plainText, promise);
+    return await promise;
+  } catch (error) {
+    inMemorySummaryCache.delete(plainText);
+    if (!isContentBlockedError(error)) throw error;
+    const nonToolEvents = events.filter((e) => !isToolEvent(e));
+    if (nonempty(nonToolEvents) && nonToolEvents.length < events.length) {
+      try {
+        const recovered = await summarizeEvents(nonToolEvents);
+        inMemorySummaryCache.set(plainText, Promise.resolve(recovered));
+        return recovered;
+      } catch (innerError) {
+        if (!isContentBlockedError(innerError)) throw innerError;
+      }
+    }
+    const fallback = fallbackContentFilteredSummary();
+    inMemorySummaryCache.set(plainText, Promise.resolve(fallback));
+    return fallback;
+  }
 };
 
 const formatSegmentRange = (start: number, end: number, timezone: string) => {

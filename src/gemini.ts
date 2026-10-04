@@ -4,6 +4,8 @@ import {
   type GenerateContentParameters,
   type GenerateContentResponse,
   GoogleGenAI,
+  HarmBlockThreshold,
+  HarmCategory,
   type Part,
   type ThinkingConfig,
   ThinkingLevel,
@@ -281,6 +283,14 @@ const generateContentInjection: Injection<
 
 export const injectGeminiGenerateContent = generateContentInjection.inject;
 
+const textSafetyCategories = [
+  HarmCategory.HARM_CATEGORY_HARASSMENT,
+  HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+  HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+  HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+  HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
+];
+
 export const geminiGenJsonFromConvo: <T extends ZodType>(
   opts: ModelOpts | undefined,
   messages: ChatCompletionMessageParam[],
@@ -327,6 +337,10 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
       config: {
         responseMimeType: "application/json",
         responseSchema: zodToGeminiParameters(zodType),
+        safetySettings: textSafetyCategories.map((category) => ({
+          category,
+          threshold: HarmBlockThreshold.OFF,
+        })),
         thinkingConfig: geminiThinkingConfig(
           resolvedTier === "lite" || disableThinking
             ? ThinkingLevel.LOW

@@ -76,6 +76,27 @@ export const geminiBlockedMessage = (blockReason: string) =>
 export const isGeminiBlockedError = (error: unknown) =>
   normalizeError(error).message.startsWith(geminiBlockedPrefix);
 
+const kimiRiskPhrase = "considered high risk";
+const contentFilterType = "content_filter";
+
+type WithTypeField = { type: unknown };
+const hasTypeField = (e: unknown): e is WithTypeField =>
+  typeof e === "object" && e !== null && "type" in e;
+
+const errorType = (error: unknown) =>
+  hasTypeField(error) ? error.type : undefined;
+
+export const isKimiBlockedError = (error: unknown): boolean => {
+  const norm = normalizeError(error);
+  return (
+    norm.message.includes(kimiRiskPhrase) ||
+    errorType(error) === contentFilterType
+  );
+};
+
+export const isContentBlockedError = (error: unknown): boolean =>
+  isGeminiBlockedError(error) || isKimiBlockedError(error);
+
 export const invalidGenJsonMessage =
   "genJson result did not match the requested schema";
 

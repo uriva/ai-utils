@@ -231,8 +231,11 @@ export { injectCacher } from "./src/cacher.ts";
 export {
   applyCleanActiveMemoryDirectives,
   compactionRetentionTokens,
+  contentPolicyFilteredContext,
+  contentPolicyFilteredNotice,
   eventsToPlainText,
   eventToPlainText,
+  fallbackContentFilteredSummary,
   groupToolCallPairs,
   type HistorySegment,
   partitionSegments,
@@ -363,6 +366,8 @@ export { searchPastHistoryToolName } from "./src/historySearch.ts";
 export {
   catchAiRefusesToAdhereToTyping,
   cleanActiveMemoryToolName,
+  isContentBlockedError,
+  isKimiBlockedError,
   type ModelOpts,
   type ModelTier,
 } from "./src/utils.ts";
