@@ -2387,42 +2387,114 @@ export const tool = <ParametersSchema extends z.ZodObject<z.ZodRawShape>>(
   ): ReturnType<typeof tool.handler> => tool.handler(params, toolCallId),
 });
 
+const isUnlearnToolCall = (e: HistoryEvent) =>
+  e.type === "tool_call" && e.name === unlearnSkillToolName;
+
+const skillNamePrefix = (name: string) => name.slice(0, name.indexOf("/"));
+
+const skillNameFromToolCall = (e: HistoryEvent): string | undefined => {
+  if (e.type !== "tool_call") return undefined;
+  const parameters = isRecord(e.parameters) ? e.parameters : {};
+  const declared = typeof parameters.skillName === "string"
+    ? parameters.skillName
+    : undefined;
+  const command = typeof parameters.command === "string"
+    ? parameters.command
+    : undefined;
+  return (
+    declared ??
+      (command?.includes("/") ? skillNamePrefix(command) : undefined) ??
+      (e.name.includes("/") ? skillNamePrefix(e.name) : undefined)
+  )?.toLowerCase();
+};
+
+// A refused unlearn_skill must not deactivate the skill in history replay, or
+// the model would see it gone from its prompt while the runtime kept it.
+const refusedUnlearnCallIds = (history: HistoryEvent[]): Set<string> =>
+  new Set(
+    history
+      .filter((e): e is ToolResult =>
+        e.type === "tool_result" &&
+        e.result.includes(skillUnlearnSkippedMarkerText)
+      )
+      .map((e) => e.toolCallId)
+      .filter((id): id is string => id !== undefined),
+  );
+
+const sortedByTimestamp = (history: HistoryEvent[]): HistoryEvent[] =>
+  [...history].sort((a, b) => a.timestamp - b.timestamp);
+
 const activeSkillNames = (history: HistoryEvent[]): Set<string> => {
   const cleaned = applyCleanActiveMemoryDirectives(history);
+  const refusedUnlearns = refusedUnlearnCallIds(cleaned);
   const names = new Set<string>();
-  const sortedHistory = [...cleaned].sort((a, b) => a.timestamp - b.timestamp);
-  for (const e of sortedHistory) {
-    if (e.type === "tool_call" && e.name === learnSkillToolName) {
-      // deno-lint-ignore no-explicit-any
-      const skillName = (e.parameters as any)?.skillName;
-      if (skillName) names.add(skillName.toLowerCase());
-    } else if (e.type === "tool_call" && e.name === unlearnSkillToolName) {
-      // deno-lint-ignore no-explicit-any
-      const skillName = (e.parameters as any)?.skillName;
-      if (skillName) names.delete(skillName.toLowerCase());
-    } else if (e.type === "tool_call" && e.name === runCommandToolName) {
-      // deno-lint-ignore no-explicit-any
-      const command = (e.parameters as any)?.command;
-      if (typeof command === "string" && command.includes("/")) {
-        names.add(command.split("/")[0].toLowerCase());
-      }
-    } else if (e.type === "tool_call" && e.name.includes("/")) {
-      names.add(e.name.split("/")[0].toLowerCase());
-    }
+  for (const e of sortedByTimestamp(cleaned)) {
+    const skillName = skillNameFromToolCall(e);
+    if (!skillName) continue;
+    if (!isUnlearnToolCall(e)) names.add(skillName);
+    else if (!refusedUnlearns.has(e.id)) names.delete(skillName);
   }
   return names;
+};
+
+// Append order, not timestamp order: history is append-only, and events the
+// model returns can carry timestamps that sort before the user message.
+const currentRequestEvents = (history: HistoryEvent[]): HistoryEvent[] => {
+  const lastUserIndex = history.reduce(
+    (index, e, position) =>
+      e.type === "participant_utterance" ? position : index,
+    -1,
+  );
+  return history.slice(lastUserIndex + 1);
+};
+
+// Deactivating a skill and then calling its tools again leaves the model no
+// better off than before, so the next deactivation is refused.
+const skillReusedAfterDeactivation = (
+  history: HistoryEvent[],
+  skillName: string,
+): boolean => {
+  const key = skillName.toLowerCase();
+  const refusedUnlearns = refusedUnlearnCallIds(history);
+  return currentRequestEvents(history)
+    .filter((e) => skillNameFromToolCall(e) === key)
+    .map((e) => isUnlearnToolCall(e) && !refusedUnlearns.has(e.id))
+    .reduce(
+      ({ deactivated, reused }, deactivatedNow) =>
+        deactivatedNow
+          ? { deactivated: true, reused }
+          : { deactivated: false, reused: reused || deactivated },
+      { deactivated: false, reused: false },
+    ).reused;
+};
+
+const skillUnlearnSkipReason = (
+  history: HistoryEvent[] | undefined,
+  skillName: string,
+): SkillUnlearnSkipReason | undefined => {
+  if (!history) return undefined;
+  if (!activeSkillNames(history).has(skillName.toLowerCase())) {
+    return "not_active";
+  }
+  return skillReusedAfterDeactivation(history, skillName)
+    ? "still_in_use"
+    : undefined;
+};
+
+const historyExcludingToolCall = async (
+  toolCallId: string,
+): Promise<HistoryEvent[] | undefined> => {
+  if (!getAgentSpec()) return undefined;
+  return (await getHistory()).filter((e) => e.id !== toolCallId);
 };
 
 const skillPreviouslyUsed = async (
   toolCallId: string,
   skillName: string,
 ): Promise<boolean> => {
-  const spec = getAgentSpec();
-  if (!spec) return true;
-  const history = await getHistory();
-  return activeSkillNames(history.filter((e) => e.id !== toolCallId)).has(
-    skillName.toLowerCase(),
-  );
+  const history = await historyExcludingToolCall(toolCallId);
+  if (!history) return true;
+  return activeSkillNames(history).has(skillName.toLowerCase());
 };
 
 const skillToolPromptLine = (
@@ -2594,15 +2666,24 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
     tool({
       name: unlearnSkillToolName,
       description:
-        "Deactivate a currently active/learned skill to reclaim context token budget",
+        `Deactivate a currently active/learned skill to reclaim context token budget. Call it at most once per skill per user request, and only when you are done with that skill: calling one of its tools again re-activates it, so deactivating mid-task just buys a full re-load on your next call.`,
       parameters: z.object({
         skillName: z.string().describe("The name of the skill to deactivate"),
         spinnerText: z.string().optional().describe(
           "A short progress update or spinner message in active voice representing what this action is actively doing, written in the same language as the conversation.",
         ),
       }),
-      handler: ({ skillName, spinnerText: _spinnerText }) => {
-        return Promise.resolve(skillUnlearnedSuccessMessage(skillName));
+      handler: async (
+        { skillName, spinnerText: _spinnerText },
+        toolCallId,
+      ) => {
+        const skipReason = skillUnlearnSkipReason(
+          await historyExcludingToolCall(toolCallId),
+          skillName,
+        );
+        return skipReason
+          ? skillUnlearnedSkippedMessage(skillName, skipReason)
+          : skillUnlearnedSuccessMessage(skillName);
       },
     }),
   ];
@@ -2611,8 +2692,23 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
 export const skillLearnedSuccessMessage = (skillName: string): string =>
   `Skill "${skillName}" learned successfully. Its tools and instructions are now active and available in your system prompt and tools.`;
 
+export const skillUnlearnAppliedMarkerText =
+  "tools have been removed from your active context";
+
+export const skillUnlearnSkippedMarkerText = "left active, nothing changed";
+
 export const skillUnlearnedSuccessMessage = (skillName: string): string =>
-  `Successfully deactivated/unlearned the skill "${skillName}". Its tools have been removed from your active context.`;
+  `Successfully deactivated/unlearned the skill "${skillName}". Its ${skillUnlearnAppliedMarkerText}.`;
+
+export type SkillUnlearnSkipReason = "not_active" | "still_in_use";
+
+export const skillUnlearnedSkippedMessage = (
+  skillName: string,
+  reason: SkillUnlearnSkipReason,
+): string =>
+  reason === "not_active"
+    ? `Skill "${skillName}" is not active, so there is nothing to deactivate — ${skillUnlearnSkippedMarkerText}. Do not call ${unlearnSkillToolName} for it again.`
+    : `Skipped: skill "${skillName}" was already deactivated earlier in this same request and has been used again since, so every further ${unlearnSkillToolName} just reloads it on your next call. It is ${skillUnlearnSkippedMarkerText}. Finish the work first; deactivate it once at the end if you still need the context back.`;
 
 const emitSkillAdjustmentEvents = async (
   toLearn: Skill[],
