@@ -86,7 +86,7 @@ const getRmmbrJevCacher = () => {
   const token = Deno.env.get("RMMBR_TOKEN");
   return token
     ? cache({
-      cacheId: "jev-model-route-v4",
+      cacheId: "jev-model-route-v5",
       ttl: 60 * 60 * 24 * 7,
       url: rmmbrUrl,
       token,

@@ -75,6 +75,57 @@ for (const provider of decisionProviders) {
     });
   });
 
+  Deno.test(`routeTask routes search and recommendation queries to lite [${provider}]`, async () => {
+    await injectDecisionProvider(provider)(async () => {
+      const state = formatAgentStateForJev(
+        "You are an events concierge guiding users to concerts and parties.",
+        [
+          participantUtteranceTurn({
+            name: "User",
+            text:
+              "What live concerts and parties are happening in Berlin this weekend?",
+          }),
+        ],
+        [{ name: "query" }, { name: "upsert_subscription" }],
+      );
+      const tier = await routeTask(state);
+      assertEquals(tier, "lite");
+    });
+  });
+
+  Deno.test(`routeTask routes presenting search/query results to lite [${provider}]`, async () => {
+    await injectDecisionProvider(provider)(async () => {
+      const callEvent: HistoryEvent = {
+        type: "tool_call",
+        id: "call-query-1",
+        timestamp: Date.now(),
+        isOwn: true,
+        name: "query",
+        parameters: { location: "Berlin", categories: ["live music"] },
+      };
+      const resultEvent = toolResultTurn({
+        result:
+          "1. Jazz Night at A-Trane\n📍 Bleibtreustr. 1, Berlin\n2. Indie Fest at SO36\n📍 Oranienstr. 190, Berlin",
+        toolCallId: "call-query-1",
+      });
+      const state = formatAgentStateForJev(
+        "You are an events concierge guiding users to concerts and parties.",
+        [
+          participantUtteranceTurn({
+            name: "User",
+            text:
+              "What live concerts and parties are happening in Berlin this weekend?",
+          }),
+          callEvent,
+          resultEvent,
+        ],
+        [{ name: "query" }, { name: "upsert_subscription" }],
+      );
+      const tier = await routeTask(state);
+      assertEquals(tier, "lite");
+    });
+  });
+
   Deno.test(`routeTask routes post-tool-result turn with constraints to flash [${provider}]`, async () => {
     await injectDecisionProvider(provider)(async () => {
       const callEvent: HistoryEvent = {
