@@ -196,6 +196,7 @@ export {
   readScratchFileToolName,
   referenceToolName,
   type RegularTool,
+  resolveSkillToolFromUnderscore,
   resolveToolDescription,
   runAbstractAgent,
   runCommandToolName,

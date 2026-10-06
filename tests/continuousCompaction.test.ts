@@ -203,3 +203,52 @@ Deno.test("continuousCompaction - deterministic rich TLDR generation without cus
     false,
   );
 });
+
+Deno.test("continuousCompaction - deterministic rich TLDR unwraps run_command to the inner command", async () => {
+  const now = Date.now();
+  const scratchStore = new Map<string, string>();
+  const setScratch = (id: string, content: string): Promise<void> => {
+    scratchStore.set(id, content);
+    return Promise.resolve();
+  };
+
+  const oldToolCallId = "old-run-cmd-id";
+  const history: HistoryEvent[] = [
+    {
+      id: oldToolCallId,
+      type: "tool_call",
+      name: "run_command",
+      parameters: {
+        command: "search/query",
+        params: { q: "foo" },
+        spinnerText: "Searching...",
+      },
+      timestamp: now - 30 * 60 * 1000,
+      isOwn: true,
+    },
+    {
+      id: "old-run-cmd-res",
+      type: "tool_result",
+      toolCallId: oldToolCallId,
+      result: "Found 10 search results.\nDetails: result details here.\n" +
+        "x".repeat(8000),
+      timestamp: now - 29 * 60 * 1000,
+      isOwn: true,
+    },
+  ];
+
+  const compacted = await compactToolResultsInMemory(history, { setScratch });
+  const updatedResult = compacted.find((e: HistoryEvent) =>
+    e.id === "old-run-cmd-res"
+  ) as Extract<HistoryEvent, { type: "tool_result" }>;
+  assertNotEquals(updatedResult, undefined);
+
+  assertStringIncludes(
+    updatedResult.result,
+    'Memory TLDR: Command "search/query"',
+  );
+  assertStringIncludes(
+    updatedResult.result,
+    "q: foo",
+  );
+});

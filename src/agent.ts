@@ -996,6 +996,20 @@ const resolveUnambiguousBareName = (
   return matches.length === 1 ? matches[0] : undefined;
 };
 
+export const resolveSkillToolFromUnderscore = (
+  name: string,
+  skills: Skill[],
+): string | undefined => {
+  const matches = skills.flatMap((s) => {
+    if (!name.startsWith(`${s.name}_`)) return [];
+    const subName = name.slice(s.name.length + 1);
+    return s.tools.filter((t) => t.name === subName).map(() =>
+      qualifiedToolName(s.name, subName)
+    );
+  });
+  return matches.length === 1 ? matches[0] : undefined;
+};
+
 // A model that read about a tool inside another skill's instructions can
 // attribute it to the wrong skill ("guide/geocode" when the tool lives in
 // "geo"). When the tool name exists in exactly one other skill, retarget the
@@ -1108,12 +1122,18 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
   ) => n === normalizedName || n === bareName);
   const slashSkillCall = !directMatch &&
     (normalizedName.includes("/") || normalizedName.includes(":"));
-  const unambiguousBare = !directMatch && !slashSkillCall
-    ? resolveUnambiguousBareName(normalizedName, skills)
+  const underscoreSkillCall = !directMatch && !slashSkillCall
+    ? resolveSkillToolFromUnderscore(normalizedName, skills)
     : undefined;
-  const isSkillCall = slashSkillCall || unambiguousBare !== undefined;
-  const skillCommand = unambiguousBare ?? normalizedName;
-  const invocationCorrections = unambiguousBare !== undefined
+  const unambiguousBare =
+    !directMatch && !slashSkillCall && !underscoreSkillCall
+      ? resolveUnambiguousBareName(normalizedName, skills)
+      : undefined;
+  const isSkillCall = slashSkillCall || underscoreSkillCall !== undefined ||
+    unambiguousBare !== undefined;
+  const skillCommand = underscoreSkillCall ?? unambiguousBare ?? normalizedName;
+  const invocationCorrections = (underscoreSkillCall !== undefined ||
+      unambiguousBare !== undefined)
     ? [commandRewrittenCorrection(normalizedName, skillCommand)]
     : [];
   const [action, effectiveArgs] = directMatch
@@ -2576,7 +2596,8 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         let separator = command.includes("/") ? "/" : ":";
         let lastSep = command.lastIndexOf(separator);
         if (lastSep === -1) {
-          const resolved = resolveUnambiguousBareName(command, skills);
+          const resolved = resolveSkillToolFromUnderscore(command, skills) ??
+            resolveUnambiguousBareName(command, skills);
           if (resolved) {
             effectiveCommand = resolved;
             separator = "/";
@@ -2588,7 +2609,8 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
         let skillName = effectiveCommand.slice(0, lastSep);
         let toolName = effectiveCommand.slice(lastSep + 1);
         if (!skillMap[skillName]) {
-          const resolved = resolveUnambiguousBareName(toolName, skills);
+          const resolved = resolveSkillToolFromUnderscore(command, skills) ??
+            resolveUnambiguousBareName(toolName, skills);
           if (resolved) {
             effectiveCommand = resolved;
             lastSep = resolved.lastIndexOf("/");

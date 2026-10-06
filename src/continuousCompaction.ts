@@ -2,6 +2,7 @@ import {
   type HistoryEvent,
   learnSkillToolName,
   readScratchFileToolName,
+  runCommandToolName,
   unlearnSkillToolName,
 } from "./agent.ts";
 import { groupToolCallPairs } from "./compaction.ts";
@@ -35,15 +36,28 @@ const isCompactedToolResult = (text: string | undefined): boolean =>
 const isSpillNotice = (text: string | undefined): boolean =>
   typeof text === "string" && text.includes("[Tool output was truncated");
 
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null;
+
+const toolCallCommandAndParams = (
+  toolCall: HistoryEvent & { type: "tool_call" },
+): { command: string; params: unknown } => {
+  const p = toolCall.parameters;
+  return toolCall.name === runCommandToolName && isObject(p) &&
+      typeof p.command === "string"
+    ? { command: p.command, params: p.params }
+    : { command: toolCall.name, params: toolCall.parameters };
+};
+
 export const defaultDeterministicTLDR = (
   toolCall: HistoryEvent & { type: "tool_call" },
   resultText: string,
 ): string => {
   const lineCount = resultText.split("\n").length;
-  const paramEntries =
-    toolCall.parameters && typeof toolCall.parameters === "object"
-      ? Object.entries(toolCall.parameters)
-      : [];
+  const { command, params } = toolCallCommandAndParams(toolCall);
+  const paramEntries = params && typeof params === "object"
+    ? Object.entries(params)
+    : [];
   const paramSummary = paramEntries.length > 0
     ? paramEntries
       .map(([k, v]) =>
@@ -59,7 +73,7 @@ export const defaultDeterministicTLDR = (
     ?.slice(0, 120) ?? "";
   const paramPart = paramSummary ? ` (${paramSummary})` : "";
   const outputPart = firstNonEmptyLine ? ` Result: "${firstNonEmptyLine}"` : "";
-  return `Command "${toolCall.name}"${paramPart} completed.${outputPart} (${lineCount} lines, ${resultText.length} chars).`;
+  return `Command "${command}"${paramPart} completed.${outputPart} (${lineCount} lines, ${resultText.length} chars).`;
 };
 
 export type CompactionOptions = {

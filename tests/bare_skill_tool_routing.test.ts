@@ -78,6 +78,21 @@ const bareCorrection = correctionPrefix([
 const colonCorrection = correctionPrefix([
   commandRewrittenCorrection("todo:todo_write", canonicalCommand),
 ]);
+const underscoreCorrection = correctionPrefix([
+  commandRewrittenCorrection("todo_todo_write", canonicalCommand),
+]);
+
+Deno.test("underscore-form direct skill tool call surfaces a canonical-name correction", async () => {
+  const skillTools = createSkillTools([todoSkill]);
+  const out = await callToResult(skillTools, [todoSkill])({
+    name: "todo_todo_write",
+    args: { todos: ["a", "b"] },
+    id: "call-underscore-note",
+  });
+  if (!out) throw new Error("expected a result");
+  assertEquals(out.result.startsWith(underscoreCorrection), true);
+  assertEquals(out.result.includes("wrote 2 todos"), true);
+});
 
 Deno.test("bare direct skill tool call surfaces a canonical-name correction", async () => {
   const skillTools = createSkillTools([todoSkill]);
@@ -129,6 +144,23 @@ Deno.test("nested run_command colon-form command surfaces a canonical-name corre
   );
   if (typeof out !== "string") throw new Error("expected string result");
   assertEquals(out.startsWith(colonCorrection), true);
+  assertEquals(out.includes("wrote 2 todos"), true);
+});
+
+Deno.test("nested run_command underscore-form command surfaces a canonical-name correction", async () => {
+  const skillTools = createSkillTools([todoSkill]);
+  const runCommand = skillTools.find((t) => t.name === runCommandToolName);
+  if (!runCommand) throw new Error("run_command missing");
+  const out = await runCommand.handler(
+    {
+      command: "todo_todo_write",
+      params: { todos: ["a", "b"] },
+      spinnerText: "writing",
+    },
+    "call-id",
+  );
+  if (typeof out !== "string") throw new Error("expected string result");
+  assertEquals(out.startsWith(underscoreCorrection), true);
   assertEquals(out.includes("wrote 2 todos"), true);
 });
 
