@@ -586,11 +586,44 @@ export const routeTask = async (
     }
     return "flash";
   }
+  if (!accessRespanToken() && !accessJevToken()) {
+    return "flash";
+  }
   const provider = resolveDecisionProvider();
   if (provider === "jev") {
-    return await routeTaskWithJev(state);
+    try {
+      return await routeTaskWithJev(state);
+    } catch (err) {
+      if (accessRespanToken()) {
+        console.warn(
+          "[decision-model] Jev routeTask failed, falling back to Respan:",
+          err,
+        );
+        try {
+          return await routeTaskWithRespan(state);
+        } catch {
+          return "flash";
+        }
+      }
+      return "flash";
+    }
   }
-  return await routeTaskWithRespan(state);
+  try {
+    return await routeTaskWithRespan(state);
+  } catch (err) {
+    if (accessJevToken()) {
+      console.warn(
+        "[decision-model] Respan routeTask failed, falling back to Jev:",
+        err,
+      );
+      try {
+        return await routeTaskWithJev(state);
+      } catch {
+        return "flash";
+      }
+    }
+    return "flash";
+  }
 };
 
 export type PastToolEpisode = {

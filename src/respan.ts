@@ -620,14 +620,14 @@ const rawCallRespanRoute = async (
   }
 
   if (!response.ok) {
-    await response.body?.cancel();
-    return "flash";
+    const errorText = await response.text();
+    throw new Error(`Respan API error (${response.status}): ${errorText}`);
   }
   const data = await response.json();
   const result = (data?.results as RespanBehaviorResult[] | undefined)?.find(
     (r) => r.id === "requires_flash",
   );
-  if (!result) return "flash";
+  if (!result) throw new Error("No requires_flash result in Respan response");
   return result.p_present >= 0.50 ? "flash" : "lite";
 };
 
@@ -640,7 +640,7 @@ const getRmmbrRouteCacher = () => {
   const token = Deno.env.get("RMMBR_TOKEN");
   return token
     ? cache({
-      cacheId: "respan-model-route-v1",
+      cacheId: "respan-model-route-v2",
       ttl: 60 * 60 * 24 * 7,
       url: rmmbrUrl,
       token,
@@ -657,7 +657,7 @@ export const routeTaskWithRespan = async (
   state: string | Record<string, unknown> | unknown[],
 ): Promise<ModelTier> => {
   const token = accessRespanToken();
-  if (!token) return "flash";
+  if (!token) throw new Error("No Respan token available");
 
   const span = stateToSpan(state);
   const payload = JSON.stringify({
@@ -671,20 +671,16 @@ export const routeTaskWithRespan = async (
     return memCached.tier;
   }
 
-  try {
-    if (!rmmbrRouteCaller) {
-      const cacher = getRmmbrRouteCacher();
-      rmmbrRouteCaller = cacher
-        ? cacher((t: string, p: string) => rawCallRespanRoute(t, p))
-        : (t: string, p: string) => rawCallRespanRoute(t, p);
-    }
-    const tier = await rmmbrRouteCaller(token, payload);
-    inMemoryRouteCache.set(payload, {
-      tier,
-      expiresAt: Date.now() + memoryTtlMs,
-    });
-    return tier;
-  } catch {
-    return "flash";
+  if (!rmmbrRouteCaller) {
+    const cacher = getRmmbrRouteCacher();
+    rmmbrRouteCaller = cacher
+      ? cacher((t: string, p: string) => rawCallRespanRoute(t, p))
+      : (t: string, p: string) => rawCallRespanRoute(t, p);
   }
+  const tier = await rmmbrRouteCaller(token, payload);
+  inMemoryRouteCache.set(payload, {
+    tier,
+    expiresAt: Date.now() + memoryTtlMs,
+  });
+  return tier;
 };

@@ -70,7 +70,10 @@ const rawCallJev = async (
     signal: AbortSignal.timeout(2500),
   });
 
-  if (!response.ok) return "flash";
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Jev API error (${response.status}): ${errorText}`);
+  }
   const data = await response.json();
   const choice = data?.answers?.model_selection?.choice;
   return choice === "lite" ? "lite" : "flash";
@@ -102,7 +105,7 @@ export const routeTaskWithJev = async (
   state: string | Record<string, unknown> | unknown[],
 ): Promise<ModelTier> => {
   const token = accessJevToken();
-  if (!token) return "flash";
+  if (!token) throw new Error("No Jev token available");
 
   const serializedState = typeof state === "string"
     ? state
@@ -112,22 +115,18 @@ export const routeTaskWithJev = async (
     return memCached.tier;
   }
 
-  try {
-    if (!rmmbrJevCaller) {
-      const cacher = getRmmbrJevCacher();
-      rmmbrJevCaller = cacher
-        ? cacher((t: string, s: string) => rawCallJev(t, s))
-        : (t: string, s: string) => rawCallJev(t, s);
-    }
-    const tier = await rmmbrJevCaller(token, serializedState);
-    inMemoryJevCache.set(serializedState, {
-      tier,
-      expiresAt: Date.now() + memoryTtlMs,
-    });
-    return tier;
-  } catch {
-    return "flash";
+  if (!rmmbrJevCaller) {
+    const cacher = getRmmbrJevCacher();
+    rmmbrJevCaller = cacher
+      ? cacher((t: string, s: string) => rawCallJev(t, s))
+      : (t: string, s: string) => rawCallJev(t, s);
   }
+  const tier = await rmmbrJevCaller(token, serializedState);
+  inMemoryJevCache.set(serializedState, {
+    tier,
+    expiresAt: Date.now() + memoryTtlMs,
+  });
+  return tier;
 };
 
 let rmmbrDecisionCaller:

@@ -248,3 +248,32 @@ Deno.test("buildReq always uses flash model and applies ThinkingLevel constants 
     false,
   );
 });
+
+Deno.test("routeTask falls back from Respan to Jev when Respan fails", async () => {
+  if (!Deno.env.get("JEV_API_KEY")) return;
+  await injectRespanToken("invalid-respan-token")(async () => {
+    await injectDecisionProvider("respan")(async () => {
+      const tier = await routeTask("Hi, what time does the venue open?");
+      assertEquals(tier, "lite");
+    });
+  });
+});
+
+Deno.test("routeTask falls back from Jev to Respan when Jev fails", async () => {
+  if (!Deno.env.get("RESPAN_API_KEY")) return;
+  await injectJevToken("invalid-jev-token")(async () => {
+    await injectDecisionProvider("jev")(async () => {
+      const tier = await routeTask("Hi, what time does the venue open?");
+      assertEquals(tier, "lite");
+    });
+  });
+});
+
+Deno.test("routeTask falls back to flash when both providers fail", async () => {
+  await injectRespanToken("invalid-token")(async () => {
+    await injectJevToken("invalid-token")(async () => {
+      const tier = await routeTask("Hi, what time does the venue open?");
+      assertEquals(tier, "flash");
+    });
+  });
+});
