@@ -2706,7 +2706,7 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
     tool({
       name: unlearnSkillToolName,
       description:
-        `Deactivate a currently active/learned skill to reclaim context token budget. Call it at most once per skill per user request, and only when you are done with that skill: calling one of its tools again re-activates it, so deactivating mid-task just buys a full re-load on your next call.`,
+        `Deactivate a currently active/learned skill to reclaim context token budget. Only call this when explicitly requested or after completing a large standalone background task. Do not call this during ordinary conversation turns or between tool calls, as skill deactivation is already handled automatically by the system. Call it at most once per skill per user request, and only when you are done with that skill: calling one of its tools again re-activates it, so deactivating mid-task just buys a full re-load on your next call.`,
       parameters: z.object({
         skillName: z.string().describe("The name of the skill to deactivate"),
         spinnerText: z.string().optional().describe(
