@@ -67,7 +67,7 @@ const rawCallJev = async (
         },
       },
     }),
-    signal: AbortSignal.timeout(3500),
+    signal: AbortSignal.timeout(5000),
   });
 
   if (!response.ok) {

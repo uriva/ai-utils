@@ -602,7 +602,7 @@ const rawCallRespanRoute = async (
       Authorization: `Bearer ${token}`,
     },
     body: payload,
-    signal: AbortSignal.timeout(3500),
+    signal: AbortSignal.timeout(5000),
   });
 
   if (response.status === 402 && payload.includes(proRespanModel)) {
@@ -615,7 +615,7 @@ const rawCallRespanRoute = async (
         Authorization: `Bearer ${token}`,
       },
       body: freePayload,
-      signal: AbortSignal.timeout(3500),
+      signal: AbortSignal.timeout(5000),
     });
   }
 
