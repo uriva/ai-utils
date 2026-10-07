@@ -67,7 +67,7 @@ const rawCallJev = async (
         },
       },
     }),
-    signal: AbortSignal.timeout(2500),
+    signal: AbortSignal.timeout(3500),
   });
 
   if (!response.ok) {
@@ -89,7 +89,7 @@ const getRmmbrJevCacher = () => {
   const token = Deno.env.get("RMMBR_TOKEN");
   return token
     ? cache({
-      cacheId: "jev-model-route-v5",
+      cacheId: "jev-model-route-v6",
       ttl: 60 * 60 * 24 * 7,
       url: rmmbrUrl,
       token,

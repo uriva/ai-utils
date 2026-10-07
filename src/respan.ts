@@ -640,7 +640,7 @@ const getRmmbrRouteCacher = () => {
   const token = Deno.env.get("RMMBR_TOKEN");
   return token
     ? cache({
-      cacheId: "respan-model-route-v2",
+      cacheId: "respan-model-route-v3",
       ttl: 60 * 60 * 24 * 7,
       url: rmmbrUrl,
       token,

@@ -120,6 +120,9 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
     const thinkingLevel = routedTier === "lite"
       ? ThinkingLevel.LOW
       : ThinkingLevel.HIGH;
+    console.log(
+      `[decision-model] routedTier=${routedTier} thinkingLevel=${thinkingLevel}`,
+    );
     return await resolveCallModel({
       ...specForTurn,
       thinkingLevel,

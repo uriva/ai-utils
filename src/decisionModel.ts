@@ -601,7 +601,11 @@ export const routeTask = async (
         );
         try {
           return await routeTaskWithRespan(state);
-        } catch {
+        } catch (fallbackErr) {
+          console.warn(
+            "[decision-model] Respan fallback routeTask failed:",
+            fallbackErr,
+          );
           return "flash";
         }
       }
@@ -618,7 +622,11 @@ export const routeTask = async (
       );
       try {
         return await routeTaskWithJev(state);
-      } catch {
+      } catch (fallbackErr) {
+        console.warn(
+          "[decision-model] Jev fallback routeTask failed:",
+          fallbackErr,
+        );
         return "flash";
       }
     }

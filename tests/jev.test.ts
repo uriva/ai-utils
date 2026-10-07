@@ -126,6 +126,24 @@ for (const provider of decisionProviders) {
     });
   });
 
+  Deno.test(`routeTask routes preference update and unsubscribe/opt-out turns to lite [${provider}]`, async () => {
+    await injectDecisionProvider(provider)(async () => {
+      const state = formatAgentStateForJev(
+        "You are an events concierge guiding users to concerts and parties.",
+        [
+          participantUtteranceTurn({
+            name: "User",
+            text:
+              "Please do not send me any more proactive notifications or updates.",
+          }),
+        ],
+        [{ name: "query" }, { name: "unsubscribe" }],
+      );
+      const tier = await routeTask(state);
+      assertEquals(tier, "lite");
+    });
+  });
+
   Deno.test(`routeTask routes post-tool-result turn with constraints to flash [${provider}]`, async () => {
     await injectDecisionProvider(provider)(async () => {
       const callEvent: HistoryEvent = {
