@@ -1,6 +1,7 @@
 import { context, type Injection, type Injector } from "@uri/inject";
 import { empty } from "gamla";
 import { cache } from "rmmbr";
+import { ThinkingLevel } from "@google/genai";
 import { makeCache } from "./cacher.ts";
 import {
   type ChoiceDecisionAnswer,
@@ -12,6 +13,7 @@ import {
   type NoulDecisionAnswer,
   type NoulDecisionQuestion,
   routeTask,
+  routeThinkingLevel,
   type ScoreDecisionAnswer,
 } from "./decisionModel.ts";
 import type { ModelTier } from "./utils.ts";
@@ -21,6 +23,7 @@ export {
   decideSkillsWithDecisionModel as decideSkillsWithRespan,
   formatAgentStateForDecisionModel as formatAgentStateForRespan,
   routeTask,
+  routeThinkingLevel,
 };
 
 export const respanApiUrl = "https://api.respan.ai/api/v1/scores";
@@ -591,10 +594,15 @@ export const respanModelRoutingBehavior: RespanBehavior = {
   definition: respanModelSelectionInstructions,
 };
 
+export const respanReasoningBehavior: RespanBehavior = {
+  id: "requires_high_thinking",
+  definition: respanModelSelectionInstructions,
+};
+
 const rawCallRespanRoute = async (
   token: string,
   payload: string,
-): Promise<ModelTier> => {
+): Promise<ThinkingLevel> => {
   let response = await fetch(respanApiUrl, {
     method: "POST",
     headers: {
@@ -625,22 +633,22 @@ const rawCallRespanRoute = async (
   }
   const data = await response.json();
   const result = (data?.results as RespanBehaviorResult[] | undefined)?.find(
-    (r) => r.id === "requires_flash",
+    (r) => r.id === "requires_high_thinking" || r.id === "requires_flash",
   );
-  if (!result) throw new Error("No requires_flash result in Respan response");
-  return result.p_present >= 0.50 ? "flash" : "lite";
+  if (!result) throw new Error("No reasoning result in Respan response");
+  return result.p_present >= 0.50 ? ThinkingLevel.HIGH : ThinkingLevel.LOW;
 };
 
 const inMemoryRouteCache = new Map<
   string,
-  { tier: ModelTier; expiresAt: number }
+  { level: ThinkingLevel; expiresAt: number }
 >();
 
 const getRmmbrRouteCacher = () => {
   const token = Deno.env.get("RMMBR_TOKEN");
   return token
     ? cache({
-      cacheId: "respan-model-route-v3",
+      cacheId: "respan-thinking-level-v1",
       ttl: 60 * 60 * 24 * 7,
       url: rmmbrUrl,
       token,
@@ -650,12 +658,12 @@ const getRmmbrRouteCacher = () => {
 };
 
 let rmmbrRouteCaller:
-  | ((token: string, payload: string) => Promise<ModelTier>)
+  | ((token: string, payload: string) => Promise<ThinkingLevel>)
   | undefined;
 
-export const routeTaskWithRespan = async (
+export const routeThinkingLevelWithRespan = async (
   state: string | Record<string, unknown> | unknown[],
-): Promise<ModelTier> => {
+): Promise<ThinkingLevel> => {
   const token = accessRespanToken();
   if (!token) throw new Error("No Respan token available");
 
@@ -663,12 +671,12 @@ export const routeTaskWithRespan = async (
   const payload = JSON.stringify({
     model: Deno.env.get("RESPAN_MODEL") || defaultRespanModel,
     span,
-    behaviors: [respanModelRoutingBehavior],
+    behaviors: [respanReasoningBehavior],
   });
 
   const memCached = inMemoryRouteCache.get(payload);
   if (memCached && Date.now() < memCached.expiresAt) {
-    return memCached.tier;
+    return memCached.level;
   }
 
   if (!rmmbrRouteCaller) {
@@ -677,10 +685,17 @@ export const routeTaskWithRespan = async (
       ? cacher((t: string, p: string) => rawCallRespanRoute(t, p))
       : (t: string, p: string) => rawCallRespanRoute(t, p);
   }
-  const tier = await rmmbrRouteCaller(token, payload);
+  const level = await rmmbrRouteCaller(token, payload);
   inMemoryRouteCache.set(payload, {
-    tier,
+    level,
     expiresAt: Date.now() + memoryTtlMs,
   });
-  return tier;
+  return level;
+};
+
+export const routeTaskWithRespan = async (
+  state: string | Record<string, unknown> | unknown[],
+): Promise<ModelTier> => {
+  const level = await routeThinkingLevelWithRespan(state);
+  return level === ThinkingLevel.LOW ? "lite" : "flash";
 };

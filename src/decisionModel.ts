@@ -1,27 +1,35 @@
 import { context, type Injection, type Injector } from "@uri/inject";
 import { empty } from "gamla";
 import type { z, ZodType } from "zod/v4";
+import { ThinkingLevel } from "@google/genai";
 import type { HistoryEvent, ParticipantUtterance, Skill } from "./agent.ts";
 import {
   accessJevToken,
   callJevDecisionModel,
-  routeTaskWithJev,
+  routeThinkingLevelWithJev,
 } from "./jev.ts";
 import {
   accessRespanToken,
   callRespanDecisionModel,
-  routeTaskWithRespan,
+  routeThinkingLevelWithRespan,
 } from "./respan.ts";
 import {
   cleanActiveMemoryToolName,
   decisionModelSelectionCriteria,
   decisionModelSelectionInstructions,
+  decisionThinkingLevelCriteria,
+  decisionThinkingLevelInstructions,
   type ModelOpts,
   type ModelTier,
   validateAgainstSchema,
 } from "./utils.ts";
 
-export { decisionModelSelectionCriteria, decisionModelSelectionInstructions };
+export {
+  decisionModelSelectionCriteria,
+  decisionModelSelectionInstructions,
+  decisionThinkingLevelCriteria,
+  decisionThinkingLevelInstructions,
+};
 
 export type ChoiceDecisionQuestion = {
   type: "choice";
@@ -568,70 +576,80 @@ export const formatAgentStateForDecisionModel = (
 export const formatAgentStateForRespan = formatAgentStateForDecisionModel;
 export const formatAgentStateForJev = formatAgentStateForDecisionModel;
 
-export const routeTask = async (
+export const routeThinkingLevel = async (
   state: string | Record<string, unknown> | unknown[],
-): Promise<ModelTier> => {
+): Promise<ThinkingLevel> => {
   const override = decisionModelOverrideInjection.access();
   if (override) {
     const answers = await override(state, {
-      requires_flash: {
+      thinking_level: {
         type: "choice",
-        criteria: decisionModelSelectionCriteria,
-        instructions: decisionModelSelectionInstructions,
+        criteria: decisionThinkingLevelCriteria,
+        instructions: decisionThinkingLevelInstructions,
       },
     });
-    const ans = answers.requires_flash;
-    if (ans && ans.type === "choice" && ans.choice === "lite") {
-      return "lite";
+    const ans = answers.thinking_level ?? answers.requires_flash;
+    if (
+      ans && ans.type === "choice" &&
+      (ans.choice === "low" || ans.choice === "lite")
+    ) {
+      return ThinkingLevel.LOW;
     }
-    return "flash";
+    return ThinkingLevel.HIGH;
   }
   if (!accessRespanToken() && !accessJevToken()) {
-    return "flash";
+    return ThinkingLevel.HIGH;
   }
   const provider = resolveDecisionProvider();
   if (provider === "jev") {
     try {
-      return await routeTaskWithJev(state);
+      return await routeThinkingLevelWithJev(state);
     } catch (err) {
       if (accessRespanToken()) {
         console.warn(
-          "[decision-model] Jev routeTask failed, falling back to Respan:",
+          "[decision-model] Jev routeThinkingLevel failed, falling back to Respan:",
           err,
         );
         try {
-          return await routeTaskWithRespan(state);
+          return await routeThinkingLevelWithRespan(state);
         } catch (fallbackErr) {
           console.warn(
-            "[decision-model] Respan fallback routeTask failed:",
+            "[decision-model] Respan fallback routeThinkingLevel failed:",
             fallbackErr,
           );
-          return "flash";
+          return ThinkingLevel.HIGH;
         }
       }
-      return "flash";
+      return ThinkingLevel.HIGH;
     }
   }
   try {
-    return await routeTaskWithRespan(state);
+    return await routeThinkingLevelWithRespan(state);
   } catch (err) {
     if (accessJevToken()) {
       console.warn(
-        "[decision-model] Respan routeTask failed, falling back to Jev:",
+        "[decision-model] Respan routeThinkingLevel failed, falling back to Jev:",
         err,
       );
       try {
-        return await routeTaskWithJev(state);
+        return await routeThinkingLevelWithJev(state);
       } catch (fallbackErr) {
         console.warn(
-          "[decision-model] Jev fallback routeTask failed:",
+          "[decision-model] Jev fallback routeThinkingLevel failed:",
           fallbackErr,
         );
-        return "flash";
+        return ThinkingLevel.HIGH;
       }
     }
-    return "flash";
+    return ThinkingLevel.HIGH;
   }
+};
+
+export const routeTask = async (
+  state: string | Record<string, unknown> | unknown[],
+): Promise<ModelTier> => {
+  const level = await routeThinkingLevel(state);
+  return level === ThinkingLevel.LOW ? "lite" : "flash";
 };
 
 export type PastToolEpisode = {

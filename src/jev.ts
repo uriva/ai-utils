@@ -1,6 +1,7 @@
 import { context, type Injection, type Injector } from "@uri/inject";
 import { pipe } from "gamla";
 import { cache } from "rmmbr";
+import { ThinkingLevel } from "@google/genai";
 import { makeCache } from "./cacher.ts";
 import {
   decideCleanupWithDecisionModel,
@@ -10,10 +11,13 @@ import {
   extractCandidateToolEpisodes,
   formatAgentStateForDecisionModel,
   type PastToolEpisode,
+  routeThinkingLevel,
 } from "./decisionModel.ts";
 import {
   decisionModelSelectionCriteria,
   decisionModelSelectionInstructions,
+  decisionThinkingLevelCriteria,
+  decisionThinkingLevelInstructions,
   type ModelTier,
 } from "./utils.ts";
 import { injectRespanToken } from "./respan.ts";
@@ -24,6 +28,7 @@ export {
   extractCandidateToolEpisodes,
   formatAgentStateForDecisionModel as formatAgentStateForJev,
   type PastToolEpisode,
+  routeThinkingLevel,
 };
 
 export const jevApiUrl = "https://api.typesafe.ai/v1/systemone";
@@ -42,14 +47,16 @@ export const injectJevToken = (token: string): Injector => {
   return injectJev;
 };
 
-export const jevModelSelectionInstructions = decisionModelSelectionInstructions;
+export const jevThinkingLevelInstructions = decisionThinkingLevelInstructions;
+export const jevThinkingLevelCriteria = decisionThinkingLevelCriteria;
 
+export const jevModelSelectionInstructions = decisionModelSelectionInstructions;
 export const jevModelSelectionCriteria = decisionModelSelectionCriteria;
 
 const rawCallJev = async (
   token: string,
   state: string | Record<string, unknown> | unknown[],
-): Promise<ModelTier> => {
+): Promise<ThinkingLevel> => {
   const response = await fetch(jevApiUrl, {
     method: "POST",
     headers: {
@@ -60,10 +67,10 @@ const rawCallJev = async (
       model: "jev-latest",
       state,
       questions: {
-        model_selection: {
+        thinking_level: {
           type: "choice",
-          instructions: jevModelSelectionInstructions,
-          criteria: jevModelSelectionCriteria,
+          instructions: jevThinkingLevelInstructions,
+          criteria: jevThinkingLevelCriteria,
         },
       },
     }),
@@ -75,13 +82,16 @@ const rawCallJev = async (
     throw new Error(`Jev API error (${response.status}): ${errorText}`);
   }
   const data = await response.json();
-  const choice = data?.answers?.model_selection?.choice;
-  return choice === "lite" ? "lite" : "flash";
+  const choice = data?.answers?.thinking_level?.choice ??
+    data?.answers?.model_selection?.choice;
+  return choice === "low" || choice === "lite"
+    ? ThinkingLevel.LOW
+    : ThinkingLevel.HIGH;
 };
 
 const inMemoryJevCache = new Map<
   string,
-  { tier: ModelTier; expiresAt: number }
+  { level: ThinkingLevel; expiresAt: number }
 >();
 const memoryTtlMs = 60 * 60 * 1000;
 
@@ -89,7 +99,7 @@ const getRmmbrJevCacher = () => {
   const token = Deno.env.get("RMMBR_TOKEN");
   return token
     ? cache({
-      cacheId: "jev-model-route-v6",
+      cacheId: "jev-thinking-level-v1",
       ttl: 60 * 60 * 24 * 7,
       url: rmmbrUrl,
       token,
@@ -98,12 +108,12 @@ const getRmmbrJevCacher = () => {
 };
 
 let rmmbrJevCaller:
-  | ((token: string, state: string) => Promise<ModelTier>)
+  | ((token: string, state: string) => Promise<ThinkingLevel>)
   | undefined;
 
-export const routeTaskWithJev = async (
+export const routeThinkingLevelWithJev = async (
   state: string | Record<string, unknown> | unknown[],
-): Promise<ModelTier> => {
+): Promise<ThinkingLevel> => {
   const token = accessJevToken();
   if (!token) throw new Error("No Jev token available");
 
@@ -112,7 +122,7 @@ export const routeTaskWithJev = async (
     : JSON.stringify(state);
   const memCached = inMemoryJevCache.get(serializedState);
   if (memCached && Date.now() < memCached.expiresAt) {
-    return memCached.tier;
+    return memCached.level;
   }
 
   if (!rmmbrJevCaller) {
@@ -121,12 +131,19 @@ export const routeTaskWithJev = async (
       ? cacher((t: string, s: string) => rawCallJev(t, s))
       : (t: string, s: string) => rawCallJev(t, s);
   }
-  const tier = await rmmbrJevCaller(token, serializedState);
+  const level = await rmmbrJevCaller(token, serializedState);
   inMemoryJevCache.set(serializedState, {
-    tier,
+    level,
     expiresAt: Date.now() + memoryTtlMs,
   });
-  return tier;
+  return level;
+};
+
+export const routeTaskWithJev = async (
+  state: string | Record<string, unknown> | unknown[],
+): Promise<ModelTier> => {
+  const level = await routeThinkingLevelWithJev(state);
+  return level === ThinkingLevel.LOW ? "lite" : "flash";
 };
 
 let rmmbrDecisionCaller:

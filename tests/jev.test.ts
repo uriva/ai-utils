@@ -10,6 +10,7 @@ import {
   injectRespanToken,
   participantUtteranceTurn,
   routeTask,
+  routeThinkingLevel,
   ThinkingLevel,
   toolResultTurn,
 } from "../mod.ts";
@@ -42,6 +43,24 @@ Deno.test("routeTask falls back to flash when no token is present", async () => 
 });
 
 for (const provider of decisionProviders) {
+  Deno.test(`routeThinkingLevel routes simple greeting to LOW [${provider}]`, async () => {
+    await injectDecisionProvider(provider)(async () => {
+      const level = await routeThinkingLevel(
+        "Hi, what time does the venue open?",
+      );
+      assertEquals(level, ThinkingLevel.LOW);
+    });
+  });
+
+  Deno.test(`routeThinkingLevel routes complex coding to HIGH [${provider}]`, async () => {
+    await injectDecisionProvider(provider)(async () => {
+      const level = await routeThinkingLevel(
+        "Implement a distributed Byzantine fault tolerant consensus algorithm in Rust with formal TLA+ specification and unit tests.",
+      );
+      assertEquals(level, ThinkingLevel.HIGH);
+    });
+  });
+
   Deno.test(`routeTask routes simple greeting to lite [${provider}]`, async () => {
     await injectDecisionProvider(provider)(async () => {
       const tier = await routeTask("Hi, what time does the venue open?");
