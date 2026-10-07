@@ -40,7 +40,17 @@ const errorStatus = (error: unknown) =>
 export const isServerError = (error: unknown) =>
   (errorStatus(error) ?? 0) >= 500;
 
-export const isRateLimitError = (error: unknown) => errorStatus(error) === 429;
+export const isRateLimitError = (error: unknown) => {
+  const norm = normalizeError(error);
+  if (errorStatus(norm) === 429) return true;
+  const msg = norm.message.toLowerCase();
+  return (
+    msg.includes("429") ||
+    msg.includes("rate limit") ||
+    msg.includes("resource_exhausted") ||
+    msg.includes("quota exceeded")
+  );
+};
 
 export const syntheticTimeoutMarker = "syntheticTimeout";
 
