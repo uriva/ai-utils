@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import { runAgent } from "../mod.ts";
 import {
   compileGrepPattern,
+  createReadScratchFileTool,
   type HistoryEvent,
   injectCallModel,
   maxToolOutputChars,
@@ -158,11 +159,18 @@ Deno.test("compileGrepPattern returns error on invalid regex", () => {
 const fakeReadScratchCall = (
   id: string,
   grep: string,
+  startLine?: number,
+  limit?: number,
 ): HistoryEvent => ({
   type: "tool_call",
   isOwn: true,
   name: readScratchFileToolName,
-  parameters: { id, grep },
+  parameters: {
+    id,
+    grep,
+    ...(startLine ? { startLine } : {}),
+    ...(limit ? { limit } : {}),
+  },
   id: "tc-grep",
   timestamp: Date.now(),
 });
@@ -170,6 +178,8 @@ const fakeReadScratchCall = (
 const runFakeGrepAgent = async (
   grep: string,
   content: string,
+  startLine?: number,
+  limit?: number,
 ): Promise<HistoryEvent[]> => {
   const scratchId = "fake-scratch-id";
   const store = new Map<string, string>([[scratchId, content]]);
@@ -181,7 +191,11 @@ const runFakeGrepAgent = async (
   let n = 0;
   const fakeCallModel = () => {
     n++;
-    if (n === 1) return Promise.resolve([fakeReadScratchCall(scratchId, grep)]);
+    if (n === 1) {
+      return Promise.resolve([
+        fakeReadScratchCall(scratchId, grep, startLine, limit),
+      ]);
+    }
     return Promise.resolve([{
       type: "own_utterance" as const,
       isOwn: true as const,
@@ -264,6 +278,153 @@ Deno.test(
     assert(
       result.result.toLowerCase().includes("invalid grep regex"),
       `expected error message in tool_result. Got: ${result.result}`,
+    );
+  },
+);
+
+Deno.test(
+  "read_scratch_file with grep and startLine paginates lines from startLine",
+  async () => {
+    const store = new Map<string, string>();
+    const scratchPad = makeScratchPad(store);
+    const lines = Array.from(
+      { length: 100 },
+      (_, i) => `row ${i + 1}: data`,
+    ).join("\n");
+    store.set("test-paginate-scratch", lines);
+    const tool = createReadScratchFileTool(scratchPad);
+
+    const page1 = await tool.handler({
+      id: "test-paginate-scratch",
+      grep: ".*",
+      startLine: 1,
+      limit: 40,
+    }, "tc-p1");
+    if (typeof page1 !== "string") throw new Error("expected string result");
+    assert(
+      page1.includes("1: row 1: data"),
+      `page 1 should start at line 1. Got: ${page1.slice(0, 200)}`,
+    );
+    assert(page1.includes("40: row 40: data"), "page 1 should end at line 40");
+    assert(
+      !page1.includes("41: row 41: data"),
+      "page 1 must not include line 41",
+    );
+    assert(
+      page1.includes("startLine=41"),
+      `page 1 continuation must recommend startLine=41. Got: ${
+        page1.slice(-150)
+      }`,
+    );
+
+    const page2 = await tool.handler({
+      id: "test-paginate-scratch",
+      grep: ".*",
+      startLine: 41,
+      limit: 40,
+    }, "tc-p2");
+    if (typeof page2 !== "string") throw new Error("expected string result");
+    assert(
+      page2.includes("41: row 41: data"),
+      `page 2 should start at line 41. Got: ${page2.slice(0, 200)}`,
+    );
+    assert(page2.includes("80: row 80: data"), "page 2 should end at line 80");
+    assert(!page2.includes("1: row 1: data"), "page 2 must not repeat line 1");
+    assert(
+      page2.includes("startLine=81"),
+      `page 2 continuation must recommend startLine=81. Got: ${
+        page2.slice(-150)
+      }`,
+    );
+
+    const page3 = await tool.handler({
+      id: "test-paginate-scratch",
+      grep: ".*",
+      startLine: 81,
+      limit: 40,
+    }, "tc-p3");
+    if (typeof page3 !== "string") throw new Error("expected string result");
+    assert(
+      page3.includes("81: row 81: data"),
+      `page 3 should start at line 81. Got: ${page3.slice(0, 200)}`,
+    );
+    assert(
+      page3.includes("100: row 100: data"),
+      "page 3 should end at line 100",
+    );
+    assert(
+      !page3.includes("startLine="),
+      "page 3 is end of file, must not have continuation prompt",
+    );
+  },
+);
+
+Deno.test(
+  "read_scratch_file with specific pattern filters only matching lines at or after startLine",
+  async () => {
+    const store = new Map<string, string>();
+    const scratchPad = makeScratchPad(store);
+    const content = [
+      "line 1: ignore",
+      "line 10: target alpha",
+      "line 25: ignore",
+      "line 50: target beta",
+      "line 75: ignore",
+      "line 90: target gamma",
+    ].join("\n");
+    store.set("test-pattern-scratch", content);
+    const tool = createReadScratchFileTool(scratchPad);
+
+    const result = await tool.handler({
+      id: "test-pattern-scratch",
+      grep: "target",
+      startLine: 3,
+      limit: 10,
+    }, "tc-target");
+    if (typeof result !== "string") throw new Error("expected string result");
+    assert(
+      !result.includes("target alpha"),
+      "should not include match before line 3",
+    );
+    assert(
+      result.includes("4: line 50: target beta"),
+      "should include match at line 4 (line 50 in content)",
+    );
+    assert(
+      result.includes("6: line 90: target gamma"),
+      "should include match at line 6 (line 90 in content)",
+    );
+  },
+);
+
+Deno.test(
+  "agent-level: read_scratch_file paginates with grep and startLine",
+  async () => {
+    const history = await runFakeGrepAgent(
+      ".*",
+      Array.from({ length: 150 }, (_, i) => `item ${i + 1}`).join("\n"),
+      81,
+      50,
+    );
+    const result = findToolResult(history);
+    assert(result, `expected tool_result. History: ${JSON.stringify(history)}`);
+    assert(
+      result.result.includes("\n81: item 81\n"),
+      `expected result to start from line 81. Got: ${
+        result.result.slice(0, 300)
+      }`,
+    );
+    assert(
+      !result.result.includes("\n1: item 1\n"),
+      "expected result to not include line 1",
+    );
+    assert(
+      result.result.includes("130: item 130"),
+      "expected result to show 50 lines ending at 130",
+    );
+    assert(
+      result.result.includes("startLine=131"),
+      "expected continuation prompt for startLine=131",
     );
   },
 );

@@ -1,4 +1,4 @@
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { pipe } from "gamla";
 import {
   type HistoryEvent,
@@ -499,6 +499,191 @@ Deno.test(
     assert(
       autoLearnCalls.length === 1,
       `Expected auto-learn event to be emitted even when LLM executed skill tool via run_command before decision settled. Found: ${autoLearnCalls.length}`,
+    );
+  },
+);
+
+Deno.test(
+  "race condition guard: if LLM invokes skill tool, background decision must NOT emit auto-unlearn for that skill",
+  async () => {
+    // The skill is already active from earlier
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Generate report.",
+      }),
+      toolUseTurn({
+        name: "learn_skill",
+        args: { skillName: "data_exporter" },
+      }),
+      toolResultTurn({
+        toolCallId: "init-learn",
+        result: 'Skill "data_exporter" learned successfully.',
+      }),
+      ownUtteranceTurn("Ready."),
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please run the second export.",
+      }),
+    ];
+
+    const SIMULATED_DECISION_LATENCY_MS = 200;
+    let iterationsCount = 0;
+
+    // Decision caller scores data_exporter low (< 0.20), so without guard it would emit auto-unlearn
+    const mockDecisionCaller = async (
+      _state: unknown,
+      // deno-lint-ignore no-explicit-any
+      questions: Record<string, any>,
+      // deno-lint-ignore no-explicit-any
+    ): Promise<Record<string, any>> => {
+      await delay(SIMULATED_DECISION_LATENCY_MS);
+      // deno-lint-ignore no-explicit-any
+      const answers: Record<string, any> = {};
+      for (const key of Object.keys(questions)) {
+        if (key === "is_hallucination") {
+          answers[key] = { type: "noul", noul: 0.05 };
+        } else if (key === "requires_flash") {
+          answers[key] = { type: "choice", choice: "lite" };
+        } else {
+          // Score 0.05 for skills, which triggers toUnlearn
+          answers[key] = { type: "noul", noul: 0.05 };
+        }
+      }
+      return answers;
+    };
+
+    const fakeCallModel = (
+      _received: HistoryEvent[],
+    ): Promise<HistoryEvent[]> => {
+      iterationsCount++;
+      if (iterationsCount === 1) {
+        // LLM immediately executes tool from data_exporter
+        return Promise.resolve([
+          toolUseTurn({
+            name: "run_command",
+            args: { command: "data_exporter/export", params: {} },
+          }),
+        ]);
+      }
+      return Promise.resolve([
+        ownUtteranceTurn("Export complete."),
+      ]);
+    };
+
+    await pipe(
+      injectDecisionModel(mockDecisionCaller),
+      injectCallModel(fakeCallModel),
+      inMemoryDeps(history),
+    )(async () => {
+      await runAgent({
+        provider: "anthropic",
+        maxIterations: 3,
+        tools: [],
+        skills: [sampleSkill],
+        prompt: "You are an assistant.",
+        timezoneIANA: "UTC",
+      });
+    })();
+
+    // Check if auto-unlearn was emitted for data_exporter
+    const autoUnlearnCalls = history.filter(
+      (e) =>
+        e.type === "tool_call" &&
+        e.id.startsWith("auto-unlearn-") &&
+        // deno-lint-ignore no-explicit-any
+        (e.parameters as any)?.skillName === "data_exporter",
+    );
+    assertEquals(
+      autoUnlearnCalls.length,
+      0,
+      `Should not emit auto-unlearn for a skill that was invoked in the current request. Found: ${
+        JSON.stringify(autoUnlearnCalls)
+      }`,
+    );
+  },
+);
+
+Deno.test(
+  "background decisions must run at most once per agent run and not repeatedly trigger across tool iterations",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Run three steps.",
+      }),
+    ];
+
+    let skillDecisionCallsCount = 0;
+    let iterationsCount = 0;
+
+    const mockDecisionCaller = (
+      _state: unknown,
+      // deno-lint-ignore no-explicit-any
+      questions: Record<string, any>,
+      // deno-lint-ignore no-explicit-any
+    ): Promise<Record<string, any>> => {
+      if ("data_exporter" in questions) {
+        skillDecisionCallsCount++;
+      }
+      // deno-lint-ignore no-explicit-any
+      const answers: Record<string, any> = {};
+      for (const key of Object.keys(questions)) {
+        if (key === "is_hallucination") {
+          answers[key] = { type: "noul", noul: 0.05 };
+        } else if (key === "requires_flash") {
+          answers[key] = { type: "choice", choice: "lite" };
+        } else {
+          answers[key] = { type: "noul", noul: 0.95 };
+        }
+      }
+      return Promise.resolve(answers);
+    };
+
+    const fakeCallModel = (
+      _received: HistoryEvent[],
+    ): Promise<HistoryEvent[]> => {
+      iterationsCount++;
+      if (iterationsCount === 1) {
+        return Promise.resolve([
+          toolUseTurn({
+            name: "run_command",
+            args: { command: "data_exporter/export", params: {} },
+          }),
+        ]);
+      }
+      if (iterationsCount === 2) {
+        return Promise.resolve([
+          toolUseTurn({
+            name: "run_command",
+            args: { command: "data_exporter/export", params: {} },
+          }),
+        ]);
+      }
+      return Promise.resolve([
+        ownUtteranceTurn("All three steps done."),
+      ]);
+    };
+
+    await pipe(
+      injectDecisionModel(mockDecisionCaller),
+      injectCallModel(fakeCallModel),
+      inMemoryDeps(history),
+    )(async () => {
+      await runAgent({
+        provider: "anthropic",
+        maxIterations: 5,
+        tools: [],
+        skills: [sampleSkill],
+        prompt: "You are an assistant.",
+        timezoneIANA: "UTC",
+      });
+    })();
+
+    assertEquals(
+      skillDecisionCallsCount,
+      1,
+      `Pre-model skill decision should only run once per agent run, but was called ${skillDecisionCallsCount} times`,
     );
   },
 );

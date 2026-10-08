@@ -356,22 +356,40 @@ const grepScratchLines = (
   content: string,
   pattern: string,
   numLines: number,
+  startLine = 1,
 ):
-  | { ok: true; text: string; matchCount: number; truncated: boolean }
+  | {
+    ok: true;
+    text: string;
+    matchCount: number;
+    totalMatches: number;
+    truncated: boolean;
+    nextStartLine?: number;
+    firstMatchLine?: number;
+    lastMatchLine?: number;
+  }
   | { ok: false; error: string } => {
   const compiled = compileGrepPattern(pattern);
   if (!compiled.ok) return compiled;
   const { re } = compiled;
-  const matches = content
+  const allMatches = content
     .split("\n")
     .map((line, idx) => ({ line, n: idx + 1 }))
     .filter(({ line }) => re.test(line));
-  const limited = matches.slice(0, numLines);
+  const matchesFromStart = allMatches.filter(({ n }) => n >= startLine);
+  const limited = matchesFromStart.slice(0, numLines);
+  const truncated = matchesFromStart.length > limited.length;
+  const lastMatch = limited[limited.length - 1];
+  const nextStartLine = truncated && lastMatch ? lastMatch.n + 1 : undefined;
   return {
     ok: true,
     text: limited.map((match) => formatGrepMatch(re, match)).join("\n"),
-    matchCount: matches.length,
-    truncated: matches.length > limited.length,
+    matchCount: limited.length,
+    totalMatches: allMatches.length,
+    truncated,
+    nextStartLine,
+    firstMatchLine: limited[0]?.n,
+    lastMatchLine: lastMatch?.n,
   };
 };
 
@@ -385,7 +403,7 @@ const readScratchFileParameters: z.ZodObject<{
 }> = z.object({
   id: z.string().describe("Scratch pad id returned by the spilling tool"),
   startLine: z.number().int().optional().describe(
-    "1-indexed line to start reading from (default 1). Ignored when grep is set.",
+    "1-indexed line to start reading from (default 1). Works with or without grep.",
   ),
   numLines: z.number().int().optional().describe(
     `Max lines to return (default and hard cap ${maxScratchReadLines}).`,
@@ -397,7 +415,7 @@ const readScratchFileParameters: z.ZodObject<{
     `Alias for numLines (max lines to return, default and hard cap ${maxScratchReadLines}).`,
   ),
   grep: z.string().optional().describe(
-    "Optional JS regex; only matching lines (prefixed with line number) are returned. Lines longer than 500 chars are returned as a window of ±500 chars around the first match, with char offsets. A leading PCRE-style inline flag group like (?i), (?im) is auto-translated to JS RegExp flags.",
+    "Optional JS regex; only matching lines (prefixed with line number) are returned. Lines longer than 500 chars are returned as a window of ±500 chars around the first match, with char offsets. A leading PCRE-style inline flag group like (?i), (?im) is auto-translated to JS RegExp flags. Combine with startLine to paginate.",
   ),
 });
 
@@ -420,21 +438,37 @@ export const createReadScratchFileTool = (
       content.length,
     );
     const effectiveLimit = clampScratchLines(numLines ?? limit);
+    const start = Math.max(1, startLine ?? offset ?? 1);
     if (typeof grep === "string" && grep.length > 0) {
-      const result = grepScratchLines(content, grep, effectiveLimit);
+      const result = grepScratchLines(content, grep, effectiveLimit, start);
       if (!result.ok) {
         return header +
           `Invalid grep regex /${grep}/: ${result.error}. ` +
           `Use a JS RegExp pattern (e.g. "foo", not "(?i)foo" — pass flags via leading "(?i)" which we translate, or just plain JS syntax).`;
       }
-      const { text, matchCount, truncated } = result;
-      if (matchCount === 0) return header + `No lines matched /${grep}/.`;
-      const suffix = truncated
-        ? `\n[${matchCount} total matches; showing first ${effectiveLimit}. Narrow the pattern to see the rest.]`
-        : `\n[${matchCount} matches.]`;
+      const {
+        text,
+        matchCount,
+        totalMatches,
+        truncated,
+        nextStartLine,
+        firstMatchLine,
+        lastMatchLine,
+      } = result;
+      if (totalMatches === 0) return header + `No lines matched /${grep}/.`;
+      if (matchCount === 0) {
+        return header +
+          `No lines matched /${grep}/ at or after line ${start} (${totalMatches} total matches earlier in file).`;
+      }
+      const suffix = truncated && nextStartLine
+        ? `\n[${totalMatches} total matches; showing ${matchCount} matches (lines ${firstMatchLine}-${lastMatchLine}). Call again with startLine=${nextStartLine} to continue.]`
+        : `\n[${matchCount} matches${
+          totalMatches !== matchCount
+            ? ` (lines ${firstMatchLine}-${lastMatchLine}) of ${totalMatches} total`
+            : ""
+        }.]`;
       return header + text + suffix;
     }
-    const start = startLine ?? offset ?? 1;
     const { text, nextStartLine, totalLines } = sliceScratchLines(
       content,
       start,
@@ -2486,6 +2520,16 @@ const currentRequestEvents = (history: HistoryEvent[]): HistoryEvent[] => {
   return history.slice(lastUserIndex + 1);
 };
 
+const skillUsedInCurrentRequest = (
+  history: HistoryEvent[],
+  skillName: string,
+): boolean => {
+  const key = skillName.toLowerCase();
+  return currentRequestEvents(history).some(
+    (e) => skillNameFromToolCall(e) === key,
+  );
+};
+
 // Deactivating a skill and then calling its tools again leaves the model no
 // better off than before, so the next deactivation is refused.
 const skillReusedAfterDeactivation = (
@@ -2553,8 +2597,15 @@ const skillAutoLoadMessage = (skill: Skill): string =>
 const isReferenceTool = (skill: Skill, toolName: string) =>
   (skill.references ?? []).some((r) => referenceToolName(r.name) === toolName);
 
-// deno-lint-ignore no-explicit-any
-export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
+export const topLevelToolCorrection = (called: string): string =>
+  `command "${called}" is a top-level tool, not a skill command`;
+
+export const createSkillTools = (
+  skills: Skill[],
+  // deno-lint-ignore no-explicit-any
+  topLevelTools?: RegularTool<any>[] | (() => RegularTool<any>[]),
+  // deno-lint-ignore no-explicit-any
+): RegularTool<any>[] => {
   const skillMap = Object.fromEntries(skills.map((s) => [s.name, s]));
   const referenceAsTool =
     (skillName: string) => (ref: { name: string; content: string }) => ({
@@ -2576,156 +2627,213 @@ export const createSkillTools = (skills: Skill[]): RegularTool<any>[] => {
     ),
   );
   const skillNames = skills.map((s) => s.name).join(", ");
-  return [
-    tool({
-      name: runCommandToolName,
-      description:
-        "Execute a tool from a specific skill. Format: skillName/toolName",
-      parameters: z.object({
-        command: z.string().describe(
-          "The command in format skillName/toolName",
-        ),
-        params: z.any().describe("The parameters for the tool"),
-        spinnerText: z.string().optional().describe(
-          "A short progress update or spinner message in active voice representing what this action is actively doing. CRITICAL: This message is shown directly to the user while the tool runs, so you MUST write it in the same language as the conversation (e.g. if the user speaks Hebrew, write it in Hebrew, e.g. 'מחפש ברשת...'). IMPORTANT: Do NOT include any emojis (such as hourglass ⏳, gears ⚙️, etc.) in this message.",
-        ),
-      }),
-      handler: async ({ command: rawCommand, params }, toolCallId) => {
-        const command = collapseDuplicatedSkillPrefix(rawCommand, skillMap);
-        let effectiveCommand = command;
-        let separator = command.includes("/") ? "/" : ":";
-        let lastSep = command.lastIndexOf(separator);
-        if (lastSep === -1) {
-          const resolved = resolveSkillToolFromUnderscore(command, skills) ??
-            resolveUnambiguousBareName(command, skills);
-          if (resolved) {
-            effectiveCommand = resolved;
-            separator = "/";
-            lastSep = resolved.lastIndexOf(separator);
-          } else {
-            return `Invalid command format. Expected "skillName/toolName", got "${command}". Available skills: ${skillNames}`;
-          }
+  const learnSkillTool = tool({
+    name: learnSkillToolName,
+    description:
+      "Activate a skill: loads its instructions and tools into your system prompt. Reference documents (if any) are separate tools you call directly by their qualified name once the skill is active.",
+    parameters: z.object({
+      skillName: z.string().describe("The name of the skill to learn about"),
+      spinnerText: z.string().optional().describe(
+        "A short progress update or spinner message in active voice representing what this action is actively doing, written in the same language as the conversation.",
+      ),
+    }),
+    handler: async (
+      { skillName, spinnerText: _spinnerText },
+    ) => {
+      const skill = skillMap[skillName];
+      if (!skill) {
+        return `Skill "${skillName}" not found. Available skills: ${skillNames}`;
+      }
+
+      const spec = getAgentSpec();
+      if (spec) {
+        const specForTurn = getSpecForTurn(spec, await getHistory());
+        const currentTokens = await estimateAgentInputTokens(
+          specForTurn,
+          await getHistory(),
+        );
+        if (currentTokens > 150000) {
+          return `SYSTEM BUDGET EXCEEDED: Your current context size is ${currentTokens} tokens, which exceeds the strict budget of 150,000 tokens. To protect against cost overruns, learning of new skills is temporarily blocked. You must immediately call either "unlearn_skill" to deactivate an active/learned skill, or use the "clean_active_memory" tool to compress or delete verbose/obsolete parts of your conversation history. If the skills are too large or should be divided into smaller subskills, please report this to the system admins so they can optimize them.`;
         }
-        let skillName = effectiveCommand.slice(0, lastSep);
-        let toolName = effectiveCommand.slice(lastSep + 1);
-        if (!skillMap[skillName]) {
-          const resolved = resolveSkillToolFromUnderscore(command, skills) ??
-            resolveUnambiguousBareName(toolName, skills);
-          if (resolved) {
-            effectiveCommand = resolved;
-            lastSep = resolved.lastIndexOf("/");
-            skillName = resolved.slice(0, lastSep);
-            toolName = resolved.slice(lastSep + 1);
-          } else {
-            return `Skill "${skillName}" not found. Available skills: ${skillNames}`;
-          }
+      }
+
+      return skillLearnedSuccessMessage(skill.name);
+    },
+  });
+  const unlearnSkillTool = tool({
+    name: unlearnSkillToolName,
+    description:
+      `Deactivate a currently active/learned skill to reclaim context token budget. Only call this when explicitly requested or after completing a large standalone background task. Do not call this during ordinary conversation turns or between tool calls, as skill deactivation is already handled automatically by the system. Call it at most once per skill per user request, and only when you are done with that skill: calling one of its tools again re-activates it, so deactivating mid-task just buys a full re-load on your next call.`,
+    parameters: z.object({
+      skillName: z.string().describe("The name of the skill to deactivate"),
+      spinnerText: z.string().optional().describe(
+        "A short progress update or spinner message in active voice representing what this action is actively doing, written in the same language as the conversation.",
+      ),
+    }),
+    handler: async (
+      { skillName, spinnerText: _spinnerText },
+      toolCallId,
+    ) => {
+      const skipReason = skillUnlearnSkipReason(
+        await historyExcludingToolCall(toolCallId),
+        skillName,
+      );
+      return skipReason
+        ? skillUnlearnedSkippedMessage(skillName, skipReason)
+        : skillUnlearnedSuccessMessage(skillName);
+    },
+  });
+  // deno-lint-ignore no-explicit-any
+  const skillManagementTools: RegularTool<any>[] = [
+    learnSkillTool,
+    unlearnSkillTool,
+  ];
+
+  // deno-lint-ignore no-explicit-any
+  const resolveTopLevel = (name: string): RegularTool<any> | undefined => {
+    const list = typeof topLevelTools === "function"
+      ? topLevelTools()
+      : (topLevelTools ?? getAgentSpec()?.tools ?? []);
+    return list.find((t) => t.name !== runCommandToolName && t.name === name) ??
+      skillManagementTools.find((t) => t.name === name);
+  };
+
+  const runCommandTool = tool({
+    name: runCommandToolName,
+    description:
+      "Execute a tool from a specific skill. Format: skillName/toolName",
+    parameters: z.object({
+      command: z.string().describe(
+        "The command in format skillName/toolName",
+      ),
+      params: z.any().describe("The parameters for the tool"),
+      spinnerText: z.string().optional().describe(
+        "A short progress update or spinner message in active voice representing what this action is actively doing. CRITICAL: This message is shown directly to the user while the tool runs, so you MUST write it in the same language as the conversation (e.g. if the user speaks Hebrew, write it in Hebrew, e.g. 'מחפש ברשת...'). IMPORTANT: Do NOT include any emojis (such as hourglass ⏳, gears ⚙️, etc.) in this message.",
+      ),
+    }),
+    handler: async ({ command: rawCommand, params }, toolCallId) => {
+      const command = collapseDuplicatedSkillPrefix(rawCommand, skillMap);
+      let effectiveCommand = command;
+      let separator = command.includes("/") ? "/" : ":";
+      let lastSep = command.lastIndexOf(separator);
+      if (lastSep === -1) {
+        const resolved = resolveSkillToolFromUnderscore(command, skills) ??
+          resolveUnambiguousBareName(command, skills);
+        if (resolved) {
+          effectiveCommand = resolved;
+          separator = "/";
+          lastSep = resolved.lastIndexOf(separator);
         }
-        const misrouted = toolMap[`${skillName}/${toolName}`]
-          ? undefined
-          : retargetMisroutedCommand(skills, skillName, toolName);
-        if (misrouted) {
-          skillName = misrouted.skillName;
-          toolName = misrouted.toolName;
+      }
+      let skillName = lastSep === -1 ? "" : effectiveCommand.slice(0, lastSep);
+      let toolName = lastSep === -1
+        ? effectiveCommand
+        : effectiveCommand.slice(lastSep + 1);
+      if (lastSep !== -1 && !skillMap[skillName]) {
+        const resolved = resolveSkillToolFromUnderscore(command, skills) ??
+          resolveUnambiguousBareName(toolName, skills);
+        if (resolved) {
+          effectiveCommand = resolved;
+          lastSep = resolved.lastIndexOf("/");
+          skillName = resolved.slice(0, lastSep);
+          toolName = resolved.slice(lastSep + 1);
         }
-        const fullToolName = `${skillName}/${toolName}`;
-        const tool = toolMap[fullToolName];
-        const skill = skillMap[skillName];
-        if (!tool) {
-          const toolList = [
-            ...skill.tools.map((t) => `  - ${t.name}: ${t.description}`),
-            ...(skill.references ?? []).map((r) =>
-              `  - ${referenceToolName(r.name)}: reference document`
-            ),
-          ].join("\n");
-          return `Tool "${toolName}" not found in skill "${skillName}".\n\nSkill "${skillName}" instructions:\n${skill.instructions}\n\nAvailable tools in this skill:\n${toolList}`;
-        }
-        const toolJsonSchema = z.toJSONSchema(tool.parameters);
+      }
+
+      const topLevelMatch = resolveTopLevel(command) ??
+        (lastSep !== -1 ? resolveTopLevel(toolName) : undefined);
+      if (
+        topLevelMatch &&
+        (!skillMap[skillName] || !toolMap[`${skillName}/${toolName}`])
+      ) {
+        const toolJsonSchema = z.toJSONSchema(topLevelMatch.parameters);
         const coerced = coerceArgs(toolJsonSchema, params);
         const prefix = correctionPrefix([
-          ...(rawCommand !== fullToolName
-            ? [commandRewrittenCorrection(rawCommand, fullToolName)]
-            : []),
+          topLevelToolCorrection(rawCommand),
           ...coerced.corrections,
         ]);
         const parseResult = parseWithCatch(
-          tool.parameters,
+          topLevelMatch.parameters,
           toolJsonSchema,
           coerced.args,
         );
         if (!parseResult.ok) {
-          if (
-            !isReferenceTool(skill, toolName) &&
-            !(await skillPreviouslyUsed(toolCallId, skillName))
-          ) return skillAutoLoadMessage(skill);
           return prefix +
-            `Invalid parameters for ${fullToolName}: ${
+            `Invalid parameters for ${topLevelMatch.name}: ${
               parseResult.error instanceof z.ZodError
                 ? formatZodIssues(parseResult.error, toolJsonSchema)
                 : parseResult.error.message
-            }\nExpected parameters: ${zodToTypingString(tool.parameters)}`;
+            }\nExpected parameters: ${
+              zodToTypingString(topLevelMatch.parameters)
+            }`;
         }
-        const out = await tool.handler(parseResult.result, toolCallId);
+        const out = await topLevelMatch.handler(parseResult.result, toolCallId);
         if (out === undefined) return out;
         if (typeof out === "string") return prefix + out;
         return { ...out, result: prefix + out.result };
-      },
-    }),
-    tool({
-      name: learnSkillToolName,
-      description:
-        "Activate a skill: loads its instructions and tools into your system prompt. Reference documents (if any) are separate tools you call directly by their qualified name once the skill is active.",
-      parameters: z.object({
-        skillName: z.string().describe("The name of the skill to learn about"),
-        spinnerText: z.string().optional().describe(
-          "A short progress update or spinner message in active voice representing what this action is actively doing, written in the same language as the conversation.",
-        ),
-      }),
-      handler: async (
-        { skillName, spinnerText: _spinnerText },
-      ) => {
-        const skill = skillMap[skillName];
-        if (!skill) {
-          return `Skill "${skillName}" not found. Available skills: ${skillNames}`;
-        }
+      }
 
-        const spec = getAgentSpec();
-        if (spec) {
-          const specForTurn = getSpecForTurn(spec, await getHistory());
-          const currentTokens = await estimateAgentInputTokens(
-            specForTurn,
-            await getHistory(),
-          );
-          if (currentTokens > 150000) {
-            return `SYSTEM BUDGET EXCEEDED: Your current context size is ${currentTokens} tokens, which exceeds the strict budget of 150,000 tokens. To protect against cost overruns, learning of new skills is temporarily blocked. You must immediately call either "unlearn_skill" to deactivate an active/learned skill, or use the "clean_active_memory" tool to compress or delete verbose/obsolete parts of your conversation history. If the skills are too large or should be divided into smaller subskills, please report this to the system admins so they can optimize them.`;
-          }
-        }
+      if (lastSep === -1) {
+        return `Invalid command format. Expected "skillName/toolName", got "${command}". Available skills: ${skillNames}`;
+      }
+      if (!skillMap[skillName]) {
+        return `Skill "${skillName}" not found. Available skills: ${skillNames}`;
+      }
+      const misrouted = toolMap[`${skillName}/${toolName}`]
+        ? undefined
+        : retargetMisroutedCommand(skills, skillName, toolName);
+      if (misrouted) {
+        skillName = misrouted.skillName;
+        toolName = misrouted.toolName;
+      }
+      const fullToolName = `${skillName}/${toolName}`;
+      const tool = toolMap[fullToolName];
+      const skill = skillMap[skillName];
+      if (!tool) {
+        const toolList = [
+          ...skill.tools.map((t) => `  - ${t.name}: ${t.description}`),
+          ...(skill.references ?? []).map((r) =>
+            `  - ${referenceToolName(r.name)}: reference document`
+          ),
+        ].join("\n");
+        return `Tool "${toolName}" not found in skill "${skillName}".\n\nSkill "${skillName}" instructions:\n${skill.instructions}\n\nAvailable tools in this skill:\n${toolList}`;
+      }
+      const toolJsonSchema = z.toJSONSchema(tool.parameters);
+      const coerced = coerceArgs(toolJsonSchema, params);
+      const prefix = correctionPrefix([
+        ...(rawCommand !== fullToolName
+          ? [commandRewrittenCorrection(rawCommand, fullToolName)]
+          : []),
+        ...coerced.corrections,
+      ]);
+      const parseResult = parseWithCatch(
+        tool.parameters,
+        toolJsonSchema,
+        coerced.args,
+      );
+      if (!parseResult.ok) {
+        if (
+          !isReferenceTool(skill, toolName) &&
+          !(await skillPreviouslyUsed(toolCallId, skillName))
+        ) return skillAutoLoadMessage(skill);
+        return prefix +
+          `Invalid parameters for ${fullToolName}: ${
+            parseResult.error instanceof z.ZodError
+              ? formatZodIssues(parseResult.error, toolJsonSchema)
+              : parseResult.error.message
+          }\nExpected parameters: ${zodToTypingString(tool.parameters)}`;
+      }
+      const out = await tool.handler(parseResult.result, toolCallId);
+      if (out === undefined) return out;
+      if (typeof out === "string") return prefix + out;
+      return { ...out, result: prefix + out.result };
+    },
+  });
 
-        return skillLearnedSuccessMessage(skill.name);
-      },
-    }),
-    tool({
-      name: unlearnSkillToolName,
-      description:
-        `Deactivate a currently active/learned skill to reclaim context token budget. Only call this when explicitly requested or after completing a large standalone background task. Do not call this during ordinary conversation turns or between tool calls, as skill deactivation is already handled automatically by the system. Call it at most once per skill per user request, and only when you are done with that skill: calling one of its tools again re-activates it, so deactivating mid-task just buys a full re-load on your next call.`,
-      parameters: z.object({
-        skillName: z.string().describe("The name of the skill to deactivate"),
-        spinnerText: z.string().optional().describe(
-          "A short progress update or spinner message in active voice representing what this action is actively doing, written in the same language as the conversation.",
-        ),
-      }),
-      handler: async (
-        { skillName, spinnerText: _spinnerText },
-        toolCallId,
-      ) => {
-        const skipReason = skillUnlearnSkipReason(
-          await historyExcludingToolCall(toolCallId),
-          skillName,
-        );
-        return skipReason
-          ? skillUnlearnedSkippedMessage(skillName, skipReason)
-          : skillUnlearnedSuccessMessage(skillName);
-      },
-    }),
+  return [
+    runCommandTool,
+    learnSkillTool,
+    unlearnSkillTool,
   ];
 };
 
@@ -2750,18 +2858,13 @@ export const skillUnlearnedSkippedMessage = (
     ? `Skill "${skillName}" is not active, so there is nothing to deactivate — ${skillUnlearnSkippedMarkerText}. Do not call ${unlearnSkillToolName} for it again.`
     : `Skipped: skill "${skillName}" was already deactivated earlier in this same request and has been used again since, so every further ${unlearnSkillToolName} just reloads it on your next call. It is ${skillUnlearnSkippedMarkerText}. Finish the work first; deactivate it once at the end if you still need the context back.`;
 
-const emitSkillAdjustmentEvents = async (
+const emitLearnSkillEvents = async (
   toLearn: Skill[],
-  toUnlearn: Skill[],
 ): Promise<void> => {
   const history = await getHistory();
   const currentLearned = learnedSkillNames(history);
-  const currentActive = activeSkillNames(history);
   const freshToLearn = toLearn.filter(
     (skill) => !currentLearned.has(skill.name.toLowerCase()),
-  );
-  const freshToUnlearn = toUnlearn.filter(
-    (skill) => currentActive.has(skill.name.toLowerCase()),
   );
   for (const skill of freshToLearn) {
     const callId = `auto-learn-${generateId()}`;
@@ -2785,6 +2888,20 @@ const emitSkillAdjustmentEvents = async (
       result: skillLearnedSuccessMessage(skill.name),
     });
   }
+};
+
+const emitPendingUnlearnEvents = async (
+  toUnlearn: Skill[],
+): Promise<void> => {
+  if (empty(toUnlearn)) return;
+  const history = await getHistory();
+  const currentActive = activeSkillNames(history);
+  const freshToUnlearn = toUnlearn.filter(
+    (skill) =>
+      currentActive.has(skill.name.toLowerCase()) &&
+      !skillUsedInCurrentRequest(history, skill.name) &&
+      !skillUnlearnSkipReason(history, skill.name),
+  );
   for (const skill of freshToUnlearn) {
     const callId = `auto-unlearn-${generateId()}`;
     await outputEvent({
@@ -2846,6 +2963,7 @@ const emitCleanupEvents = async (
 const runPreModelDecisions = async (
   spec: AgentSpec,
   skills: Skill[],
+  onPendingUnlearn?: (skills: Skill[]) => void,
 ): Promise<void> => {
   const shouldDecide = !isMockModelInjected() || isDecisionModelInjected();
   if (!shouldDecide) return;
@@ -2875,10 +2993,8 @@ const runPreModelDecisions = async (
       : Promise.resolve([]),
   ]);
 
-  await emitSkillAdjustmentEvents(
-    skillsAdjustment.toLearn,
-    skillsAdjustment.toUnlearn,
-  );
+  await emitLearnSkillEvents(skillsAdjustment.toLearn);
+  onPendingUnlearn?.(skillsAdjustment.toUnlearn);
   await emitCleanupEvents(cleanupDecisions);
 };
 
@@ -3114,9 +3230,13 @@ export const runAbstractAgent = (
     const { tools, skills } = spec;
     const scratchPad = spec.toolOutputScratchPad;
     const existingToolNames = new Set(tools.map(({ name }) => name));
-    const allTools = [
+    const scratchTools =
+      scratchPad && !existingToolNames.has(readScratchFileToolName)
+        ? [createReadScratchFileTool(scratchPad)]
+        : [];
+    const baseTools = [
       ...tools,
-      ...(skills && skills.length > 0 ? createSkillTools(skills) : []),
+      ...scratchTools,
       ...(spec.enableCleanActiveMemory !== false
         ? [cleanActiveMemoryTool(getHistory)].filter(({ name }) =>
           !existingToolNames.has(name)
@@ -3126,6 +3246,12 @@ export const runAbstractAgent = (
         ? [searchPastHistoryTool(getHistory)].filter(({ name }) =>
           !existingToolNames.has(name)
         )
+        : []),
+    ];
+    const allTools = [
+      ...baseTools,
+      ...(skills && skills.length > 0
+        ? createSkillTools(skills, baseTools)
         : []),
     ];
     const skillsArr = skills ?? [];
@@ -3139,20 +3265,22 @@ export const runAbstractAgent = (
       hallucination: 0,
       doNothing: 0,
     };
-    let activeBgDecisions: Promise<void> | undefined;
+    let pendingToUnlearn: Skill[] = [];
+    let hasTriggeredPreModelDecisions = false;
     const allBgDecisions: Promise<void>[] = [];
     const triggerBackgroundDecisions = () => {
-      if (activeBgDecisions) return;
-      const promise = runPreModelDecisions(spec, skillsArr)
+      if (hasTriggeredPreModelDecisions) return;
+      hasTriggeredPreModelDecisions = true;
+      const promise = runPreModelDecisions(
+        spec,
+        skillsArr,
+        (unlearnList) => {
+          pendingToUnlearn = unlearnList;
+        },
+      )
         .catch((err) =>
           console.warn("[pre-model-decisions] background decision failed:", err)
-        )
-        .finally(() => {
-          if (activeBgDecisions === promise) {
-            activeBgDecisions = undefined;
-          }
-        });
-      activeBgDecisions = promise;
+        );
       allBgDecisions.push(promise);
     };
 
@@ -3163,7 +3291,9 @@ export const runAbstractAgent = (
         if (c > 200) {
           throw new Error("Agent turn limit safety threshold (200) exceeded.");
         }
-        triggerBackgroundDecisions();
+        if (c === 1) {
+          triggerBackgroundDecisions();
+        }
         const history = await getHistory();
         let normalizedHistory = await projectModelContext(
           spec,
@@ -3328,6 +3458,8 @@ export const runAbstractAgent = (
               ev.type === "own_thought"
             )
           ) {
+            await Promise.all(allBgDecisions);
+            await emitPendingUnlearnEvents(pendingToUnlearn);
             return;
           }
         } else {

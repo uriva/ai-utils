@@ -252,3 +252,47 @@ Deno.test("continuousCompaction - deterministic rich TLDR unwraps run_command to
     "q: foo",
   );
 });
+
+Deno.test(
+  "continuousCompaction - never compacts read_scratch_file invoked via run_command",
+  async () => {
+    const now = Date.now();
+    const scratchStore = new Map<string, string>();
+    const setScratch = (id: string, content: string): Promise<void> => {
+      scratchStore.set(id, content);
+      return Promise.resolve();
+    };
+
+    const oldToolCallId = "old-read-scratch-cmd-id";
+    const rawScratchContent = "line from scratch pad\n".repeat(200);
+    const history: HistoryEvent[] = [
+      {
+        id: oldToolCallId,
+        type: "tool_call",
+        name: "run_command",
+        parameters: {
+          command: "read_scratch_file",
+          params: { id: "scratch-123", startLine: 1 },
+          spinnerText: "reading",
+        },
+        timestamp: now - 30 * 60 * 1000,
+        isOwn: true,
+      },
+      {
+        id: "old-read-scratch-res",
+        type: "tool_result",
+        toolCallId: oldToolCallId,
+        result: rawScratchContent,
+        timestamp: now - 29 * 60 * 1000,
+        isOwn: true,
+      },
+    ];
+
+    const compacted = await compactToolResultsInMemory(history, { setScratch });
+    const result = compacted.find((e: HistoryEvent) =>
+      e.id === "old-read-scratch-res"
+    ) as Extract<HistoryEvent, { type: "tool_result" }>;
+    assertNotEquals(result, undefined);
+    assertEquals(result.result, rawScratchContent);
+  },
+);

@@ -6,6 +6,7 @@ import {
   callToResult,
   commandRewrittenCorrection,
   correctionPrefix,
+  createReadScratchFileTool,
   createSkillTools,
   formatSkillsPrompt,
   getSpecForTurn,
@@ -14,9 +15,11 @@ import {
   ownUtteranceTurn,
   participantUtteranceTurn,
   qualifiedToolName,
+  readScratchFileToolName,
   resolveToolDescription,
   runCommandToolName,
   tool,
+  topLevelToolCorrection,
 } from "../src/agent.ts";
 import type { AgentSpec, Skill } from "../src/agent.ts";
 import { agentDeps } from "../test_helpers.ts";
@@ -511,3 +514,124 @@ Deno.test("active skills prompt includes tool names and descriptions", () => {
   const specTurn2 = getSpecForTurn(spec, history);
   assertEquals(specTurn2.prompt.includes("todo/todo_write(params:"), true);
 });
+
+Deno.test(
+  "run_command with top-level tool executes the tool and surfaces a correction",
+  async () => {
+    const topTool = tool({
+      name: "ping",
+      description: "ping tool",
+      parameters: z.object({ message: z.string() }),
+      handler: ({ message }) => Promise.resolve(`pong: ${message}`),
+    });
+    const skillTools = createSkillTools([todoSkill], [topTool]);
+    const runCommand = skillTools.find((t) => t.name === runCommandToolName);
+    if (!runCommand) throw new Error("run_command missing");
+    const out = await runCommand.handler(
+      {
+        command: "ping",
+        params: { message: "hello" },
+        spinnerText: "pinging",
+      },
+      "call-id",
+    );
+    if (typeof out !== "string") throw new Error("expected string result");
+    assertEquals(out.includes(topLevelToolCorrection("ping")), true);
+    assertEquals(out.includes("pong: hello"), true);
+  },
+);
+
+Deno.test(
+  "run_command with read_scratch_file executes scratchpad reader and surfaces a correction",
+  async () => {
+    const store = new Map<string, string>([
+      ["scratch-1", "line 1\nline 2\nline 3"],
+    ]);
+    const scratchTool = createReadScratchFileTool({
+      get: (id: string) => Promise.resolve(store.get(id)),
+      set: (id: string, content: string) => {
+        store.set(id, content);
+        return Promise.resolve();
+      },
+    });
+    const skillTools = createSkillTools([todoSkill], [scratchTool]);
+    const runCommand = skillTools.find((t) => t.name === runCommandToolName);
+    if (!runCommand) throw new Error("run_command missing");
+    const out = await runCommand.handler(
+      {
+        command: readScratchFileToolName,
+        params: { id: "scratch-1", startLine: 1, limit: 10 },
+        spinnerText: "reading",
+      },
+      "call-id",
+    );
+    if (typeof out !== "string") throw new Error("expected string result");
+    assertEquals(
+      out.includes(topLevelToolCorrection(readScratchFileToolName)),
+      true,
+    );
+    assertEquals(out.includes("line 1"), true);
+  },
+);
+
+Deno.test(
+  "agent-level: a top-level tool invoked via run_command executes successfully and surfaces correction",
+  async () => {
+    const executed: string[] = [];
+    const topTool = tool({
+      name: "echo_note",
+      description: "echo note",
+      parameters: z.object({ note: z.string() }),
+      handler: ({ note }) => {
+        executed.push(note);
+        return Promise.resolve(`echoed: ${note}`);
+      },
+    });
+    const runCommandCall = (): HistoryEvent => ({
+      type: "tool_call",
+      isOwn: true,
+      id: "rc-top-1",
+      timestamp: Date.now(),
+      name: runCommandToolName,
+      parameters: {
+        command: "echo_note",
+        params: { note: "test-note" },
+        spinnerText: "echoing",
+      },
+    });
+    const fakeModel: CallModel = () =>
+      Promise.resolve(
+        executed.length > 0 ? [ownUtteranceTurn("done")] : [runCommandCall()],
+      );
+    const history: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "Echo the note test-note.",
+    })];
+    await injectCallModel(fakeModel)(() =>
+      agentDeps(history)(runAgent)({
+        maxIterations: 4,
+        tools: [topTool],
+        skills: [todoSkill],
+        prompt: "You help users.",
+        timezoneIANA: "UTC",
+      })
+    )();
+    assertEquals(
+      executed.length,
+      1,
+      `top-level tool should execute once via run_command. History: ${
+        JSON.stringify(history, null, 2)
+      }`,
+    );
+    const toolResult = history.find(
+      (e): e is Extract<HistoryEvent, { type: "tool_result" }> =>
+        e.type === "tool_result" && e.toolCallId === "rc-top-1",
+    );
+    assert(toolResult, "expected tool result for rc-top-1");
+    assertEquals(
+      toolResult.result.includes(topLevelToolCorrection("echo_note")),
+      true,
+    );
+    assertEquals(toolResult.result.includes("echoed: test-note"), true);
+  },
+);

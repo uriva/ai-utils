@@ -110,12 +110,13 @@ export const compactToolResultsInMemory = async (
 
     if (toolCall && toolResult && toolResult.result) {
       const threshold = getSpillThreshold(toolResult.timestamp, turnDistance);
+      const { command } = toolCallCommandAndParams(toolCall);
 
       // If it exceeds decaying threshold and has not been folded yet
       if (
-        toolCall.name !== readScratchFileToolName &&
-        toolCall.name !== learnSkillToolName &&
-        toolCall.name !== unlearnSkillToolName &&
+        command !== readScratchFileToolName &&
+        command !== learnSkillToolName &&
+        command !== unlearnSkillToolName &&
         toolResult.result.length > threshold &&
         !isCompactedToolResult(toolResult.result)
       ) {

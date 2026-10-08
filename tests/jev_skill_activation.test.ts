@@ -1,10 +1,12 @@
 import { assert, assertEquals } from "@std/assert";
+import { z } from "zod/v4";
 import {
   getSpecForTurn,
   type HistoryEvent,
   learnSkillToolName,
   participantUtteranceTurn,
   runCommandToolName,
+  unlearnSkillToolName,
 } from "../src/agent.ts";
 import {
   addition,
@@ -125,4 +127,87 @@ runForAllProviders(
     );
   },
   1, // retries = 1
+);
+
+const lookupSkill = {
+  name: "lookup",
+  description: "Lookup tools to search external databases and documentation",
+  instructions:
+    "When asked about facts, specifications, or details, search using lookup/search.",
+  tools: [
+    {
+      name: "search",
+      description: "Search for query",
+      parameters: z.object({ query: z.string() }),
+      handler: ({ query }: { query: string }) =>
+        Promise.resolve(`Results for ${query}: Project Alpha lead was Alice.`),
+    },
+  ],
+};
+
+runForAllProviders(
+  "decision model skill retention: active skill is NOT unlearned prior to search or across consecutive queries",
+  async (runAgentWithProvider) => {
+    // Turn 1: user asks a question -> lookup skill is learned and used
+    const turn1History: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please search specifications for Project Alpha.",
+      }),
+    ];
+
+    await agentDeps(turn1History)(runAgentWithProvider)({
+      maxIterations: 5,
+      tools: [],
+      skills: [lookupSkill],
+      prompt: "You are a research assistant.",
+      timezoneIANA: "UTC",
+    });
+
+    // Turn 2: user asks a follow-up question without explicitly saying "search"
+    const turn2History: HistoryEvent[] = [
+      ...turn1History,
+      participantUtteranceTurn({
+        name: "user",
+        text:
+          "Who was the lead architect on that project and what was their role?",
+      }),
+    ];
+
+    await agentDeps(turn2History)(runAgentWithProvider)({
+      maxIterations: 5,
+      tools: [],
+      skills: [lookupSkill],
+      prompt: "You are a research assistant.",
+      timezoneIANA: "UTC",
+    });
+
+    const turn2Events = turn2History.slice(turn1History.length);
+    const unlearnCalls = turn2Events.filter(
+      (e) => e.type === "tool_call" && e.name === unlearnSkillToolName,
+    );
+    assertEquals(
+      unlearnCalls.length,
+      0,
+      `Active skill must not be unlearned prior to search on follow-up query. Found unlearn calls: ${
+        JSON.stringify(unlearnCalls)
+      }`,
+    );
+
+    const lookupCommandCalls = turn2Events.filter(
+      (e) =>
+        e.type === "tool_call" &&
+        e.name === runCommandToolName &&
+        typeof e.parameters === "object" &&
+        e.parameters !== null &&
+        "command" in e.parameters &&
+        typeof e.parameters.command === "string" &&
+        e.parameters.command.startsWith("lookup/"),
+    );
+    assert(
+      lookupCommandCalls.length > 0,
+      "Agent should execute lookup/search directly on Turn 2",
+    );
+  },
+  1,
 );

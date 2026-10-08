@@ -222,6 +222,7 @@ export {
   type ToolReturn,
   toolUseTurn,
   toolUseTurnWithMetadata,
+  topLevelToolCorrection,
   truncateToolOutput,
   unlearnSkillToolName,
 } from "./src/agent.ts";

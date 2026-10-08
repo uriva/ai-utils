@@ -767,8 +767,15 @@ export const decideSkillsWithDecisionModel = async (
     current_user_request: lastUser.text,
   };
 
-  const questions = Object.fromEntries(
-    candidateSkills.map((s) => [
+  const inactiveSkills = candidateSkills.filter(
+    (s) => !currentlyActiveSkills.has(s.name.toLowerCase()),
+  );
+  const activeSkills = candidateSkills.filter(
+    (s) => currentlyActiveSkills.has(s.name.toLowerCase()),
+  );
+
+  const questions = Object.fromEntries([
+    ...inactiveSkills.map((s) => [
       s.name,
       {
         type: "noul" as const,
@@ -776,7 +783,15 @@ export const decideSkillsWithDecisionModel = async (
           `Does answering this turn or executing the user request directly require the '${s.name}' skill (${s.description})?`,
       },
     ]),
-  );
+    ...activeSkills.map((s) => [
+      s.name,
+      {
+        type: "noul" as const,
+        instructions:
+          `Could answering this turn, looking up facts, or continuing this conversation require or benefit from the '${s.name}' skill (${s.description})?`,
+      },
+    ]),
+  ]);
 
   try {
     const answers = await callDecisionModel(state, questions);
@@ -787,8 +802,7 @@ export const decideSkillsWithDecisionModel = async (
       }),
     );
 
-    const candidateToLearn = candidateSkills
-      .filter((s) => !currentlyActiveSkills.has(s.name.toLowerCase()))
+    const candidateToLearn = inactiveSkills
       .filter((s) => (scores[s.name] ?? 0) >= 0.60)
       .sort((a, b) => (scores[b.name] ?? 0) - (scores[a.name] ?? 0));
 
@@ -801,8 +815,7 @@ export const decideSkillsWithDecisionModel = async (
       ]
       : [];
 
-    const toUnlearn = candidateSkills
-      .filter((s) => currentlyActiveSkills.has(s.name.toLowerCase()))
+    const toUnlearn = activeSkills
       .filter((s) => (scores[s.name] ?? 1) < 0.20);
 
     return { toLearn, toUnlearn };
