@@ -687,3 +687,87 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "waitForBackgroundDecisions: false allows agent run to complete without waiting for slow background decisions",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Tell me a joke.",
+      }),
+    ];
+
+    const SLOW_DECISION_LATENCY_MS = 600;
+    let decisionCompleted = false;
+
+    const mockDecisionCaller = async (
+      _state: unknown,
+      // deno-lint-ignore no-explicit-any
+      questions: Record<string, any>,
+      // deno-lint-ignore no-explicit-any
+    ): Promise<Record<string, any>> => {
+      if (
+        "data_exporter" in questions ||
+        Object.keys(questions).some((k) => k.startsWith("compact_turn_"))
+      ) {
+        await delay(SLOW_DECISION_LATENCY_MS);
+        decisionCompleted = true;
+      }
+      // deno-lint-ignore no-explicit-any
+      const answers: Record<string, any> = {};
+      for (const key of Object.keys(questions)) {
+        if (key === "is_hallucination") {
+          answers[key] = { type: "noul", noul: 0.05 };
+        } else if (key === "requires_flash") {
+          answers[key] = { type: "choice", choice: "lite" };
+        } else {
+          answers[key] = { type: "noul", noul: 0.95 };
+        }
+      }
+      return answers;
+    };
+
+    const fakeCallModel = (
+      _received: HistoryEvent[],
+    ): Promise<HistoryEvent[]> => {
+      return Promise.resolve([
+        ownUtteranceTurn("Why did the chicken cross the road?"),
+      ]);
+    };
+
+    const startTime = performance.now();
+    await pipe(
+      injectDecisionModel(mockDecisionCaller),
+      injectCallModel(fakeCallModel),
+      inMemoryDeps(history),
+    )(async () => {
+      await runAgent({
+        provider: "anthropic",
+        maxIterations: 3,
+        tools: [],
+        skills: [sampleSkill],
+        prompt: "You are an assistant.",
+        timezoneIANA: "UTC",
+        waitForBackgroundDecisions: false,
+      });
+    })();
+    const elapsedMs = performance.now() - startTime;
+
+    assert(
+      elapsedMs < 250,
+      `Expected runAgent with waitForBackgroundDecisions: false to return in < 250ms, but took ${
+        Math.round(elapsedMs)
+      }ms`,
+    );
+    assertEquals(
+      decisionCompleted,
+      false,
+      "Background decision should still be in-flight when runAgent returns",
+    );
+
+    // Wait for the background task to settle cleanly before ending test
+    await delay(SLOW_DECISION_LATENCY_MS);
+    assertEquals(decisionCompleted, true);
+  },
+);

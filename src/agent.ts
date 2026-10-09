@@ -3055,6 +3055,7 @@ export type AgentSpec = AgentInputs & {
   // instruction or history (e.g. arbitrary code execution). Matching covers
   // the tool name and, for router tools, the inner `command` string.
   urlGroundingExemptToolNames?: string[];
+  waitForBackgroundDecisions?: boolean;
 };
 
 const hasEmojiFlood = (events: HistoryEvent[]) =>
@@ -3278,6 +3279,13 @@ export const runAbstractAgent = (
           pendingToUnlearn = unlearnList;
         },
       )
+        .then(async () => {
+          if (spec.waitForBackgroundDecisions === false) {
+            const toEmit = pendingToUnlearn;
+            pendingToUnlearn = [];
+            await emitPendingUnlearnEvents(toEmit);
+          }
+        })
         .catch((err) =>
           console.warn("[pre-model-decisions] background decision failed:", err)
         );
@@ -3458,8 +3466,12 @@ export const runAbstractAgent = (
               ev.type === "own_thought"
             )
           ) {
-            await Promise.all(allBgDecisions);
-            await emitPendingUnlearnEvents(pendingToUnlearn);
+            if (spec.waitForBackgroundDecisions !== false) {
+              await Promise.all(allBgDecisions);
+            }
+            const toEmit = pendingToUnlearn;
+            pendingToUnlearn = [];
+            await emitPendingUnlearnEvents(toEmit);
             return;
           }
         } else {
@@ -3468,7 +3480,9 @@ export const runAbstractAgent = (
         }
       }
     } finally {
-      await Promise.all(allBgDecisions);
+      if (spec.waitForBackgroundDecisions !== false) {
+        await Promise.all(allBgDecisions);
+      }
     }
   })();
 
