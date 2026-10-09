@@ -263,7 +263,14 @@ Deno.test("runAgent auto-cleanup with decision model: automatically emits clean_
     return Promise.resolve(answers);
   };
 
+  let it = 0;
   const fakeCallModel = (received: HistoryEvent[]): Promise<HistoryEvent[]> => {
+    it++;
+    if (it === 1) {
+      return Promise.resolve([
+        toolUseTurn({ name: "someTool", args: {} }),
+      ]);
+    }
     modelReceivedHistory = JSON.parse(JSON.stringify(received));
     return Promise.resolve([
       ownUtteranceTurn("I have sent the release notes to the team."),
