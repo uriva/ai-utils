@@ -3055,7 +3055,6 @@ export type AgentSpec = AgentInputs & {
   // instruction or history (e.g. arbitrary code execution). Matching covers
   // the tool name and, for router tools, the inner `command` string.
   urlGroundingExemptToolNames?: string[];
-  waitForBackgroundDecisions?: boolean;
 };
 
 const hasEmojiFlood = (events: HistoryEvent[]) =>
@@ -3268,220 +3267,206 @@ export const runAbstractAgent = (
     };
     let pendingToUnlearn: Skill[] = [];
     let hasTriggeredPreModelDecisions = false;
-    const allBgDecisions: Promise<void>[] = [];
+    let turnEnded = false;
     const triggerBackgroundDecisions = () => {
       if (hasTriggeredPreModelDecisions) return;
       hasTriggeredPreModelDecisions = true;
-      const promise = runPreModelDecisions(
+      runPreModelDecisions(
         spec,
         skillsArr,
         (unlearnList) => {
-          pendingToUnlearn = unlearnList;
+          if (!turnEnded) {
+            pendingToUnlearn = unlearnList;
+          }
         },
       )
-        .then(async () => {
-          if (spec.waitForBackgroundDecisions === false) {
-            const toEmit = pendingToUnlearn;
-            pendingToUnlearn = [];
-            await emitPendingUnlearnEvents(toEmit);
-          }
-        })
         .catch((err) =>
           console.warn("[pre-model-decisions] background decision failed:", err)
         );
-      allBgDecisions.push(promise);
     };
 
-    try {
-      while (true) {
-        if (await shouldAbort()) return;
-        c++;
-        if (c > 200) {
-          throw new Error("Agent turn limit safety threshold (200) exceeded.");
+    while (true) {
+      if (await shouldAbort()) return;
+      c++;
+      if (c > 200) {
+        throw new Error("Agent turn limit safety threshold (200) exceeded.");
+      }
+      if (c === 1) {
+        triggerBackgroundDecisions();
+      }
+      const history = await getHistory();
+      let normalizedHistory = await projectModelContext(
+        spec,
+        [...history, ...ephemeralHistory],
+        scratchPad,
+      );
+
+      const progress = await maybeRunProgressCheck(spec, {
+        c,
+        stopAdviceCount,
+        normalizedHistory,
+      });
+      if (progress.kind === "force-stop") {
+        if (hasUnansweredUserMessage(normalizedHistory)) {
+          await outputEvent(ownUtteranceTurn(forcedStopUtterance));
         }
-        if (c === 1) {
-          triggerBackgroundDecisions();
-        }
-        const history = await getHistory();
-        let normalizedHistory = await projectModelContext(
+        return;
+      }
+      stopAdviceCount = progress.stopAdviceCount;
+      if (progress.injectedThought) {
+        await outputEvent(progress.injectedThought);
+        ephemeralHistory = [...ephemeralHistory, progress.injectedThought];
+        normalizedHistory = await projectModelContext(
           spec,
           [...history, ...ephemeralHistory],
           scratchPad,
         );
+      }
 
-        const progress = await maybeRunProgressCheck(spec, {
-          c,
-          stopAdviceCount,
-          normalizedHistory,
-        });
-        if (progress.kind === "force-stop") {
-          if (hasUnansweredUserMessage(normalizedHistory)) {
-            await outputEvent(ownUtteranceTurn(forcedStopUtterance));
-          }
-          return;
-        }
-        stopAdviceCount = progress.stopAdviceCount;
-        if (progress.injectedThought) {
-          await outputEvent(progress.injectedThought);
-          ephemeralHistory = [...ephemeralHistory, progress.injectedThought];
-          normalizedHistory = await projectModelContext(
-            spec,
-            [...history, ...ephemeralHistory],
-            scratchPad,
-          );
-        }
+      console.log(
+        `[agent-iter] iter=${c} histLen=${history.length} ephLen=${ephemeralHistory.length} normLen=${normalizedHistory.length}`,
+      );
+      await reportHistoryForDebug(normalizedHistory);
+      scheduleHistoryCompaction(spec, normalizedHistory);
+      const rawModelResponse = await timeit(reportTimeElapsedMs, callModel)(
+        normalizedHistory,
+      );
 
-        console.log(
-          `[agent-iter] iter=${c} histLen=${history.length} ephLen=${ephemeralHistory.length} normLen=${normalizedHistory.length}`,
+      // Ordered post-response gates: each blocked response retries the model
+      // call with a correctional thought (or aborts on persistent flooding).
+      if (hasEmojiFlood(rawModelResponse)) {
+        retryCounts.emojiFlood++;
+        console.warn(
+          `[emoji-flood] detected emoji flood in model response (attempt ${retryCounts.emojiFlood}/${maxEmojiFloodRetries})`,
         );
-        await reportHistoryForDebug(normalizedHistory);
-        scheduleHistoryCompaction(spec, normalizedHistory);
-        const rawModelResponse = await timeit(reportTimeElapsedMs, callModel)(
-          normalizedHistory,
+        if (retryCounts.emojiFlood >= maxEmojiFloodRetries) {
+          throw new Error("model keeps producing emoji flood responses");
+        }
+        continue;
+      }
+      if (hasRepetitionFlood(rawModelResponse)) {
+        retryCounts.repetitionFlood++;
+        console.warn(
+          `[repetition-flood] detected repetition flood in model response (attempt ${retryCounts.repetitionFlood}/${maxRepetitionFloodRetries})`,
         );
+        if (retryCounts.repetitionFlood >= maxRepetitionFloodRetries) {
+          throw new Error("model keeps producing repetition flood responses");
+        }
+        continue;
+      }
+      const truncated = findTruncatedUtterance(rawModelResponse);
+      if (truncated && retryCounts.truncation < maxTruncationRetries) {
+        retryCounts.truncation++;
+        console.warn(
+          `[max-tokens] model response truncated (attempt ${retryCounts.truncation}/${maxTruncationRetries}); retrying with correctional thought`,
+        );
+        ephemeralHistory = [
+          ...ephemeralHistory,
+          ownThoughtTurn(truncationCorrectionText(truncated.text)),
+        ];
+        continue;
+      }
 
-        // Ordered post-response gates: each blocked response retries the model
-        // call with a correctional thought (or aborts on persistent flooding).
-        if (hasEmojiFlood(rawModelResponse)) {
-          retryCounts.emojiFlood++;
+      const modelResponse = stripTruncatedFlag(rawModelResponse);
+      const { emit, internal } = sanitizeModelOutput(
+        normalizedHistory,
+        modelResponse,
+      );
+      const emitWithDescriptions = withResolvedToolDescriptions(
+        allTools,
+        skillsArr,
+        emit,
+      );
+
+      const concludingTexts = concludingUtteranceTexts(emit);
+      if (
+        (!isMockModelInjected() || isDecisionModelInjected()) &&
+        nonempty(concludingTexts) &&
+        !emit.some(isSafetyBlockUtterance) &&
+        isUserPromptedTurn(history) &&
+        retryCounts.hallucination < maxHallucinationRetries
+      ) {
+        const isHallucinated = await auditUtteranceForHallucination(
+          normalizedHistory,
+          concludingTexts.join("\n"),
+        );
+        if (isHallucinated) {
+          retryCounts.hallucination++;
           console.warn(
-            `[emoji-flood] detected emoji flood in model response (attempt ${retryCounts.emojiFlood}/${maxEmojiFloodRetries})`,
+            `[hallucination-gate] blocked hallucinated/off-topic utterance (attempt ${retryCounts.hallucination}/${maxHallucinationRetries})`,
           );
-          if (retryCounts.emojiFlood >= maxEmojiFloodRetries) {
-            throw new Error("model keeps producing emoji flood responses");
-          }
-          continue;
-        }
-        if (hasRepetitionFlood(rawModelResponse)) {
-          retryCounts.repetitionFlood++;
-          console.warn(
-            `[repetition-flood] detected repetition flood in model response (attempt ${retryCounts.repetitionFlood}/${maxRepetitionFloodRetries})`,
+          const lastUser = [...normalizedHistory].reverse().find(
+            (e) => e.type === "participant_utterance",
           );
-          if (retryCounts.repetitionFlood >= maxRepetitionFloodRetries) {
-            throw new Error("model keeps producing repetition flood responses");
-          }
-          continue;
-        }
-        const truncated = findTruncatedUtterance(rawModelResponse);
-        if (truncated && retryCounts.truncation < maxTruncationRetries) {
-          retryCounts.truncation++;
-          console.warn(
-            `[max-tokens] model response truncated (attempt ${retryCounts.truncation}/${maxTruncationRetries}); retrying with correctional thought`,
-          );
+          const userQuery = lastUser && "text" in lastUser &&
+              typeof lastUser.text === "string"
+            ? lastUser.text.slice(0, 300)
+            : "your request";
           ephemeralHistory = [
             ...ephemeralHistory,
-            ownThoughtTurn(truncationCorrectionText(truncated.text)),
+            ownThoughtTurn(hallucinationCorrectionText(userQuery)),
           ];
           continue;
-        }
-
-        const modelResponse = stripTruncatedFlag(rawModelResponse);
-        const { emit, internal } = sanitizeModelOutput(
-          normalizedHistory,
-          modelResponse,
-        );
-        const emitWithDescriptions = withResolvedToolDescriptions(
-          allTools,
-          skillsArr,
-          emit,
-        );
-
-        const concludingTexts = concludingUtteranceTexts(emit);
-        if (
-          (!isMockModelInjected() || isDecisionModelInjected()) &&
-          nonempty(concludingTexts) &&
-          !emit.some(isSafetyBlockUtterance) &&
-          isUserPromptedTurn(history) &&
-          retryCounts.hallucination < maxHallucinationRetries
-        ) {
-          const isHallucinated = await auditUtteranceForHallucination(
-            normalizedHistory,
-            concludingTexts.join("\n"),
-          );
-          if (isHallucinated) {
-            retryCounts.hallucination++;
-            console.warn(
-              `[hallucination-gate] blocked hallucinated/off-topic utterance (attempt ${retryCounts.hallucination}/${maxHallucinationRetries})`,
-            );
-            const lastUser = [...normalizedHistory].reverse().find(
-              (e) => e.type === "participant_utterance",
-            );
-            const userQuery = lastUser && "text" in lastUser &&
-                typeof lastUser.text === "string"
-              ? lastUser.text.slice(0, 300)
-              : "your request";
-            ephemeralHistory = [
-              ...ephemeralHistory,
-              ownThoughtTurn(hallucinationCorrectionText(userQuery)),
-            ];
-            continue;
-          }
-        }
-
-        if (
-          emitWithDescriptions.some((e) => e.type === "do_nothing") &&
-          hasUnansweredUserMessage(normalizedHistory) &&
-          retryCounts.doNothing < maxDoNothingRetries
-        ) {
-          retryCounts.doNothing++;
-          console.warn(
-            `[unanswered-user-gate] model chose do_nothing with unanswered user message (attempt ${retryCounts.doNothing}/${maxDoNothingRetries}); retrying with correctional thought`,
-          );
-          ephemeralHistory = [
-            ...ephemeralHistory,
-            ownThoughtTurn(unansweredUserCorrectionText),
-          ];
-          continue;
-        }
-
-        const emitWithUniqueIds = disambiguateNewToolCalls(
-          history,
-          emitWithDescriptions,
-        );
-
-        // Process what needs to be emitted
-        if (emitWithUniqueIds.length > 0) {
-          await each(outputEvent)(emitWithUniqueIds);
-
-          const hadDeferred = await handleFunctionCalls(
-            allTools,
-            undefined,
-            skillsArr,
-            scratchPad,
-          )(emitWithUniqueIds);
-          if (hadDeferred) return;
-
-          // We actually yielded things to the outside world, reset ephemeral history
-          ephemeralHistory = [];
-          retryCounts.doNothing = 0;
-
-          const updatedHistory = await getHistory();
-          if (
-            !(emitWithUniqueIds.some((ev: HistoryEvent) =>
-              ev.type === "tool_call"
-            )) &&
-            nonempty(updatedHistory) &&
-            last(updatedHistory).isOwn &&
-            !emitWithUniqueIds.every((ev: HistoryEvent) =>
-              ev.type === "own_thought"
-            )
-          ) {
-            if (spec.waitForBackgroundDecisions !== false) {
-              await Promise.all(allBgDecisions);
-            }
-            const toEmit = pendingToUnlearn;
-            pendingToUnlearn = [];
-            await emitPendingUnlearnEvents(toEmit);
-            return;
-          }
-        } else {
-          // Nothing was emitted to the outside world, accumulate the internal state (e.g., thoughts)
-          ephemeralHistory = [...ephemeralHistory, ...internal];
         }
       }
-    } finally {
-      if (spec.waitForBackgroundDecisions !== false) {
-        await Promise.all(allBgDecisions);
+
+      if (
+        emitWithDescriptions.some((e) => e.type === "do_nothing") &&
+        hasUnansweredUserMessage(normalizedHistory) &&
+        retryCounts.doNothing < maxDoNothingRetries
+      ) {
+        retryCounts.doNothing++;
+        console.warn(
+          `[unanswered-user-gate] model chose do_nothing with unanswered user message (attempt ${retryCounts.doNothing}/${maxDoNothingRetries}); retrying with correctional thought`,
+        );
+        ephemeralHistory = [
+          ...ephemeralHistory,
+          ownThoughtTurn(unansweredUserCorrectionText),
+        ];
+        continue;
+      }
+
+      const emitWithUniqueIds = disambiguateNewToolCalls(
+        history,
+        emitWithDescriptions,
+      );
+
+      // Process what needs to be emitted
+      if (emitWithUniqueIds.length > 0) {
+        await each(outputEvent)(emitWithUniqueIds);
+
+        const hadDeferred = await handleFunctionCalls(
+          allTools,
+          undefined,
+          skillsArr,
+          scratchPad,
+        )(emitWithUniqueIds);
+        if (hadDeferred) return;
+
+        // We actually yielded things to the outside world, reset ephemeral history
+        ephemeralHistory = [];
+        retryCounts.doNothing = 0;
+
+        const updatedHistory = await getHistory();
+        if (
+          !(emitWithUniqueIds.some((ev: HistoryEvent) =>
+            ev.type === "tool_call"
+          )) &&
+          nonempty(updatedHistory) &&
+          last(updatedHistory).isOwn &&
+          !emitWithUniqueIds.every((ev: HistoryEvent) =>
+            ev.type === "own_thought"
+          )
+        ) {
+          turnEnded = true;
+          const toEmit = pendingToUnlearn;
+          pendingToUnlearn = [];
+          await emitPendingUnlearnEvents(toEmit);
+          return;
+        }
+      } else {
+        // Nothing was emitted to the outside world, accumulate the internal state (e.g., thoughts)
+        ephemeralHistory = [...ephemeralHistory, ...internal];
       }
     }
   })();

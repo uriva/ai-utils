@@ -188,6 +188,18 @@ Deno.test(
       "Expected callModel to be invoked while pre-model decisions were in-flight, but callModel waited until after decisions completed",
     );
 
+    // Turn completes without waiting for slow background decisions
+    const runAgentDurationMs = performance.now() - agentRunStart;
+    assert(
+      runAgentDurationMs < 300,
+      `Expected runAgent to return immediately (< 300ms) without waiting for 500ms background decision, took ${
+        Math.round(runAgentDurationMs)
+      }ms`,
+    );
+
+    // Wait for the background task to settle cleanly before asserting on additive events
+    await delay(SIMULATED_DECISION_LATENCY_MS + 50);
+
     // 3. ADDITIVE ASSERTION: Decisions must complete in the background and additively record skills and memory cleanup to history
     const autoLearnEvents = history.filter(
       (e) => e.type === "tool_call" && e.id.startsWith("auto-learn-"),
@@ -329,6 +341,7 @@ Deno.test(
     );
 
     // Verify background decisions were additive across iterations
+    await delay(SIMULATED_DECISION_LATENCY_MS + 50);
     const autoLearnEvents = history.filter(
       (e) => e.type === "tool_call" && e.id.startsWith("auto-learn-"),
     );
@@ -493,6 +506,7 @@ Deno.test(
       });
     })();
 
+    await delay(SIMULATED_DECISION_LATENCY_MS + 50);
     const autoLearnCalls = history.filter(
       (e) => e.type === "tool_call" && e.id.startsWith("auto-learn-"),
     );
@@ -586,6 +600,7 @@ Deno.test(
       });
     })();
 
+    await delay(SIMULATED_DECISION_LATENCY_MS + 50);
     // Check if auto-unlearn was emitted for data_exporter
     const autoUnlearnCalls = history.filter(
       (e) =>
@@ -689,7 +704,7 @@ Deno.test(
 );
 
 Deno.test(
-  "waitForBackgroundDecisions: false allows agent run to complete without waiting for slow background decisions",
+  "background decisions never block agent turn completion on slow decision models",
   async () => {
     const history: HistoryEvent[] = [
       participantUtteranceTurn({
@@ -749,14 +764,13 @@ Deno.test(
         skills: [sampleSkill],
         prompt: "You are an assistant.",
         timezoneIANA: "UTC",
-        waitForBackgroundDecisions: false,
       });
     })();
     const elapsedMs = performance.now() - startTime;
 
     assert(
       elapsedMs < 250,
-      `Expected runAgent with waitForBackgroundDecisions: false to return in < 250ms, but took ${
+      `Expected runAgent to return in < 250ms without waiting for background decisions, but took ${
         Math.round(elapsedMs)
       }ms`,
     );
