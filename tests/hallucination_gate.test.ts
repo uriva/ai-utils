@@ -17,7 +17,7 @@ import { injectDecisionModel } from "../src/decisionModel.ts";
 import { agentDeps, injectSecrets } from "../test_helpers.ts";
 
 Deno.test(
-  "hallucination gate - intercepts off-topic utterance and re-invokes model with correctional thought",
+  "runAgent delivers utterance directly without hallucination gate re-invocation",
   async () => {
     const userQuery = "What is my flight number?";
     const history: HistoryEvent[] = [
@@ -26,7 +26,6 @@ Deno.test(
     let callCount = 0;
     const seenThoughts: string[] = [];
 
-    // Scripted model: initially hallucinates about invoices, then course-corrects on retry
     const scriptedModel = (events: HistoryEvent[]) => {
       callCount++;
       const thoughts = events
@@ -34,31 +33,23 @@ Deno.test(
         .map((e) => ("text" in e && typeof e.text === "string" ? e.text : ""));
       seenThoughts.push(...thoughts);
 
-      if (callCount === 1) {
-        return Promise.resolve([
-          ownUtteranceTurn(
-            "I checked your invoice: No VAT was charged and the total is $3,756.",
-          ),
-        ]);
-      }
       return Promise.resolve([
         ownUtteranceTurn("Your flight number is IZ 595."),
       ]);
     };
 
-    // Decision model mock: flags the first invoice utterance as hallucination, passes the second
+    let decisionModelCalled = false;
     const mockDecisionModel = (
-      state: unknown,
-      _questions: Record<string, unknown>,
+      _state: unknown,
+      questions: Record<string, unknown>,
     ) => {
-      const stateObj = state as { assistant_response?: string };
-      const isInvoice = Boolean(
-        stateObj?.assistant_response?.includes("invoice"),
-      );
+      if (questions && "is_hallucination" in questions) {
+        decisionModelCalled = true;
+      }
       return Promise.resolve({
         is_hallucination: {
           type: "choice" as const,
-          choice: isInvoice ? "true" : "false",
+          choice: "false",
         },
       });
     };
@@ -76,29 +67,20 @@ Deno.test(
 
     assertEquals(
       callCount,
-      2,
-      "Model should be re-invoked after hallucination is blocked",
+      1,
+      "Model should only be called once without being blocked by hallucination gate",
+    );
+    assertEquals(
+      decisionModelCalled,
+      false,
+      "Decision model hallucination check should not be called",
     );
     assert(
-      seenThoughts.some((t) =>
+      !seenThoughts.some((t) =>
         t.includes(
           "SYSTEM AUDIT: Your proposed response was flagged as an off-topic hallucination",
-        ) &&
-        t.includes(userQuery)
+        )
       ),
-      "Model must receive correctional thought with user query",
-    );
-
-    const emittedUtterances = history.filter((e) => e.type === "own_utterance");
-    assertEquals(
-      emittedUtterances.length,
-      1,
-      "Only the final non-hallucinated utterance should be emitted to user",
-    );
-    assertEquals(
-      emittedUtterances[0].text,
-      "Your flight number is IZ 595.",
-      "Emitted message must be the corrected flight number",
     );
   },
 );
@@ -327,7 +309,7 @@ Deno.test(
     )();
 
     assertEquals(callCount, 1);
-    assertEquals(auditedEvents?.length, 2);
+    assertEquals(auditedEvents, undefined);
   },
 );
 

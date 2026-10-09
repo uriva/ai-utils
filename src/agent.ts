@@ -52,12 +52,6 @@ import {
   isDecisionModelInjected,
   type PastToolEpisode,
 } from "./decisionModel.ts";
-import {
-  auditUtteranceForHallucination,
-  hallucinationCorrectionText,
-  isUserPromptedTurn,
-  maxHallucinationRetries,
-} from "./hallucinationGate.ts";
 export const stopThoughtPrefix =
   "I'm working on this for some time and not making progress.";
 export const stopThoughtDefault =
@@ -3086,20 +3080,6 @@ export const isSafetyBlockUtterance = (event: HistoryEvent): boolean =>
       event.modelMetadata.isSafetyBlock,
   ) || event.text === safetyWarningText);
 
-// A response concludes the turn when it carries user-facing utterances with no
-// pending tool calls — the loop returns right after emitting it. Only then is
-// grounding verification needed: a response with tool calls is followed by
-// tool results and another model pass, whose eventual concluding reply gets
-// verified instead.
-const concludingUtteranceTexts = (emit: HistoryEvent[]): string[] =>
-  emit.some((event) =>
-      event.type === "tool_call" || isSafetyBlockUtterance(event)
-    )
-    ? []
-    : emit.flatMap((event) =>
-      event.type === "own_utterance" ? [event.text] : []
-    );
-
 export const thinkingTokenExhaustionWarningText =
   "The model exhausted its thinking token limit. Please retry with smaller, more focused instructions (avoiding generating large files or code blocks in a single step).";
 
@@ -3262,7 +3242,6 @@ export const runAbstractAgent = (
       emojiFlood: 0,
       repetitionFlood: 0,
       truncation: 0,
-      hallucination: 0,
       doNothing: 0,
     };
     let pendingToUnlearn: Skill[] = [];
@@ -3377,38 +3356,6 @@ export const runAbstractAgent = (
         skillsArr,
         emit,
       );
-
-      const concludingTexts = concludingUtteranceTexts(emit);
-      if (
-        (!isMockModelInjected() || isDecisionModelInjected()) &&
-        nonempty(concludingTexts) &&
-        !emit.some(isSafetyBlockUtterance) &&
-        isUserPromptedTurn(history) &&
-        retryCounts.hallucination < maxHallucinationRetries
-      ) {
-        const isHallucinated = await auditUtteranceForHallucination(
-          normalizedHistory,
-          concludingTexts.join("\n"),
-        );
-        if (isHallucinated) {
-          retryCounts.hallucination++;
-          console.warn(
-            `[hallucination-gate] blocked hallucinated/off-topic utterance (attempt ${retryCounts.hallucination}/${maxHallucinationRetries})`,
-          );
-          const lastUser = [...normalizedHistory].reverse().find(
-            (e) => e.type === "participant_utterance",
-          );
-          const userQuery = lastUser && "text" in lastUser &&
-              typeof lastUser.text === "string"
-            ? lastUser.text.slice(0, 300)
-            : "your request";
-          ephemeralHistory = [
-            ...ephemeralHistory,
-            ownThoughtTurn(hallucinationCorrectionText(userQuery)),
-          ];
-          continue;
-        }
-      }
 
       if (
         emitWithDescriptions.some((e) => e.type === "do_nothing") &&
