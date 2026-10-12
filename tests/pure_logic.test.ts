@@ -1816,3 +1816,46 @@ Deno.test("normalizeHistoryForModel: recent proactive task survives when partici
     "recent proactive task must survive across participant reply",
   );
 });
+
+Deno.test(
+  "buildReq guarantees non-empty final user turn when participant utterance has empty text and no parts",
+  () => {
+    const events = [
+      {
+        type: "participant_utterance" as const,
+        id: "u1",
+        timestamp: 1000,
+        name: "user",
+        text: "hello",
+        isOwn: false as const,
+      },
+      {
+        type: "own_utterance" as const,
+        id: "b1",
+        timestamp: 2000,
+        text: "hi there",
+        isOwn: true as const,
+      },
+      {
+        type: "participant_utterance" as const,
+        id: "u2",
+        timestamp: 3000,
+        name: "user",
+        text: "",
+        attachments: [],
+        isOwn: false as const,
+      },
+    ];
+    const req = buildReq(ThinkingLevel.HIGH, "prompt", [], "UTC", undefined)(
+      events,
+    );
+    const contents = req.contents as Content[];
+    assertEquals(contents.length > 0, true);
+    const lastContent = contents[contents.length - 1];
+    assertEquals(lastContent.role, "user");
+    assertEquals(
+      Boolean(lastContent.parts && lastContent.parts.length > 0),
+      true,
+    );
+  },
+);

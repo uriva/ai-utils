@@ -331,6 +331,10 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
   if (empty(contents)) {
     throw new Error("Cannot call Gemini with empty contents");
   }
+  const lastMsg = contents[contents.length - 1];
+  const safeContents = lastMsg.role === "model"
+    ? [...contents, { role: "user", parts: [{ text: "<continue>" }] }]
+    : contents;
   const callWithReq = (c: Content[]) =>
     cachedCall({
       model: geminiModelVersion(resolvedTier),
@@ -354,7 +358,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
 
   if (attachments && attachments.length > 0) {
     try {
-      const withAttachments: Content[] = contents.map((c) => ({
+      const withAttachments: Content[] = safeContents.map((c) => ({
         ...c,
         parts: [...(c.parts ?? [])],
       }));
@@ -379,7 +383,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
       if (!is403PermissionError(normalizeError(err))) throw err;
     }
   }
-  return await callWithReq(contents);
+  return await callWithReq(safeContents);
 };
 
 export const attachmentsToParts = (

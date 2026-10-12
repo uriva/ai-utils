@@ -19,6 +19,7 @@ import {
   groupBy,
   last,
   map,
+  nonempty,
   pipe,
   sum,
 } from "gamla";
@@ -769,14 +770,15 @@ const historyEventToContent = (
       : e.text
       ? `${e.name}: ${e.text}`
       : "";
-    return wrapUserContent([
+    const parts = [
       text
         ? {
           text: stampText(text),
         }
         : undefined,
       ...attachmentsToPartsOrEmpty(e.attachments),
-    ].filter((x): x is Part => !!x));
+    ].filter((x): x is Part => !!x);
+    return wrapUserContent(nonempty(parts) ? parts : [{ text: " " }]);
   }
   if (e.type === "own_utterance" || e.type === "own_edit_message") {
     const text = e.type === "own_edit_message"
@@ -950,15 +952,21 @@ const fixStart = (history: Content[]) =>
     : history;
 
 const fixEnd = (history: Content[]) => {
-  if (empty(history)) return history;
-  const last = history[history.length - 1];
+  if (empty(history)) {
+    return [{ role: "user", parts: [{ text: "<conversation started>" }] }];
+  }
+  const nonEmpty = history.filter((c) => nonempty(c.parts ?? []));
+  if (empty(nonEmpty)) {
+    return [{ role: "user", parts: [{ text: "<conversation started>" }] }];
+  }
+  const last = nonEmpty[nonEmpty.length - 1];
   if (last.role === "model") {
     return [
-      ...history,
+      ...nonEmpty,
       { role: "user", parts: [{ text: "<continue>" }] },
     ];
   }
-  return history;
+  return nonEmpty;
 };
 
 const mergeConsecutiveRoles = (contents: Content[]): Content[] => {
