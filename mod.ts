@@ -327,7 +327,10 @@ export {
   type ScoreDecisionQuestion,
 } from "./src/decisionModel.ts";
 export {
+  decideWithReasoningOnPositive,
+  type DecideWithReasoningOpts,
   geminiGenJson,
+  genDecisionWithReasoningOnPositive,
   genJson,
   genJsonFromConvo,
   genJsonOverride,

@@ -2,6 +2,7 @@ import { assertEquals } from "@std/assert";
 import {
   callDecisionModel,
   decide,
+  decideWithReasoningOnPositive,
   type DecisionProvider,
   genDecision,
   genJson,
@@ -140,7 +141,7 @@ for (const provider of decisionProviders) {
   );
 
   Deno.test(
-    `genJson with mixed schema splits string fields and decision fields [${provider}]`,
+    `genJson with mixed schema routes directly to generative model when string fields are present [${provider}]`,
     injectSecrets(async () => {
       await injectDecisionProvider(provider)(async () => {
         const MixedSchema = z.object({
@@ -166,6 +167,39 @@ for (const provider of decisionProviders) {
         assertEquals(result.department, "auth");
         assertEquals(typeof result.summary, "string");
         assertEquals(result.summary.length > 5, true);
+      });
+    }),
+  );
+
+  Deno.test(
+    `decideWithReasoningOnPositive generates reasoning only on positive decision [${provider}]`,
+    injectSecrets(async () => {
+      await injectDecisionProvider(provider)(async () => {
+        const UrgencyReportSchema = z.object({
+          isUrgent: z.boolean().describe(
+            "Is the user experiencing an urgent block?",
+          ),
+          explanation: z.string().describe(
+            "Explanation of why the issue is urgent, or empty if not urgent.",
+          ),
+        });
+
+        const check = decideWithReasoningOnPositive(
+          { provider: "google", tier: "flash" },
+          "Determine if the user problem is urgent and explain why.",
+          UrgencyReportSchema,
+        );
+
+        // Positive case: urgent login issue
+        const positiveResult = await check(sampleInquiry);
+        assertEquals(positiveResult.isUrgent, true);
+        assertEquals(typeof positiveResult.explanation, "string");
+        assertEquals(positiveResult.explanation.length > 0, true);
+
+        // Negative case: non-urgent casual question
+        const negativeResult = await check("What are your business hours?");
+        assertEquals(negativeResult.isUrgent, false);
+        assertEquals(negativeResult.explanation, "");
       });
     }),
   );

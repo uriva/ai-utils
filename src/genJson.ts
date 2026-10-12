@@ -117,41 +117,6 @@ export const genJson =
           );
         }
       }
-
-      if ((!empty(stringKeys) || !empty(otherKeys)) && !empty(decisionKeys)) {
-        try {
-          const decisionShape = Object.fromEntries(
-            decisionKeys.map((k) => [k, shape[k]]),
-          );
-          const generativeShape = Object.fromEntries(
-            [...stringKeys, ...otherKeys].map((k) => [k, shape[k]]),
-          );
-          const decisionSchema = z.object(decisionShape);
-          const generativeSchema = z.object(generativeShape);
-
-          const [decisionRes, generativeRes] = await Promise.all([
-            decide(systemMsg, decisionSchema)(userMsg),
-            genJsonFromConvo(
-              opts,
-              structuredMsgs(systemMsg, userMsg),
-              generativeSchema,
-              attachments,
-            ),
-          ]);
-
-          return validateAgainstSchema(zodType, {
-            ...decisionRes,
-            ...generativeRes,
-          });
-        } catch {
-          return genJsonFromConvo(
-            opts,
-            structuredMsgs(systemMsg, userMsg),
-            zodType,
-            attachments,
-          );
-        }
-      }
     }
 
     return genJsonFromConvo(
@@ -163,3 +128,114 @@ export const genJson =
   };
 
 export const geminiGenJson = genJson;
+
+export type DecideWithReasoningOpts = ModelOpts & {
+  positiveValue?: boolean;
+};
+
+export function decideWithReasoningOnPositive<T extends ZodType>(
+  systemMsg: string,
+  zodType: T,
+): (userMsg: string, attachments?: MediaAttachment[]) => Promise<z.infer<T>>;
+export function decideWithReasoningOnPositive<T extends ZodType>(
+  opts: DecideWithReasoningOpts,
+  systemMsg: string,
+  zodType: T,
+): (userMsg: string, attachments?: MediaAttachment[]) => Promise<z.infer<T>>;
+export function decideWithReasoningOnPositive<T extends ZodType>(
+  optsOrSystemMsg: DecideWithReasoningOpts | string,
+  systemMsgOrZodType: string | T,
+  maybeZodType?: T,
+): (userMsg: string, attachments?: MediaAttachment[]) => Promise<z.infer<T>> {
+  const opts: DecideWithReasoningOpts = typeof optsOrSystemMsg === "string"
+    ? {}
+    : optsOrSystemMsg;
+  const systemMsg = typeof optsOrSystemMsg === "string"
+    ? optsOrSystemMsg
+    : (systemMsgOrZodType as string);
+  const zodType = typeof optsOrSystemMsg === "string"
+    ? (systemMsgOrZodType as T)
+    : (maybeZodType as T);
+  const positiveValue = opts.positiveValue ?? true;
+
+  return async (
+    userMsg: string,
+    attachments?: MediaAttachment[],
+  ): Promise<z.infer<T>> => {
+    if (attachments && !empty(attachments)) {
+      return genJsonFromConvo(
+        opts,
+        structuredMsgs(systemMsg, userMsg),
+        zodType,
+        attachments,
+      );
+    }
+
+    if (!isRecord(zodType) || !isRecord(zodType.shape)) {
+      return genJsonFromConvo(
+        opts,
+        structuredMsgs(systemMsg, userMsg),
+        zodType,
+        attachments,
+      );
+    }
+
+    const shape = zodType.shape as Record<string, ZodType>;
+    const decisionKeys = Object.keys(shape).filter((k) =>
+      isDecisionField(shape[k])
+    );
+    const stringKeys = Object.keys(shape).filter((k) =>
+      isStringField(shape[k])
+    );
+
+    if (empty(decisionKeys)) {
+      return genJsonFromConvo(
+        opts,
+        structuredMsgs(systemMsg, userMsg),
+        zodType,
+        attachments,
+      );
+    }
+
+    const decisionShape = Object.fromEntries(
+      decisionKeys.map((k) => [k, shape[k]]),
+    );
+    const decisionSchema = z.object(decisionShape);
+
+    let decisionRes: Record<string, unknown>;
+    try {
+      const res = await decide(systemMsg, decisionSchema)(userMsg);
+      decisionRes = isRecord(res) ? res : {};
+    } catch {
+      return genJsonFromConvo(
+        opts,
+        structuredMsgs(systemMsg, userMsg),
+        zodType,
+        attachments,
+      );
+    }
+
+    const isPositive = decisionKeys.some((k) =>
+      decisionRes[k] === positiveValue
+    );
+
+    if (!isPositive) {
+      const defaultStrings = Object.fromEntries(
+        stringKeys.map((k) => [k, ""]),
+      );
+      return validateAgainstSchema(zodType, {
+        ...decisionRes,
+        ...defaultStrings,
+      });
+    }
+
+    return genJsonFromConvo(
+      opts,
+      structuredMsgs(systemMsg, userMsg),
+      zodType,
+      attachments,
+    );
+  };
+}
+
+export const genDecisionWithReasoningOnPositive = decideWithReasoningOnPositive;
