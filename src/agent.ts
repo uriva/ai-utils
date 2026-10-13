@@ -546,7 +546,7 @@ type SharedFields = { id: MessageId; timestamp: number; isOwn: boolean };
 
 export type MessageId = string;
 
-type ParticipantDetail = { name: string };
+type ParticipantDetail = { name?: string };
 
 export type ParticipantUtterance =
   & {
@@ -1954,7 +1954,8 @@ const participantNamesFromHistory = (history: HistoryEvent[]): Set<string> =>
         e.type === "participant_utterance" ||
         e.type === "participant_edit_message"
       )
-      .map((e) => e.name),
+      .map((e) => e.name)
+      .filter((n): n is string => Boolean(n)),
   );
 
 const fabricatedUserMessagePattern = (participantNames: Set<string>) => {

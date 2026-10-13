@@ -10,6 +10,7 @@ import {
   injectGeminiToken,
   injectJevToken,
   injectRespanToken,
+  injectRespanUrl,
   z,
 } from "../mod.ts";
 import { injectSecrets } from "../test_helpers.ts";
@@ -260,4 +261,59 @@ Deno.test(
       });
     });
   }),
+);
+
+Deno.test(
+  "Respan falls back from defaultRespanModel to proRespanModel on 429 quota exhaustion",
+  async () => {
+    const requestedModels: string[] = [];
+    const server = Deno.serve({ port: 0 }, async (req) => {
+      const body = await req.json();
+      requestedModels.push(body.model);
+      if (body.model === "span-01-free") {
+        return new Response("Daily free quota exceeded", { status: 429 });
+      }
+      return new Response(
+        JSON.stringify({
+          model: "span-01-pro",
+          results: [
+            {
+              id: "urgency",
+              p_present: 0.95,
+              p_absent: 0.05,
+              p_not_observable: 0.0,
+            },
+          ],
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    const addr = server.addr;
+    const url = `http://localhost:${addr.port}`;
+
+    await injectRespanUrl(url)(async () => {
+      await injectRespanToken("fake-token")(async () => {
+        await injectDecisionProvider("respan")(async () => {
+          const answers = await callDecisionModel(
+            `unique-state-${Date.now()}`,
+            {
+              urgency: {
+                type: "noul",
+                instructions: "Is this urgent?",
+              },
+            },
+          );
+          assertEquals(answers.urgency.type, "noul");
+          assertEquals(
+            answers.urgency.type === "noul" && answers.urgency.noul > 0.9,
+            true,
+          );
+          assertEquals(requestedModels, ["span-01-free", "span-01-pro"]);
+        });
+      });
+    });
+
+    await server.shutdown();
+  },
 );

@@ -31,6 +31,14 @@ export const defaultRespanModel = "span-01-free";
 export const proRespanModel = "span-01-pro";
 const rmmbrUrl = "https://rmmbr.net";
 
+const respanUrlInjection: Injection<() => string> = context(
+  (): string => respanApiUrl,
+);
+
+export const accessRespanUrl = respanUrlInjection.access;
+export const injectRespanUrl = (url: string): Injector =>
+  respanUrlInjection.inject(() => url);
+
 const respanToken: Injection<() => string | undefined> = context(
   (): string | undefined => Deno.env.get("RESPAN_API_KEY"),
 );
@@ -488,34 +496,55 @@ const parseScoresToAnswers = (
   );
 };
 
-const rawCallRespanScores = async (
-  token: string,
-  payload: string,
-): Promise<RespanScoreResponse> => {
-  let response = await fetch(respanApiUrl, {
+const postRespan = (token: string, body: string, timeoutMs: number) =>
+  fetch(accessRespanUrl(), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-    body: payload,
-    signal: AbortSignal.timeout(10000),
+    body,
+    signal: AbortSignal.timeout(timeoutMs),
   });
+
+const isDepletedStatus = (status: number) => status === 429 || status === 402;
+
+const fetchRespanWithFallback = async (
+  token: string,
+  payload: string,
+  timeoutMs: number,
+): Promise<Response> => {
+  const response = await postRespan(token, payload, timeoutMs);
+
+  if (
+    isDepletedStatus(response.status) &&
+    payload.includes(defaultRespanModel)
+  ) {
+    await response.body?.cancel();
+    return postRespan(
+      token,
+      payload.replaceAll(defaultRespanModel, proRespanModel),
+      timeoutMs,
+    );
+  }
 
   if (response.status === 402 && payload.includes(proRespanModel)) {
     await response.body?.cancel();
-    const freePayload = payload.replaceAll(proRespanModel, defaultRespanModel);
-    response = await fetch(respanApiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: freePayload,
-      signal: AbortSignal.timeout(10000),
-    });
+    return postRespan(
+      token,
+      payload.replaceAll(proRespanModel, defaultRespanModel),
+      timeoutMs,
+    );
   }
 
+  return response;
+};
+
+const rawCallRespanScores = async (
+  token: string,
+  payload: string,
+): Promise<RespanScoreResponse> => {
+  const response = await fetchRespanWithFallback(token, payload, 10000);
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`Respan API error (${response.status}): ${errorText}`);
@@ -603,30 +632,7 @@ const rawCallRespanRoute = async (
   token: string,
   payload: string,
 ): Promise<ThinkingLevel> => {
-  let response = await fetch(respanApiUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: payload,
-    signal: AbortSignal.timeout(5000),
-  });
-
-  if (response.status === 402 && payload.includes(proRespanModel)) {
-    await response.body?.cancel();
-    const freePayload = payload.replaceAll(proRespanModel, defaultRespanModel);
-    response = await fetch(respanApiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: freePayload,
-      signal: AbortSignal.timeout(5000),
-    });
-  }
-
+  const response = await fetchRespanWithFallback(token, payload, 5000);
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`Respan API error (${response.status}): ${errorText}`);

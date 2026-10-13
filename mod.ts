@@ -339,12 +339,14 @@ export {
 export { injectKimiToken, kimiGenJsonFromConvo } from "./src/kimiJson.ts";
 export {
   accessRespanToken,
+  accessRespanUrl,
   callRespanDecisionModel,
   decideCleanupWithRespan,
   decideSkillsWithRespan,
   defaultRespanModel,
   formatAgentStateForRespan,
   injectRespanToken,
+  injectRespanUrl,
   proRespanModel,
   respanApiUrl,
   routeTaskWithRespan,
