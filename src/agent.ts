@@ -546,7 +546,7 @@ type SharedFields = { id: MessageId; timestamp: number; isOwn: boolean };
 
 export type MessageId = string;
 
-type ParticipantDetail = { name?: string };
+type ParticipantDetail = { name: string };
 
 export type ParticipantUtterance =
   & {

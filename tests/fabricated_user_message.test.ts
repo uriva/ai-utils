@@ -93,14 +93,14 @@ Deno.test("sanitizeModelOutput self-corrects fabricated user message with timest
 });
 
 Deno.test("sanitizeModelOutput handles participant utterance without name without throwing", () => {
-  const history: HistoryEvent[] = [
+  const history = [
     {
       type: "participant_utterance",
       text: "Hello without name",
       id: "1",
       timestamp: 1000,
       isOwn: false,
-    },
+    } as unknown as HistoryEvent,
   ];
   const output = [ownUtteranceTurn("Hello! How can I help you?")];
   const result = sanitizeModelOutput(history, output);
