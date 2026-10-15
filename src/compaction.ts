@@ -559,23 +559,69 @@ export const parseCleanMemoryDirectives = (
   return directives.sort((a, b) => a.toolCallTimestamp - b.toolCallTimestamp);
 };
 
+const isDirectCleanCandidate = (
+  directive: {
+    start: number;
+    end: number;
+    toolCallTimestamp?: number;
+    toolCallId?: string;
+  },
+  event: HistoryEvent,
+): boolean =>
+  event.type !== "participant_utterance" &&
+  event.timestamp >= directive.start &&
+  event.timestamp <= directive.end &&
+  (directive.toolCallTimestamp === undefined ||
+    event.timestamp < directive.toolCallTimestamp) &&
+  event.id !== directive.toolCallId &&
+  !(event.type === "tool_result" && event.toolCallId === directive.toolCallId);
+
+const collectCleanTargetCallIds = (
+  events: HistoryEvent[],
+  directive: {
+    start: number;
+    end: number;
+    toolCallTimestamp?: number;
+    toolCallId?: string;
+  },
+): Set<string> =>
+  new Set(
+    events
+      .filter((event) => isDirectCleanCandidate(directive, event))
+      .flatMap((event) =>
+        event.type === "tool_call"
+          ? [event.id]
+          : event.type === "tool_result" && event.toolCallId &&
+              event.toolCallId !== directive.toolCallId
+          ? [event.toolCallId]
+          : []
+      ),
+  );
+
+const isCleanTargetEvent = (
+  directive: {
+    start: number;
+    end: number;
+    toolCallTimestamp?: number;
+    toolCallId?: string;
+  },
+  targetCallIds: Set<string>,
+  event: HistoryEvent,
+): boolean =>
+  isDirectCleanCandidate(directive, event) ||
+  (event.type === "tool_call" && targetCallIds.has(event.id)) ||
+  (event.type === "tool_result" &&
+    Boolean(event.toolCallId && targetCallIds.has(event.toolCallId)));
+
 const applyOneCleanDirective = (
   events: HistoryEvent[],
   directive: CleanMemoryDirective,
 ): HistoryEvent[] => {
+  const targetCallIds = collectCleanTargetCallIds(events, directive);
   let placedSummary = false;
   const result: HistoryEvent[] = [];
   for (const event of events) {
-    const isUserUtterance = event.type === "participant_utterance";
-    const isInSpan = event.timestamp >= directive.start &&
-      event.timestamp <= directive.end;
-    const isPriorToDirective = event.timestamp < directive.toolCallTimestamp;
-    const isTarget = !isUserUtterance &&
-      isInSpan &&
-      isPriorToDirective &&
-      event.id !== directive.toolCallId;
-
-    if (isTarget) {
+    if (isCleanTargetEvent(directive, targetCallIds, event)) {
       if (directive.summary && !placedSummary) {
         result.push({
           id: `clean-summary-${directive.toolCallId}`,
@@ -641,7 +687,11 @@ export const cleanActiveMemoryToolRaw = (
       return "No events found within the specified time range. Check your timestamps and try again.";
     }
 
-    const match = inSpan.filter((e) => e.type !== "participant_utterance");
+    const spanBounds = { start, end };
+    const targetCallIds = collectCleanTargetCallIds(history, spanBounds);
+    const match = history.filter((e) =>
+      isCleanTargetEvent(spanBounds, targetCallIds, e)
+    );
     if (empty(match)) {
       return "Memory cleanup aborted: You cannot delete or summarize user messages (participant_utterance). Only select time spans containing tool results, tool calls, or thoughts.";
     }

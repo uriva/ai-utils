@@ -1422,6 +1422,7 @@ export const doNothingEventWithMetadata = <Metadata>(
 } as HistoryEventWithMetadata<Metadata>);
 
 export const overrideTime = timestampGeneration.inject;
+export const generateTimestamp = timestampGeneration.access;
 export const overrideIdGenerator = idGeneration.inject;
 export const generateId = idGeneration.access;
 

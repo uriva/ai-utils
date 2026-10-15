@@ -554,3 +554,72 @@ Deno.test("projectHistoryToModelContext integrates applyCleanActiveMemoryDirecti
   // User utterance must be intact
   assertEquals(projected.some((e) => e.id === "user-1"), true);
 });
+
+Deno.test("clean_active_memory tool - cleans paired tool_result when end_time lands on tool_call timestamp", async () => {
+  const history: HistoryEvent[] = [
+    {
+      id: "call-1",
+      type: "tool_call",
+      name: "toolA",
+      parameters: {},
+      timestamp: 2000,
+      isOwn: true,
+    },
+    {
+      id: "res-1",
+      type: "tool_result",
+      result: "resultA",
+      timestamp: 2005,
+      isOwn: true,
+      toolCallId: "call-1",
+    },
+  ];
+
+  const cleanTool = {
+    ...cleanActiveMemoryToolRaw(() => Promise.resolve(history)),
+  };
+  const resolver = callToResult([cleanTool]);
+  const res = await resolver({
+    name: cleanActiveMemoryToolName,
+    args: {
+      start_time: new Date(2000).toISOString(),
+      end_time: new Date(2000).toISOString(),
+      summary: "Ran toolA.",
+    },
+    id: "call-cleanup",
+  });
+
+  assertEquals(
+    res?.result,
+    `Successfully summarized 2 events from ${new Date(2000).toISOString()} to ${
+      new Date(2000).toISOString()
+    } with summary: "Ran toolA."`,
+  );
+
+  const projected = applyCleanActiveMemoryDirectives([
+    ...history,
+    {
+      id: "call-cleanup",
+      type: "tool_call",
+      name: cleanActiveMemoryToolName,
+      parameters: {
+        start_time: new Date(2000).toISOString(),
+        end_time: new Date(2000).toISOString(),
+        summary: "Ran toolA.",
+      },
+      timestamp: 3000,
+      isOwn: true,
+    },
+    {
+      id: "res-cleanup",
+      type: "tool_result",
+      result: res?.result ?? "",
+      timestamp: 3001,
+      isOwn: true,
+      toolCallId: "call-cleanup",
+    },
+  ]);
+
+  assertEquals(projected.some((e) => e.id === "call-1"), false);
+  assertEquals(projected.some((e) => e.id === "res-1"), false);
+});

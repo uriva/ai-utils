@@ -10,12 +10,14 @@ import {
   injectOpenAiToken,
   injectRespanToken,
   overrideIdGenerator,
+  overrideTime,
   runAgent,
   tool,
 } from "./mod.ts";
 import {
   type AgentSpec,
   type CallModelWrapper,
+  generateTimestamp,
   type HistoryEvent,
   injectAccessHistory,
   injectCallModelWrapper,
@@ -90,9 +92,25 @@ const cachingCallModelWrapper: CallModelWrapper = (
       systemPrompt,
       events: eventsCacheKey(events),
     }),
-    (events: HistoryEvent[]) => inner(events),
+    (events: HistoryEvent[]) => {
+      const maxTs = events.reduce((max, e) => Math.max(max, e.timestamp), 0);
+      return pipe(
+        overrideIdGenerator(makeCounter("model-id")),
+        overrideTime(() => maxTs),
+      )(() => inner(events))();
+    },
   );
-  return (events) => cached(events);
+  return async (events) => {
+    const maxInputTs = events.reduce(
+      (max, e) => Math.max(max, e.timestamp),
+      0,
+    );
+    const outputEvents = await cached(events);
+    return outputEvents.map((e, i) => ({
+      ...e,
+      timestamp: Math.max(generateTimestamp(), maxInputTs + i + 1),
+    }));
+  };
 };
 
 const flushRmmbr = (f: () => Promise<void>) => async () => {
