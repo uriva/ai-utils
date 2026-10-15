@@ -4,12 +4,15 @@ import {
   cleanActiveMemoryToolRaw,
 } from "../src/compaction.ts";
 import { cleanActiveMemoryToolName } from "../src/utils.ts";
+import { runAgent } from "../mod.ts";
 import {
   callToResult,
   type HistoryEvent,
+  injectCallModel,
   projectHistoryToModelContext,
   skillLoadedResultText,
 } from "../src/agent.ts";
+import { agentDeps } from "../test_helpers.ts";
 
 Deno.test("clean_active_memory tool - deletes target events in projected context without mutating raw history", async () => {
   const history: HistoryEvent[] = [
@@ -205,7 +208,7 @@ Deno.test("clean_active_memory tool - summarizes target events in projected cont
   assertEquals(summaryThought !== undefined, true);
 });
 
-Deno.test("clean_active_memory tool - blocks deleting user messages", async () => {
+Deno.test("clean_active_memory tool - excludes user messages and cleans non-user events when span contains both", async () => {
   const history: HistoryEvent[] = [
     {
       id: "msg-1",
@@ -216,11 +219,62 @@ Deno.test("clean_active_memory tool - blocks deleting user messages", async () =
       name: "user",
     },
     {
+      id: "call-2",
+      type: "tool_call",
+      name: "toolA",
+      parameters: {},
+      timestamp: 2000,
+      isOwn: true,
+    },
+    {
+      id: "res-3",
+      type: "tool_result",
+      result: "resultA",
+      timestamp: 3000,
+      isOwn: true,
+      toolCallId: "call-2",
+    },
+    {
       id: "msg-4",
       type: "own_utterance",
       isOwn: true,
       text: "bot reply 1",
       timestamp: 4000,
+    },
+  ];
+
+  const mockGetHistory = () => Promise.resolve(history);
+  const cleanTool = {
+    ...cleanActiveMemoryToolRaw(mockGetHistory),
+  };
+
+  const resolver = callToResult([cleanTool]);
+  const res = await resolver({
+    name: cleanActiveMemoryToolName,
+    args: {
+      start_time: "1970-01-01T00:00:01.000Z",
+      end_time: "1970-01-01T00:00:04.000Z",
+      summary: "Cleaned episode 1.",
+    },
+    id: "call-cleanup",
+  });
+
+  assertEquals(res?.toolCallId, "call-cleanup");
+  assertEquals(
+    res?.result,
+    'Successfully summarized 3 events from 1970-01-01T00:00:01.000Z to 1970-01-01T00:00:04.000Z with summary: "Cleaned episode 1."',
+  );
+});
+
+Deno.test("clean_active_memory tool - blocks deleting span containing only user messages", async () => {
+  const history: HistoryEvent[] = [
+    {
+      id: "msg-1",
+      type: "participant_utterance",
+      isOwn: false,
+      text: "user message 1",
+      timestamp: 1000,
+      name: "user",
     },
   ];
 
@@ -245,6 +299,106 @@ Deno.test("clean_active_memory tool - blocks deleting user messages", async () =
     true,
     `expected blocked notice, got: ${res?.result}`,
   );
+});
+
+Deno.test("runAgent - clean_active_memory succeeds when model passes span covering user utterance and tool calls", async () => {
+  const history: HistoryEvent[] = [
+    {
+      id: "msg-1",
+      type: "participant_utterance",
+      isOwn: false,
+      text: "Run step 1",
+      timestamp: 1000,
+      name: "user",
+    },
+    {
+      id: "call-2",
+      type: "tool_call",
+      name: "step_tool",
+      parameters: {},
+      timestamp: 2000,
+      isOwn: true,
+    },
+    {
+      id: "res-3",
+      type: "tool_result",
+      result: "verbose log output",
+      timestamp: 3000,
+      isOwn: true,
+      toolCallId: "call-2",
+    },
+    {
+      id: "msg-4",
+      type: "own_utterance",
+      isOwn: true,
+      text: "Step 1 complete.",
+      timestamp: 4000,
+    },
+    {
+      id: "msg-5",
+      type: "participant_utterance",
+      isOwn: false,
+      text: "Clean up memory from the start of the conversation.",
+      timestamp: 5000,
+      name: "user",
+    },
+  ];
+
+  let turn = 0;
+  let secondTurnHistory: HistoryEvent[] = [];
+  const fakeModel = (events: HistoryEvent[]): Promise<HistoryEvent[]> => {
+    turn++;
+    if (turn === 1) {
+      return Promise.resolve([
+        {
+          id: "call-clean-agent",
+          type: "tool_call",
+          isOwn: true,
+          name: cleanActiveMemoryToolName,
+          parameters: {
+            start_time: "1970-01-01T00:00:01.000Z",
+            end_time: "1970-01-01T00:00:04.000Z",
+            summary: "Completed step 1.",
+          },
+          timestamp: 6000,
+        },
+      ]);
+    }
+    secondTurnHistory = [...events];
+    return Promise.resolve([
+      {
+        id: "msg-6",
+        type: "own_utterance",
+        isOwn: true,
+        text: "Memory cleaned.",
+        timestamp: 7000,
+      },
+    ]);
+  };
+
+  await injectCallModel(fakeModel)(
+    agentDeps(history)(() =>
+      runAgent({
+        maxIterations: 3,
+        tools: [],
+        prompt: "You are a helpful assistant.",
+        timezoneIANA: "UTC",
+      })
+    ),
+  )();
+
+  const cleanResult = history.find((
+    e,
+  ): e is Extract<HistoryEvent, { type: "tool_result" }> =>
+    e.type === "tool_result" && e.toolCallId === "call-clean-agent"
+  );
+  assertEquals(
+    cleanResult?.result,
+    'Successfully summarized 3 events from 1970-01-01T00:00:01.000Z to 1970-01-01T00:00:04.000Z with summary: "Completed step 1."',
+  );
+  assertEquals(secondTurnHistory.some((e) => e.id === "msg-1"), true);
+  assertEquals(secondTurnHistory.some((e) => e.id === "call-2"), false);
+  assertEquals(secondTurnHistory.some((e) => e.id === "res-3"), false);
 });
 
 Deno.test(

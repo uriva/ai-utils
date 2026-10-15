@@ -607,13 +607,13 @@ export const cleanActiveMemoryToolRaw = (
 ) => ({
   name: cleanActiveMemoryToolName,
   description:
-    "Clean up your active conversation history by deleting or summarizing a specific time span. Excellent for compressing a series of failed trials or redundant logs into a single summary line.",
+    "Clean up your active conversation history by deleting or summarizing a specific time span. Excellent for compressing a series of failed trials or redundant logs into a single summary line. User messages (participant_utterance) within the span are automatically preserved.",
   parameters: z.object({
     start_time: z.string().describe(
-      "The exact timestamp of the first event in the span to clean, e.g. 'Jun 21, 2026, 1:10 AM' or '2026-06-21T01:10:00Z'.",
+      "The exact timestamp of the first event in the span to clean, e.g. 'Jun 21, 2026, 1:10 AM' or '2026-06-21T01:10:00Z'. User utterances in the span are automatically excluded and preserved.",
     ),
     end_time: z.string().describe(
-      "The exact timestamp of the last event in the span to clean, e.g. 'Jun 21, 2026, 1:15 AM' or '2026-06-21T01:15:00Z'.",
+      "The exact timestamp of the last event in the span to clean, e.g. 'Jun 21, 2026, 1:15 AM' or '2026-06-21T01:15:00Z'. User utterances in the span are automatically excluded and preserved.",
     ),
     summary: z.string().optional().describe(
       "Optional. A short 1-line description of what transpired during that time span to replace the verbose logs. If omitted, the entire time span is permanently deleted.",
@@ -634,17 +634,15 @@ export const cleanActiveMemoryToolRaw = (
     }
 
     const history = await getHistory();
-    const match = history.filter(
+    const inSpan = history.filter(
       (e) => e.timestamp >= start && e.timestamp <= end,
     );
-    if (match.length === 0) {
+    if (empty(inSpan)) {
       return "No events found within the specified time range. Check your timestamps and try again.";
     }
 
-    const hasUserUtterance = match.some(
-      (e) => e.type === "participant_utterance",
-    );
-    if (hasUserUtterance) {
+    const match = inSpan.filter((e) => e.type !== "participant_utterance");
+    if (empty(match)) {
       return "Memory cleanup aborted: You cannot delete or summarize user messages (participant_utterance). Only select time spans containing tool results, tool calls, or thoughts.";
     }
 
