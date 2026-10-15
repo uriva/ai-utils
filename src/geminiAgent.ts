@@ -558,13 +558,19 @@ const geminiSdkExchange = async (
   } catch (err: unknown) {
     if (usedCacheName && typeof rawSysInstr === "string") {
       const errorMsg = String(err);
+      const lowerMsg = errorMsg.toLowerCase();
       if (
         errorMsg.includes("NOT_FOUND") ||
         errorMsg.includes("404") ||
-        errorMsg.includes("cachedContent") ||
-        errorMsg.includes("Cached content")
+        lowerMsg.includes("cachedcontent") ||
+        lowerMsg.includes("cached content")
       ) {
-        await invalidateGeminiContextCache(req.model, rawSysInstr, rawTools);
+        await invalidateGeminiContextCache(
+          req.model,
+          rawSysInstr,
+          rawTools,
+          rawToolConfig,
+        );
         return await geminiSdkExchange(signal, {
           req: rawReq,
           disableStreaming,

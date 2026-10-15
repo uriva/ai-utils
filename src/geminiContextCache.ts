@@ -26,6 +26,7 @@ const minCacheChars = 4000;
 
 const contextCacheMap = new Map<string, CachedContextEntry>();
 const inFlightCreations = new Map<string, Promise<string | null>>();
+const bypassExternalCacheKeys = new Set<string>();
 
 const hashString = async (text: string): Promise<string> => {
   const buf = await crypto.subtle.digest(
@@ -47,17 +48,25 @@ const makeCacheKey = async (
 export const clearGeminiContextCacheMap = (): void => {
   contextCacheMap.clear();
   inFlightCreations.clear();
+  bypassExternalCacheKeys.clear();
 };
 
 export const invalidateGeminiContextCache = async (
   model: string,
   systemInstruction: string,
   tools?: GoogleToolDeclarations[],
+  toolConfig?: ToolConfig,
 ): Promise<void> => {
   const toolsJson = tools ? JSON.stringify(tools) : "";
-  const key = await makeCacheKey(model, systemInstruction, toolsJson);
+  const toolConfigJson = toolConfig ? JSON.stringify(toolConfig) : "";
+  const key = await makeCacheKey(
+    model,
+    systemInstruction,
+    toolsJson + "::" + toolConfigJson,
+  );
   contextCacheMap.delete(key);
   inFlightCreations.delete(key);
+  bypassExternalCacheKeys.add(key);
 };
 
 const createRemoteCache = async (
@@ -119,10 +128,13 @@ export const getOrCreateGeminiContextCache = async (
 
   const creationPromise = (async () => {
     try {
-      const cacheName = await makeCache(
-        geminiContextCacheId,
-        geminiContextCacheClientTtlSeconds,
-      )(createRemoteCache)(
+      const createFn = bypassExternalCacheKeys.has(key)
+        ? createRemoteCache
+        : makeCache(
+          geminiContextCacheId,
+          geminiContextCacheClientTtlSeconds,
+        )(createRemoteCache);
+      const cacheName = await createFn(
         model,
         systemInstruction,
         toolsJson,

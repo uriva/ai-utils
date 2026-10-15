@@ -1,7 +1,11 @@
 import { assertEquals } from "@std/assert";
+import type { Injector } from "@uri/inject";
 import {
   type AgentSpec,
+  clearGeminiContextCacheMap,
+  geminiContextCacheId,
   type HistoryEvent,
+  injectCacher,
   injectCallModelWrapper,
   participantUtteranceTurn,
   tool,
@@ -87,5 +91,60 @@ Deno.test({
         } fresh prompt tokens (delta) to be < 500 tokens, but got ${freshPrompt} (total: ${totalPrompt}, cached: ${cached})`,
       );
     }
+  }),
+});
+
+Deno.test({
+  name:
+    "Gemini Explicit Context Caching: recovers from 403 CachedContent not found when external cache returns expired cacheName",
+  fn: injectSecrets(async () => {
+    const largePrompt =
+      "Comprehensive reference manual for deep space navigation, orbital transfers, and stellar cartography. "
+        .repeat(1000);
+
+    const recordedUsages: TokenUsage[] = [];
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "User",
+        text: "Reply with the single word READY.",
+      }),
+    ];
+
+    const navTool = tool({
+      name: "calculate_orbit",
+      description: "Calculate orbital parameters",
+      parameters: z.object({ body: z.string() }),
+      handler: ({ body }) => Promise.resolve(`Orbit calculated for ${body}`),
+    });
+
+    const spec: AgentSpec = {
+      provider: "google",
+      prompt: largePrompt,
+      tools: [navTool],
+      maxIterations: 3,
+      timezoneIANA: "UTC",
+    };
+
+    clearGeminiContextCacheMap();
+    const staleCacher = (cacheId: string): Injector =>
+      ((f: (...args: unknown[]) => Promise<unknown>) =>
+        cacheId === geminiContextCacheId
+          ? () => Promise.resolve("cachedContents/expired-stale-cache-id")
+          : f) as Injector;
+
+    await injectCallModelWrapper(({ inner }) => inner)(
+      injectCacher(staleCacher)(
+        injectTokenUsage((usage) => {
+          recordedUsages.push(usage);
+        })(agentDeps(history)(runWithProvider("google"))),
+      ),
+    )(spec);
+
+    const utterances = history.filter((e) => e.type === "own_utterance");
+    assertEquals(utterances.length >= 1, true);
+    assertEquals(
+      (recordedUsages[0]?.cachedContentTokenCount ?? 0) > 15000,
+      true,
+    );
   }),
 });
