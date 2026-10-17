@@ -5,6 +5,9 @@ import {
   type DuplexMessage,
   formatSystemNotification,
   type HistoryEvent,
+  injectAccessHistory,
+  ownUtteranceTurn,
+  participantUtteranceTurn,
   runAgent,
   systemNotificationPrefix,
   tool,
@@ -915,4 +918,201 @@ Deno.test("formatSystemNotification formats text with system notification prefix
     formatted,
     `${systemNotificationPrefix} Please greet the caller.]`,
   );
+});
+
+Deno.test("buildLiveSetupMessage preserves all 35 tools and tail skill instructions when verbose schemas and prompt exceed budget", () => {
+  const verboseDeclarations = Array.from({ length: 35 }, (_, i) => ({
+    name: `custom_tool_${i}`,
+    description: i < 2
+      ? `Verbose tool description ${i}: ` + "detailed usage rules ".repeat(200)
+      : `Short description for tool ${i}.`,
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: i < 2
+            ? "Verbose parameter description ".repeat(150)
+            : "Search query",
+        },
+      },
+      required: ["query"],
+    },
+  }));
+
+  const tailMarker = "CRITICAL_TAIL_SKILL_AND_LIVE_AUDIO_INSTRUCTIONS";
+  const promptWithTail = "You are a helpful voice assistant. ".repeat(1200) +
+    `\n\n${tailMarker}`;
+
+  const setupMsg = buildLiveSetupMessage({
+    model: defaultLiveModel,
+    voiceName: "Aoede",
+    prompt: promptWithTail,
+    declarations: verboseDeclarations,
+  });
+
+  const byteLength = new TextEncoder().encode(setupMsg).length;
+  assert(
+    byteLength <= maxLiveSetupBytes,
+    `Expected setupMsg byteLength ${byteLength} <= ${maxLiveSetupBytes}`,
+  );
+
+  const parsed = JSON.parse(setupMsg);
+  const keptDecls = parsed.setup.tools[0].functionDeclarations;
+  assertEquals(
+    keptDecls.length,
+    35,
+    `Expected all 35 tools to be preserved after description compaction, got ${keptDecls.length}`,
+  );
+  const finalPrompt: string = parsed.setup.systemInstruction.parts[0].text;
+  assert(
+    finalPrompt.includes(tailMarker),
+    "Expected tail skill and live-audio instructions to be preserved in setup prompt",
+  );
+});
+
+Deno.test({
+  name:
+    "audio agent resolves tool calls and speaks answer even when outputEvent rejects",
+  ignore: !canRunLiveGemini,
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: withRetries(
+    3,
+    injectSecrets(async () => {
+      const { left: testEndpoint, right: agentEndpoint } = createDuplexPair();
+      const outputEvents: HistoryEvent[] = [];
+
+      const agentTask = runAgent({
+        prompt:
+          "You are a helpful voice assistant. When asked for the secret word, you MUST call the get_secret tool and speak the word it returns.",
+        tools: [
+          tool({
+            name: "get_secret",
+            description: "Gets the secret word",
+            parameters: z.object({}),
+            handler: () => Promise.resolve("Bananarama"),
+          }),
+        ],
+        maxIterations: 5,
+        timezoneIANA: "UTC",
+        transport: {
+          kind: "audio" as const,
+          endpoint: agentEndpoint,
+          voiceName: "Zephyr",
+          participantName: "User",
+        },
+        onOutputEvent: (event) => {
+          outputEvents.push(event);
+          if (event.type !== "own_utterance") {
+            return Promise.reject(
+              new Error("Simulated history persistence failure"),
+            );
+          }
+          return Promise.resolve();
+        },
+      });
+
+      await testEndpoint.sendData({
+        type: "text",
+        text: "What is the secret word? Call get_secret now.",
+        from: "tester",
+      });
+
+      await waitForCondition(
+        () =>
+          outputEvents.some((e) =>
+            e.type === "own_utterance" && e.text.includes("Bananarama")
+          ),
+        45_000,
+      );
+
+      await testEndpoint.sendData({ type: "close", from: "tester" });
+      await agentTask;
+
+      const spokenText = outputEvents
+        .filter((e) => e.type === "own_utterance")
+        .map((e) => (e as { text: string }).text)
+        .join(" ");
+
+      assert(
+        spokenText.includes("Bananarama"),
+        `Expected agent to resolve tool call and speak "Bananarama" despite outputEvent rejection, got: "${spokenText}"`,
+      );
+    }),
+  ),
+});
+
+Deno.test({
+  name:
+    "audio agent includes prior conversation history from injectAccessHistory",
+  ignore: !canRunLiveGemini,
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: withRetries(
+    3,
+    injectSecrets(async () => {
+      const { left: testEndpoint, right: agentEndpoint } = createDuplexPair();
+      const outputEvents: HistoryEvent[] = [];
+      const priorHistory: HistoryEvent[] = [
+        participantUtteranceTurn({
+          name: "User",
+          text: "Remember that my secret project codename is ProjectFalcon.",
+        }),
+        ownUtteranceTurn(
+          "Got it, I will remember your project codename is ProjectFalcon.",
+        ),
+      ];
+
+      const agentTask = injectAccessHistory(() =>
+        Promise.resolve(priorHistory)
+      )(() =>
+        runAgent({
+          prompt:
+            "You are a helpful voice assistant. Answer questions directly and concisely using the conversation history.",
+          tools: [],
+          maxIterations: 5,
+          timezoneIANA: "UTC",
+          transport: {
+            kind: "audio" as const,
+            endpoint: agentEndpoint,
+            voiceName: "Zephyr",
+            participantName: "User",
+          },
+          onOutputEvent: (event) => {
+            outputEvents.push(event);
+            return Promise.resolve();
+          },
+        })
+      )();
+
+      await testEndpoint.sendData({
+        type: "text",
+        text: "What was my secret project codename from our earlier chat?",
+        from: "tester",
+      });
+
+      await waitForCondition(
+        () =>
+          outputEvents.some((e) =>
+            e.type === "own_utterance" &&
+            e.text.toLowerCase().includes("falcon")
+          ),
+        30_000,
+      );
+
+      await testEndpoint.sendData({ type: "close", from: "tester" });
+      await agentTask;
+
+      const spokenText = outputEvents
+        .filter((e) => e.type === "own_utterance")
+        .map((e) => (e as { text: string }).text)
+        .join(" ");
+
+      assert(
+        spokenText.toLowerCase().includes("falcon"),
+        `Expected agent to recall "ProjectFalcon" from prior conversation history, got: "${spokenText}"`,
+      );
+    }),
+  ),
 });

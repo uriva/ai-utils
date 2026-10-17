@@ -2395,8 +2395,8 @@ async (output: HistoryEvent[]): Promise<boolean> => {
       return;
     }
     const result = toolResultTurn(callResult);
-    await outputEvent(result);
     onToolResult?.(result);
+    await outputEvent(result);
   })(toolCalls);
   return hadDeferred;
 };

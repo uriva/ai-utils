@@ -1,9 +1,12 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
+  accessHistory,
   accessOutputEvent,
   type AgentSpec,
   formatSystemNotification,
   handleFunctionCalls,
   type HistoryEvent,
+  injectOutputEvent,
   invisibleToolUseInstruction,
   ownThoughtTurn,
   ownUtteranceTurn,
@@ -125,6 +128,7 @@ const transcriptDebounceMs = 1000;
 export const makeSessionEventHandler = (
   callbacks: SessionEventCallbacks,
 ) => {
+  const runInContext = AsyncLocalStorage.snapshot();
   let interrupted = false;
   let latestOutputTranscript = "";
   let turnEvents: AudioSessionEvent[] = [];
@@ -144,13 +148,17 @@ export const makeSessionEventHandler = (
   };
   const scheduleDebouncedFlush = () => {
     cancelDebounce();
-    debounceTimer = globalThis.setTimeout(() => {
-      debounceTimer = undefined;
-      if (!interrupted && latestOutputTranscript) {
-        callbacks.onUtterance(latestOutputTranscript);
-        latestOutputTranscript = "";
-      }
-    }, transcriptDebounceMs) as unknown as number;
+    debounceTimer = globalThis.setTimeout(
+      () =>
+        runInContext(() => {
+          debounceTimer = undefined;
+          if (!interrupted && latestOutputTranscript) {
+            callbacks.onUtterance(latestOutputTranscript);
+            latestOutputTranscript = "";
+          }
+        }),
+      transcriptDebounceMs,
+    ) as unknown as number;
   };
   const handle = (event: AudioSessionEvent) => {
     if (event.type === "audio") {
@@ -199,6 +207,16 @@ export const makeSessionEventHandler = (
   return { handle, flushPending };
 };
 
+const safeOutputEvent = (
+  outputEvent: (event: HistoryEvent) => Promise<void>,
+) =>
+(event: HistoryEvent): Promise<void> =>
+  Promise.resolve()
+    .then(() => outputEvent(event))
+    .catch((e) => {
+      console.error("[audio] outputEvent error:", e);
+    });
+
 export const emitSpokenUtteranceIfOpen = (
   text: string,
   isClosed: boolean,
@@ -209,7 +227,7 @@ export const emitSpokenUtteranceIfOpen = (
   if (isReconnecting) return;
   const spoken = spokenReplyOnly(text);
   if (spoken.length === 0) return;
-  void outputEvent(ownUtteranceTurn(spoken));
+  void safeOutputEvent(outputEvent)(ownUtteranceTurn(spoken));
 };
 
 const audioToolTimeoutMs = 60_000;
@@ -243,6 +261,7 @@ const resolveToolCalls = async (
   tools: Tool<any>[],
   sessionOutput: AudioSessionEvent[],
   skills: Skill[] = [],
+  outputEvent: (event: HistoryEvent) => Promise<void> = accessOutputEvent,
 ) => {
   const geminiIdByHistoryId = new Map<string, string>();
   const respondedGeminiIds = new Set<string>();
@@ -272,33 +291,35 @@ const resolveToolCalls = async (
   const startTime = Date.now();
   try {
     await Promise.race([
-      handleFunctionCalls(
-        tools,
-        (event) => {
-          if (event.type === "tool_result") {
-            const geminiId = geminiIdByHistoryId.get(event.toolCallId!);
-            const id = geminiId ?? event.toolCallId!;
-            respondedGeminiIds.add(id);
-            const toolCall = sessionOutput.find((e) =>
-              e.type === "tool_call" && e.id === id
-            );
-            const name = toolCall && "name" in toolCall
-              ? toolCall.name
-              : "unknown";
-            console.log(
-              `[audio-tool] tool result for ${name} after ${
-                Date.now() - startTime
-              }ms, responding to Gemini`,
-            );
-            session.respondToToolCall({
-              id,
-              name,
-              response: { result: event.result },
-              scheduling: "WHEN_IDLE",
-            });
-          }
-        },
-        skills,
+      injectOutputEvent(safeOutputEvent(outputEvent))(
+        handleFunctionCalls(
+          tools,
+          (event) => {
+            if (event.type === "tool_result") {
+              const geminiId = geminiIdByHistoryId.get(event.toolCallId!);
+              const id = geminiId ?? event.toolCallId!;
+              respondedGeminiIds.add(id);
+              const toolCall = sessionOutput.find((e) =>
+                e.type === "tool_call" && e.id === id
+              );
+              const name = toolCall && "name" in toolCall
+                ? toolCall.name
+                : "unknown";
+              console.log(
+                `[audio-tool] tool result for ${name} after ${
+                  Date.now() - startTime
+                }ms, responding to Gemini`,
+              );
+              session.respondToToolCall({
+                id,
+                name,
+                response: { result: event.result },
+                scheduling: "WHEN_IDLE",
+              });
+            }
+          },
+          skills,
+        ),
       )(toolCallEvents),
       new Promise<never>((_, reject) =>
         setTimeout(
@@ -421,6 +442,54 @@ const isInternalScriptHelper = (name: string): boolean =>
   name.startsWith("buildMime");
 
 const maxAudioTools = 35;
+const maxAudioHistoryTurns = 12;
+const maxAudioHistoryTurnChars = 300;
+const maxAudioHistorySummaryChars = 800;
+const maxAudioHistoryTotalChars = 2500;
+
+const formatAudioHistoryEntry = (event: HistoryEvent): string | null => {
+  if (
+    event.type === "participant_utterance" ||
+    event.type === "participant_edit_message"
+  ) {
+    const text = event.text.trim();
+    return !text || text === "Calling"
+      ? null
+      : `User (${event.name}): ${text.slice(0, maxAudioHistoryTurnChars)}`;
+  }
+  if (event.type === "own_utterance") {
+    const text = event.text.replace(/<[^>]+>/g, "").trim();
+    return text
+      ? `Assistant: ${text.slice(0, maxAudioHistoryTurnChars)}`
+      : null;
+  }
+  return null;
+};
+
+export const formatAudioHistoryContext = (history: HistoryEvent[]): string => {
+  const latestSummary = history
+    .filter((e): e is Extract<HistoryEvent, { type: "own_thought" }> =>
+      e.type === "own_thought" && e.text.startsWith("[This summary covers")
+    )
+    .at(-1)?.text.slice(0, maxAudioHistorySummaryChars);
+  const recentTurns = history
+    .map(formatAudioHistoryEntry)
+    .filter((line): line is string => Boolean(line))
+    .slice(-maxAudioHistoryTurns);
+  if (!latestSummary && recentTurns.length === 0) return "";
+  const body = [...(latestSummary ? [latestSummary] : []), ...recentTurns]
+    .join("\n")
+    .slice(-maxAudioHistoryTotalChars);
+  return `\n\nRecent conversation history with this user (this is an ongoing conversation, NOT a first interaction):\n${body}`;
+};
+
+const bindToolToSnapshot =
+  (runInContext: <T>(fn: () => T) => T) =>
+  <T extends { handler: (...args: never[]) => unknown }>(t: T): T => ({
+    ...t,
+    handler: (...args: Parameters<T["handler"]>) =>
+      runInContext(() => t.handler(...args)),
+  });
 
 const collectAllAudioTools = (
   // deno-lint-ignore no-explicit-any
@@ -467,6 +536,7 @@ const createSessionConfig = (
     sessionGeneration: number;
     flushPendingUtterance: () => void;
   },
+  historyPrompt: string = "",
 ): AudioSessionConfig => {
   const generation = state.sessionGeneration;
   const sessionHandler = makeSessionEventHandler({
@@ -526,7 +596,7 @@ const createSessionConfig = (
   return {
     apiKey: accessGeminiToken(),
     prompt:
-      `${spec.prompt}${skillsPrompt}\n\n${invisibleToolUseInstruction}\n\nIn this live audio session, never speak or output '[no response]' or '<no response>'. If you have nothing to say or choose to stay silent, reply with an empty string.`,
+      `${spec.prompt}${historyPrompt}${skillsPrompt}\n\n${invisibleToolUseInstruction}\n\nIn this live audio session, never speak or output '[no response]' or '<no response>'. If you have nothing to say or choose to stay silent, reply with an empty string.`,
     voiceName: spec.transport.voiceName,
     tools: allTools,
     onDebug: (msg) => {
@@ -557,9 +627,10 @@ const processTurnOutput = async (
   sessionOutput: AudioSessionEvent[],
   wasInterrupted: boolean,
 ) => {
+  const safeEmit = safeOutputEvent(outputEvent);
   const heard = transcriptOf(sessionOutput, "input_transcript");
   if (heard.length > 0) {
-    await outputEvent(participantEditMessageTurn({
+    await safeEmit(participantEditMessageTurn({
       name: spec.transport.participantName,
       text: heard,
       onMessage: crypto.randomUUID(),
@@ -567,21 +638,43 @@ const processTurnOutput = async (
   }
 
   if (!wasInterrupted) {
-    await emitNonUtteranceEvents(outputEvent, sessionOutput);
+    await emitNonUtteranceEvents(safeEmit, sessionOutput);
   }
   const allTools = collectAllAudioTools(spec.tools, spec.skills);
-  await resolveToolCalls(session, allTools, sessionOutput, spec.skills ?? []);
+  await resolveToolCalls(
+    session,
+    allTools,
+    sessionOutput,
+    spec.skills ?? [],
+    safeEmit,
+  );
 };
 
 export const runAudioAgentLoop = async (
   spec: AgentSpec,
   endpoint: DuplexEndpoint,
-  outputEvent: (event: HistoryEvent) => Promise<void>,
+  rawOutputEvent: (event: HistoryEvent) => Promise<void>,
 ) => {
   if (!spec.transport || spec.transport.kind !== "audio") {
     throw new Error("audio transport required");
   }
-  const typedSpec = spec as AgentSpec & { transport: { kind: "audio" } };
+  const runInContext = AsyncLocalStorage.snapshot();
+  const bindTool = bindToolToSnapshot(runInContext);
+  const outputEvent = safeOutputEvent((event: HistoryEvent) =>
+    runInContext(() => rawOutputEvent(event))
+  );
+  const typedSpec = {
+    ...(spec as AgentSpec & { transport: { kind: "audio" } }),
+    tools: spec.tools.map(bindTool),
+    skills: spec.skills?.map((s) => ({
+      ...s,
+      tools: s.tools.map(bindTool),
+    })),
+  };
+  const initialHistory = await Promise.resolve()
+    .then(() => runInContext(() => accessHistory()))
+    .catch(() => [] as HistoryEvent[]);
+  const historyPrompt = formatAudioHistoryContext(initialHistory);
   let audioInputBuffer = new Uint8Array(0);
   let loggedFirstAudioIn = false;
 
@@ -627,113 +720,125 @@ export const runAudioAgentLoop = async (
       console.log(
         `[audio] reconnecting in ${delay}ms (${attemptsInWindow}/${maxReconnectsPerWindow} in window)`,
       );
-      globalThis.setTimeout(() => {
-        if (state.isClosed) {
-          state.isReconnecting = false;
-          return;
-        }
-        state.sessionGeneration++;
-        createAudioSession(
-          createSessionConfig(typedSpec, endpoint, outputEvent, state),
-        )
-          .then((newSession) => {
-            state.session = newSession;
-            state.isReconnecting = false;
-            audioInputBuffer = new Uint8Array(0);
-            console.log(
-              `[audio] reconnected successfully (${attemptsInWindow}/${maxReconnectsPerWindow} in window)`,
-            );
-          })
-          .catch((e) => {
-            console.error(
-              `[audio] reconnect failed: ${
-                e instanceof Error ? e.message : String(e)
-              }`,
-            );
-            state.isReconnecting = false;
-            state.reconnect();
-          });
-      }, delay);
+      globalThis.setTimeout(
+        () =>
+          runInContext(() => {
+            if (state.isClosed) {
+              state.isReconnecting = false;
+              return;
+            }
+            state.sessionGeneration++;
+            createAudioSession(
+              createSessionConfig(
+                typedSpec,
+                endpoint,
+                outputEvent,
+                state,
+                historyPrompt,
+              ),
+            )
+              .then((newSession) => {
+                state.session = newSession;
+                state.isReconnecting = false;
+                audioInputBuffer = new Uint8Array(0);
+                console.log(
+                  `[audio] reconnected successfully (${attemptsInWindow}/${maxReconnectsPerWindow} in window)`,
+                );
+              })
+              .catch((e) => {
+                console.error(
+                  `[audio] reconnect failed: ${
+                    e instanceof Error ? e.message : String(e)
+                  }`,
+                );
+                state.isReconnecting = false;
+                state.reconnect();
+              });
+          }),
+        delay,
+      );
     },
   };
 
   state.session = await createAudioSession(
-    createSessionConfig(typedSpec, endpoint, outputEvent, state),
+    createSessionConfig(typedSpec, endpoint, outputEvent, state, historyPrompt),
   );
   console.log("[audio] session created");
 
   await new Promise<void>((resolve) => {
     state.resolveLoop = resolve;
-    endpoint.onData(async (message) => {
-      if (state.isClosed) return;
-      if (message.type === "close") {
-        console.log("[audio] session closed");
-        state.isClosed = true;
-        state.flushPendingUtterance();
-        await state.session?.close();
-        resolve();
-        return;
-      }
-      if (state.isReconnecting || !state.session) return;
-      try {
-        if (message.type === "system") {
-          const formatted = message.text.startsWith(systemNotificationPrefix)
-            ? message.text
-            : formatSystemNotification(message.text);
-          state.session.sendClientContent({
-            turns: [
-              {
-                role: "user",
-                parts: [{ text: formatted }],
-              },
-            ],
-            turnComplete: message.turnComplete ?? true,
-          }).catch(() => {});
-        } else if (message.type === "text") {
-          state.session.sendText(message.text).catch(() => {});
-        } else if (message.type === "flush") {
-          if (audioInputBuffer.length > 0) {
-            state.session.streamAudioChunks([{
-              mimeType: "audio/pcm;rate=16000",
-              dataBase64: bytesToBase64(audioInputBuffer),
-            }]);
-            audioInputBuffer = new Uint8Array(0);
-          }
-          state.session.commitTurn();
-        } else if (message.type === "audio") {
-          if (!loggedFirstAudioIn) {
-            loggedFirstAudioIn = true;
-            console.log("[audio] first input audio received");
-          }
-          const incomingBytes = concatBytes([
-            ...message.chunks.map(({ mimeType, dataBase64 }) =>
-              mimeType.includes("24000")
-                ? resample24kTo16k(base64ToBytes(dataBase64))
-                : base64ToBytes(dataBase64)
-            ),
-          ]);
-          audioInputBuffer = concatBytes([audioInputBuffer, incomingBytes]);
-
-          const chunksToStream: LiveAudioChunk[] = [];
-          while (audioInputBuffer.length >= 3200) {
-            const piece = audioInputBuffer.slice(0, 3200);
-            audioInputBuffer = audioInputBuffer.slice(3200);
-            chunksToStream.push({
-              mimeType: "audio/pcm;rate=16000",
-              dataBase64: bytesToBase64(piece),
-            });
-          }
-          if (chunksToStream.length > 0) {
-            state.session.streamAudioChunks(chunksToStream);
-          }
+    endpoint.onData((message) =>
+      runInContext(async () => {
+        if (state.isClosed) return;
+        if (message.type === "close") {
+          console.log("[audio] session closed");
+          state.isClosed = true;
+          state.flushPendingUtterance();
+          await state.session?.close();
+          resolve();
+          return;
         }
-      } catch (error) {
-        await outputEvent(ownThoughtTurn(
-          `Audio transport error for ${typedSpec.transport.participantName}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        ));
-      }
-    });
+        if (state.isReconnecting || !state.session) return;
+        try {
+          if (message.type === "system") {
+            const formatted = message.text.startsWith(systemNotificationPrefix)
+              ? message.text
+              : formatSystemNotification(message.text);
+            state.session.sendClientContent({
+              turns: [
+                {
+                  role: "user",
+                  parts: [{ text: formatted }],
+                },
+              ],
+              turnComplete: message.turnComplete ?? true,
+            }).catch(() => {});
+          } else if (message.type === "text") {
+            state.session.sendText(message.text).catch(() => {});
+          } else if (message.type === "flush") {
+            if (audioInputBuffer.length > 0) {
+              state.session.streamAudioChunks([{
+                mimeType: "audio/pcm;rate=16000",
+                dataBase64: bytesToBase64(audioInputBuffer),
+              }]);
+              audioInputBuffer = new Uint8Array(0);
+            }
+            state.session.commitTurn();
+          } else if (message.type === "audio") {
+            if (!loggedFirstAudioIn) {
+              loggedFirstAudioIn = true;
+              console.log("[audio] first input audio received");
+            }
+            const incomingBytes = concatBytes([
+              ...message.chunks.map(({ mimeType, dataBase64 }) =>
+                mimeType.includes("24000")
+                  ? resample24kTo16k(base64ToBytes(dataBase64))
+                  : base64ToBytes(dataBase64)
+              ),
+            ]);
+            audioInputBuffer = concatBytes([audioInputBuffer, incomingBytes]);
+
+            const chunksToStream: LiveAudioChunk[] = [];
+            while (audioInputBuffer.length >= 3200) {
+              const piece = audioInputBuffer.slice(0, 3200);
+              audioInputBuffer = audioInputBuffer.slice(3200);
+              chunksToStream.push({
+                mimeType: "audio/pcm;rate=16000",
+                dataBase64: bytesToBase64(piece),
+              });
+            }
+            if (chunksToStream.length > 0) {
+              state.session.streamAudioChunks(chunksToStream);
+            }
+          }
+        } catch (error) {
+          await outputEvent(ownThoughtTurn(
+            `Audio transport error for ${typedSpec.transport.participantName}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          ));
+        }
+      })
+    );
   });
 };

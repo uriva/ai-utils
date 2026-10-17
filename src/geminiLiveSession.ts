@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { zodToGeminiParameters } from "./gemini.ts";
 import type { Tool } from "./agent.ts";
 
@@ -139,6 +140,47 @@ export type AudioSession = {
 };
 
 export const maxLiveSetupBytes = 65_000;
+const maxCompactToolDescriptionChars = 200;
+const minPromptCharsBeforePoppingTools = 16_000;
+const maxPreservedPromptTailChars = 12_000;
+
+const stripSchemaDescriptions = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stripSchemaDescriptions);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== "description")
+      .map(([key, val]) => [key, stripSchemaDescriptions(val)]),
+  );
+};
+
+const compactDeclaration = (
+  decl: LiveFunctionDeclaration,
+): LiveFunctionDeclaration => ({
+  ...decl,
+  description: decl.description.slice(0, maxCompactToolDescriptionChars),
+  parameters: stripSchemaDescriptions(decl.parameters) as Record<
+    string,
+    unknown
+  >,
+});
+
+const trimPromptPreservingTail = (
+  text: string,
+  targetChars: number,
+): string => {
+  if (text.length <= targetChars) return text;
+  const tailChars = Math.min(
+    maxPreservedPromptTailChars,
+    Math.floor(targetChars * 0.4),
+  );
+  const headChars = Math.max(250, targetChars - tailChars - 5);
+  return `${text.slice(0, headChars)}\n...\n${
+    text.slice(text.length - tailChars)
+  }`;
+};
+
+const utf8ByteLength = (text: string) => new TextEncoder().encode(text).length;
 
 export const buildLiveSetupMessage = ({
   model = defaultLiveModel,
@@ -173,31 +215,54 @@ export const buildLiveSetupMessage = ({
     },
   });
 
-  const currentDecls = declarations ? [...declarations] : [];
+  let currentDecls = declarations ? [...declarations] : [];
   let currentPrompt = prompt;
   let setupMsg = JSON.stringify(buildPayload(currentPrompt, currentDecls));
-  let byteLength = new TextEncoder().encode(setupMsg).length;
+  let byteLength = utf8ByteLength(setupMsg);
+
+  if (byteLength > maxBytes && currentDecls.length > 0) {
+    currentDecls = currentDecls.map(compactDeclaration);
+    setupMsg = JSON.stringify(buildPayload(currentPrompt, currentDecls));
+    byteLength = utf8ByteLength(setupMsg);
+  }
+
+  if (
+    byteLength > maxBytes &&
+    currentPrompt &&
+    currentPrompt.length > minPromptCharsBeforePoppingTools
+  ) {
+    const excess = byteLength - maxBytes + 100;
+    currentPrompt = trimPromptPreservingTail(
+      currentPrompt,
+      Math.max(
+        minPromptCharsBeforePoppingTools,
+        currentPrompt.length - excess,
+      ),
+    );
+    setupMsg = JSON.stringify(buildPayload(currentPrompt, currentDecls));
+    byteLength = utf8ByteLength(setupMsg);
+  }
 
   while (byteLength > maxBytes && currentDecls.length > 5) {
     currentDecls.pop();
     setupMsg = JSON.stringify(buildPayload(currentPrompt, currentDecls));
-    byteLength = new TextEncoder().encode(setupMsg).length;
+    byteLength = utf8ByteLength(setupMsg);
   }
 
   if (byteLength > maxBytes && currentPrompt) {
     const excess = byteLength - maxBytes + 100;
-    currentPrompt = currentPrompt.slice(
-      0,
+    currentPrompt = trimPromptPreservingTail(
+      currentPrompt,
       Math.max(500, currentPrompt.length - excess),
     );
     setupMsg = JSON.stringify(buildPayload(currentPrompt, currentDecls));
-    byteLength = new TextEncoder().encode(setupMsg).length;
+    byteLength = utf8ByteLength(setupMsg);
   }
 
   while (byteLength > maxBytes && currentDecls.length > 0) {
     currentDecls.pop();
     setupMsg = JSON.stringify(buildPayload(currentPrompt, currentDecls));
-    byteLength = new TextEncoder().encode(setupMsg).length;
+    byteLength = utf8ByteLength(setupMsg);
   }
 
   return setupMsg;
@@ -214,6 +279,7 @@ export const createAudioSession = async ({
   onSessionEvent,
   onClose,
 }: AudioSessionConfig): Promise<AudioSession> => {
+  const runInContext = AsyncLocalStorage.snapshot();
   const ws = new WebSocket(
     `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`,
   );
@@ -231,49 +297,59 @@ export const createAudioSession = async ({
   };
 
   await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error(`Gemini Live setup timed out after ${turnTimeoutMs}ms`));
-    }, turnTimeoutMs);
-    ws.onopen = () => {
-      debug("websocket open");
-      const declarations = tools && tools.length > 0
-        ? toolsToDeclarations(tools)[0]?.functionDeclarations
-        : undefined;
-      const setupMsg = buildLiveSetupMessage({
-        model,
-        voiceName,
-        prompt,
-        declarations,
-      });
-      ws.send(setupMsg);
-    };
-    ws.onerror = (error) => {
-      clearTimeout(timeout);
-      reject(error instanceof Error ? error : new Error(String(error)));
-    };
-    ws.onclose = (e) => {
-      debug(`close: code=${e.code} reason=${e.reason}`);
-      clearTimeout(timeout);
-      reject(
-        new Error(
-          `Gemini Live closed before setupComplete: code=${e.code} reason=${e.reason}`,
+    const timeout = setTimeout(
+      () =>
+        runInContext(() =>
+          reject(
+            new Error(`Gemini Live setup timed out after ${turnTimeoutMs}ms`),
+          )
         ),
-      );
-    };
-    ws.onmessage = async (event) => {
-      const msg = JSON.parse(await decodeWsData(event.data));
-      if (msg.error) {
-        debug(`setup error: ${JSON.stringify(msg.error)}`);
+      turnTimeoutMs,
+    );
+    ws.onopen = () =>
+      runInContext(() => {
+        debug("websocket open");
+        const declarations = tools && tools.length > 0
+          ? toolsToDeclarations(tools)[0]?.functionDeclarations
+          : undefined;
+        const setupMsg = buildLiveSetupMessage({
+          model,
+          voiceName,
+          prompt,
+          declarations,
+        });
+        ws.send(setupMsg);
+      });
+    ws.onerror = (error) =>
+      runInContext(() => {
         clearTimeout(timeout);
-        reject(new Error(JSON.stringify(msg.error)));
-        return;
-      }
-      if (msg.setupComplete) {
-        debug("setup complete");
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
+    ws.onclose = (e) =>
+      runInContext(() => {
+        debug(`close: code=${e.code} reason=${e.reason}`);
         clearTimeout(timeout);
-        resolve();
-      }
-    };
+        reject(
+          new Error(
+            `Gemini Live closed before setupComplete: code=${e.code} reason=${e.reason}`,
+          ),
+        );
+      });
+    ws.onmessage = (event) =>
+      runInContext(async () => {
+        const msg = JSON.parse(await decodeWsData(event.data));
+        if (msg.error) {
+          debug(`setup error: ${JSON.stringify(msg.error)}`);
+          clearTimeout(timeout);
+          reject(new Error(JSON.stringify(msg.error)));
+          return;
+        }
+        if (msg.setupComplete) {
+          debug("setup complete");
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
   });
 
   const flushEvents = () => {
@@ -294,111 +370,116 @@ export const createAudioSession = async ({
     pendingTurn = undefined;
   };
 
-  ws.onclose = (e) => {
-    console.log(
-      `[audio-tool] Gemini WS closed: code=${e.code} reason=${e.reason}`,
-    );
-    rejectPendingTurn(
-      new Error(`Gemini WS closed: code=${e.code} reason=${e.reason}`),
-    );
-    onClose?.(e.code, e.reason);
-  };
-
-  ws.onerror = (e) => {
-    console.error(
-      `[audio-tool] Gemini WS error: ${
-        e instanceof Error ? e.message : "unknown"
-      }`,
-    );
-  };
-
-  ws.onmessage = async (event) => {
-    const msg = JSON.parse(await decodeWsData(event.data));
-    if (msg.error) {
-      debug(`message error: ${JSON.stringify(msg.error)}`);
-      rejectPendingTurn(new Error(JSON.stringify(msg.error)));
-      activeTurn = false;
-      bufferedEvents = [];
-      return;
-    }
-    const content = msg.serverContent;
-    if (content?.inputTranscription?.text) {
-      debug(`input transcription: ${content.inputTranscription.text}`);
-      consumeTranscriptEvent(
-        bufferedEvents,
-        "input_transcript",
-        content.inputTranscription.text,
-        !!content.inputTranscription.finished,
-        onSessionEvent,
+  ws.onclose = (e) =>
+    runInContext(() => {
+      console.log(
+        `[audio-tool] Gemini WS closed: code=${e.code} reason=${e.reason}`,
       );
-    }
-    if (content?.outputTranscription?.text) {
-      debug(`output transcription: ${content.outputTranscription.text}`);
-      consumeTranscriptEvent(
-        bufferedEvents,
-        "output_transcript",
-        content.outputTranscription.text,
-        !!content.outputTranscription.finished,
-        onSessionEvent,
+      rejectPendingTurn(
+        new Error(`Gemini WS closed: code=${e.code} reason=${e.reason}`),
       );
-    }
-    const parts = content?.modelTurn?.parts ?? [];
-    for (const part of parts) {
-      if (part.inlineData?.data) {
-        debug(
-          `audio chunk from model: ${part.inlineData.mimeType ?? "audio/pcm"}`,
-        );
-        addEvent({
-          type: "audio",
-          chunk: {
-            mimeType: part.inlineData.mimeType ?? "audio/pcm;rate=24000",
-            dataBase64: part.inlineData.data,
-          },
-        });
+      onClose?.(e.code, e.reason);
+    });
+
+  ws.onerror = (e) =>
+    runInContext(() => {
+      console.error(
+        `[audio-tool] Gemini WS error: ${
+          e instanceof Error ? e.message : "unknown"
+        }`,
+      );
+    });
+
+  ws.onmessage = (event) =>
+    runInContext(async () => {
+      const msg = JSON.parse(await decodeWsData(event.data));
+      if (msg.error) {
+        debug(`message error: ${JSON.stringify(msg.error)}`);
+        rejectPendingTurn(new Error(JSON.stringify(msg.error)));
+        activeTurn = false;
+        bufferedEvents = [];
+        return;
       }
-      if (part.text) {
-        if (part.thought) {
-          addEvent({ type: "thought", text: part.text });
-        } else {
-          consumeTranscriptEvent(
-            bufferedEvents,
-            "output_transcript",
-            part.text,
-            false,
-            onSessionEvent,
+      const content = msg.serverContent;
+      if (content?.inputTranscription?.text) {
+        debug(`input transcription: ${content.inputTranscription.text}`);
+        consumeTranscriptEvent(
+          bufferedEvents,
+          "input_transcript",
+          content.inputTranscription.text,
+          !!content.inputTranscription.finished,
+          onSessionEvent,
+        );
+      }
+      if (content?.outputTranscription?.text) {
+        debug(`output transcription: ${content.outputTranscription.text}`);
+        consumeTranscriptEvent(
+          bufferedEvents,
+          "output_transcript",
+          content.outputTranscription.text,
+          !!content.outputTranscription.finished,
+          onSessionEvent,
+        );
+      }
+      const parts = content?.modelTurn?.parts ?? [];
+      for (const part of parts) {
+        if (part.inlineData?.data) {
+          debug(
+            `audio chunk from model: ${
+              part.inlineData.mimeType ?? "audio/pcm"
+            }`,
           );
+          addEvent({
+            type: "audio",
+            chunk: {
+              mimeType: part.inlineData.mimeType ?? "audio/pcm;rate=24000",
+              dataBase64: part.inlineData.data,
+            },
+          });
+        }
+        if (part.text) {
+          if (part.thought) {
+            addEvent({ type: "thought", text: part.text });
+          } else {
+            consumeTranscriptEvent(
+              bufferedEvents,
+              "output_transcript",
+              part.text,
+              false,
+              onSessionEvent,
+            );
+          }
         }
       }
-    }
-    const functionCalls = msg.toolCall?.functionCalls ?? [];
-    for (const functionCall of functionCalls) {
-      if (!functionCall.id || !functionCall.name) continue;
-      debug(`tool call: ${functionCall.name}`);
-      addEvent({
-        type: "tool_call",
-        id: functionCall.id,
-        name: functionCall.name,
-        args: functionCall.args ?? {},
-      });
-    }
-    if (functionCalls.length > 0) {
-      pendingToolCount += functionCalls.length;
-      flushEvents();
-      return;
-    }
-    if (content?.interrupted) {
-      debug("turn interrupted");
-      addEvent({ type: "interrupted" });
-      flushEvents();
-      return;
-    }
-    if (content?.turnComplete) {
-      debug("turn complete");
-      activeTurn = false;
-      addEvent({ type: "turn_complete" });
-      flushEvents();
-    }
-  };
+      const functionCalls = msg.toolCall?.functionCalls ?? [];
+      for (const functionCall of functionCalls) {
+        if (!functionCall.id || !functionCall.name) continue;
+        debug(`tool call: ${functionCall.name}`);
+        addEvent({
+          type: "tool_call",
+          id: functionCall.id,
+          name: functionCall.name,
+          args: functionCall.args ?? {},
+        });
+      }
+      if (functionCalls.length > 0) {
+        pendingToolCount += functionCalls.length;
+        flushEvents();
+        return;
+      }
+      if (content?.interrupted) {
+        debug("turn interrupted");
+        addEvent({ type: "interrupted" });
+        flushEvents();
+        return;
+      }
+      if (content?.turnComplete) {
+        debug("turn complete");
+        activeTurn = false;
+        addEvent({ type: "turn_complete" });
+        flushEvents();
+      }
+    });
 
   const waitForEvents = () => {
     if (
