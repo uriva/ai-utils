@@ -178,6 +178,83 @@ runForAllProviders(
   false,
 );
 
+const nonBufferingFetch =
+  (targetUrl: string, baseFetch: typeof fetch): typeof fetch =>
+  async (input, init) => {
+    const res = await baseFetch(input, init);
+    const urlStr = typeof input === "string"
+      ? input
+      : input instanceof Request
+      ? input.url
+      : input.toString();
+    if (urlStr === targetUrl) {
+      res.blob = () =>
+        Promise.reject(
+          new Error("Must stream response body without buffering via blob()"),
+        );
+      res.arrayBuffer = () =>
+        Promise.reject(
+          new Error(
+            "Must stream response body without buffering via arrayBuffer()",
+          ),
+        );
+    }
+    return res;
+  };
+
+runForAllProviders(
+  "user file attachment url is streamed to gemini without buffering blob or arrayBuffer in memory",
+  async (runAgentWithProvider) => {
+    const ac = new AbortController();
+    const server = Deno.serve({ port: 0, signal: ac.signal }, async (req) => {
+      const url = new URL(req.url);
+      if (url.pathname === "/dog-stream-only.jpg") {
+        const data = await Deno.readFile("./dog.jpg");
+        return new Response(data, {
+          headers: { "content-type": "image/jpeg" },
+        });
+      }
+      return new Response("Not found", { status: 404 });
+    });
+    const port = "port" in server.addr ? server.addr.port : 0;
+    const imageUrl = `http://localhost:${port}/dog-stream-only.jpg`;
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = nonBufferingFetch(imageUrl, originalFetch);
+
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Please describe the attached image.",
+        attachments: [
+          { kind: "file", mimeType: "image/jpeg", fileUri: imageUrl },
+        ],
+      }),
+    ];
+
+    await agentDeps(mockHistory)(runAgentWithProvider)({
+      maxIterations: 3,
+      tools: [],
+      prompt: "You can see images attached by the user.",
+      timezoneIANA: "UTC",
+    }).finally(() => {
+      globalThis.fetch = originalFetch;
+      ac.abort();
+    });
+    await server.finished.catch(() => {});
+
+    assert(
+      mockHistory.some(recognizedTheDog),
+      `AI did not describe the streamed image as a dog. History: ${
+        JSON.stringify(mockHistory, null, 2)
+      }`,
+    );
+  },
+  3,
+  true,
+  false,
+);
+
 runForAllProviders(
   "tool file attachment url is inspected only by explicit tool call",
   async (runAgentWithProvider) => {

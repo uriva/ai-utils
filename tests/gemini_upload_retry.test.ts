@@ -14,7 +14,10 @@ Deno.test(
   "uploadBlobToGemini recovers when the Gemini SDK throws a transient JSON-parse error",
   async () => {
     let attempts = 0;
-    const flakyUpload = (_blob: Blob, _mimeType: string) => {
+    const flakyUpload = (
+      _blob: Blob | ReadableStream<Uint8Array>,
+      _mimeType: string,
+    ) => {
       attempts++;
       if (attempts === 1) {
         return Promise.reject(

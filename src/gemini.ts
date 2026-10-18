@@ -443,20 +443,36 @@ export const geminiGenText = async (
 };
 
 type UploadResult = { geminiUri: string; mimeType: string };
+type GeminiUploadSource = Blob | ReadableStream<Uint8Array>;
 
 const rawUploadBlobToGemini = async (
-  blob: Blob,
+  file: GeminiUploadSource,
   mimeType: string,
 ): Promise<UploadResult> => {
-  const ai = new GoogleGenAI({ apiKey: tokenInjection.access() });
-  const { uri, mimeType: mimeType2 } = await ai.files.upload({
-    file: blob,
-    config: { mimeType },
+  const uploadUrl =
+    `https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=media&key=${
+      encodeURIComponent(tokenInjection.access())
+    }`;
+  const res = await fetch(uploadUrl, {
+    method: "POST",
+    headers: { "Content-Type": mimeType },
+    body: file instanceof Blob ? file.stream() : file,
+    // @ts-ignore: duplex is required by Node/undici fetch when body is a ReadableStream
+    duplex: "half",
   });
-  if (!uri || !mimeType2) {
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(
+      `Gemini file upload failed (${res.status}): ${errText}`,
+    );
+  }
+  const data = await res.json();
+  const uri = data?.file?.uri;
+  const resolvedMime = data?.file?.mimeType || mimeType;
+  if (typeof uri !== "string" || typeof resolvedMime !== "string") {
     throw new Error("Gemini file upload failed: missing uri or mimeType");
   }
-  return { geminiUri: uri, mimeType: mimeType2 };
+  return { geminiUri: uri, mimeType: resolvedMime };
 };
 
 const {
@@ -478,11 +494,11 @@ const fetchAndUploadToGemini = async (
   mimeType: string,
 ): Promise<UploadResult> => {
   const res = await fetch(url);
-  if (!res.ok) {
+  if (!res.ok || !res.body) {
     await res.body?.cancel();
     throw new Error(`Failed to fetch file for Gemini upload: ${url}`);
   }
-  return uploadBlobToGemini(await res.blob(), mimeType);
+  return accessRawUploadBlobToGemini()(res.body, mimeType);
 };
 
 const fetchAndUploadToGeminiCached = (
