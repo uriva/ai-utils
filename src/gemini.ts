@@ -568,6 +568,18 @@ export const normalizeMimeType = (
     : mimeType;
 };
 
+const directGcsMimePrefixes = ["image/", "audio/", "video/"];
+
+const isDirectGcsMediaAttachment = (
+  uri: string,
+  mimeType: string,
+): boolean => {
+  const normalized = mimeType.toLowerCase().trim();
+  return uri.startsWith("https://storage.googleapis.com/") &&
+    (directGcsMimePrefixes.some((p) => normalized.startsWith(p)) ||
+      normalized === "application/pdf");
+};
+
 export const ensureGeminiAttachmentIsLink = async (
   attachment: MediaAttachment,
 ): Promise<MediaAttachment> => {
@@ -575,9 +587,21 @@ export const ensureGeminiAttachmentIsLink = async (
     return attachment;
   }
   if (attachment.kind === "file" && attachment.fileUri.trim()) {
+    const normalizedMime = normalizeMimeType(
+      attachment.mimeType,
+      attachment.fileUri,
+    );
+    if (isDirectGcsMediaAttachment(attachment.fileUri, normalizedMime)) {
+      return {
+        kind: "file",
+        fileUri: attachment.fileUri,
+        mimeType: normalizedMime,
+        caption: attachment.caption,
+      };
+    }
     const { geminiUri, mimeType } = await uploadToGeminiFromUrl(
       attachment.fileUri,
-      normalizeMimeType(attachment.mimeType, attachment.fileUri),
+      normalizedMime,
     );
     return {
       kind: "file",

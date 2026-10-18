@@ -1,9 +1,12 @@
 {
   "name": "@uri/ai-utils",
-  "version": "0.3.99",
+  "version": "0.3.100",
   "minimumDependencyAge": 0,
   "license": "MIT",
   "exports": "./mod.ts",
+  "publish": {
+    "include": ["mod.ts", "src/**", "README.md", "deno.json"]
+  },
   "imports": {
     "@anthropic-ai/sdk": "npm:@anthropic-ai/sdk@0.39.0",
     "@google/genai": "npm:@google/genai@2.10.0",
