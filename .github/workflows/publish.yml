@@ -22,10 +22,14 @@ jobs:
       - name: Publish package and verify
         run: |
           VERSION=$(jq -r .version deno.json)
-          for attempt in 1 2 3; do
+          if curl -sI "https://jsr.io/@uri/ai-utils/${VERSION}_meta.json?cb=$RANDOM" | grep -E "HTTP/.* 200" > /dev/null; then
+            echo "JSR version ${VERSION} is already published and resolvable!"
+            exit 0
+          fi
+          for attempt in 1 2 3 4 5; do
             echo "Publish attempt ${attempt} for version ${VERSION}..."
             timeout 180s deno publish || echo "Publish command completed or timed out"
-            for i in {1..6}; do
+            for i in {1..18}; do
               if curl -sI "https://jsr.io/@uri/ai-utils/${VERSION}_meta.json?cb=$RANDOM" | grep -E "HTTP/.* 200" > /dev/null; then
                 echo "Success: JSR version ${VERSION} is resolvable!"
                 exit 0
@@ -34,5 +38,5 @@ jobs:
               sleep 5
             done
           done
-          echo "Error: JSR version ${VERSION} is not resolvable after 3 publish attempts."
+          echo "Error: JSR version ${VERSION} is not resolvable after 5 publish attempts."
           exit 1
