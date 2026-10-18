@@ -5,6 +5,7 @@ import {
   createAudioSession,
   toolsToDeclarations,
 } from "../src/geminiLiveSession.ts";
+import { collectAllAudioTools } from "../src/audioTransportAgent.ts";
 
 Deno.test(
   "toolsToDeclarations configures tools with NON_BLOCKING behavior for Gemini Live 3.8",
@@ -124,5 +125,77 @@ Deno.test(
       });
     }
     await session.close();
+  },
+);
+
+Deno.test(
+  "collectAllAudioTools preserves composio, secrets_and_variables, agentdocs, and google-docs tools across large skill sets",
+  () => {
+    const dummyTool = (name: string) =>
+      tool({
+        name,
+        description: `Tool ${name}`,
+        parameters: z.object({}),
+        handler: () => Promise.resolve("ok"),
+      });
+    const skills = [
+      {
+        name: "scheduling",
+        description: "Scheduling",
+        instructions: "",
+        tools: Array.from({ length: 12 }, (_, i) => dummyTool(`sched_${i}`)),
+      },
+      {
+        name: "google-docs",
+        description: "Google Docs",
+        instructions: "",
+        tools: [
+          ...Array.from({ length: 10 }, (_, i) => dummyTool(`sheet_${i}`)),
+          dummyTool("fetchDocument"),
+        ],
+      },
+      {
+        name: "composio",
+        description: "Composio",
+        instructions: "",
+        tools: [
+          dummyTool("list_composio_tools"),
+          dummyTool("inspect_composio_tool"),
+          dummyTool("execute_composio_tool"),
+        ],
+      },
+      {
+        name: "secrets_and_variables",
+        description: "Secrets",
+        instructions: "",
+        tools: [
+          dummyTool("set_secret"),
+          dummyTool("delete_secret"),
+          dummyTool("list_env_variables"),
+        ],
+      },
+      {
+        name: "agentdocs",
+        description: "AgentDocs",
+        instructions: "",
+        tools: [
+          dummyTool("searchDocuments"),
+          dummyTool("getDocument"),
+          dummyTool("listDocuments"),
+        ],
+      },
+    ];
+    const collected = collectAllAudioTools(
+      Array.from({ length: 8 }, (_, i) => dummyTool(`base_${i}`)),
+      skills,
+    );
+    const names = new Set(collected.map((t) => t.name));
+    assertEquals(names.has("list_composio_tools"), true);
+    assertEquals(names.has("inspect_composio_tool"), true);
+    assertEquals(names.has("execute_composio_tool"), true);
+    assertEquals(names.has("list_env_variables"), true);
+    assertEquals(names.has("searchDocuments"), true);
+    assertEquals(names.has("getDocument"), true);
+    assertEquals(names.has("fetchDocument"), true);
   },
 );

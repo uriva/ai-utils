@@ -262,6 +262,7 @@ const resolveToolCalls = async (
   sessionOutput: AudioSessionEvent[],
   skills: Skill[] = [],
   outputEvent: (event: HistoryEvent) => Promise<void> = accessOutputEvent,
+  scratchPad?: AgentSpec["toolOutputScratchPad"],
 ) => {
   const geminiIdByHistoryId = new Map<string, string>();
   const respondedGeminiIds = new Set<string>();
@@ -319,6 +320,7 @@ const resolveToolCalls = async (
             }
           },
           skills,
+          scratchPad,
         ),
       )(toolCallEvents),
       new Promise<never>((_, reject) =>
@@ -406,18 +408,19 @@ const formatAudioSkillsPrompt = (skills?: AgentSpec["skills"]): string => {
 };
 
 const primaryAudioSkillOrder = [
+  "composio",
   "gmail",
   "web",
   "task_management",
   "todo",
+  "secrets_and_variables",
+  "agentdocs",
   "scheduling",
   "safescript",
   "google-docs",
   "google-drive",
-  "agentdocs",
-  "secrets_and_variables",
   "github",
-  "composio",
+  "automation",
 ];
 
 const isInternalScriptHelper = (name: string): boolean =>
@@ -441,7 +444,8 @@ const isInternalScriptHelper = (name: string): boolean =>
   name.startsWith("encodeRfc") ||
   name.startsWith("buildMime");
 
-const maxAudioTools = 35;
+export const maxAudioTools = 65;
+const primaryToolsFirstPassCap = 4;
 const maxAudioHistoryTurns = 12;
 const maxAudioHistoryTurnChars = 300;
 const maxAudioHistorySummaryChars = 800;
@@ -491,25 +495,35 @@ const bindToolToSnapshot =
       runInContext(() => t.handler(...args)),
   });
 
-const collectAllAudioTools = (
+export const collectAllAudioTools = (
   // deno-lint-ignore no-explicit-any
   specTools: Tool<any>[],
   skills?: AgentSpec["skills"],
+  limit: number = maxAudioTools,
   // deno-lint-ignore no-explicit-any
 ): Tool<any>[] => {
   const allSkills = skills ?? [];
   const skillMap = new Map(
     allSkills.map((s) => [s.name.replace(/@.*/, ""), s]),
   );
-  const orderedPrimaryTools = primaryAudioSkillOrder.flatMap(
-    (name) => skillMap.get(name)?.tools ?? [],
+  const primaryToolLists = primaryAudioSkillOrder.map((name) =>
+    (skillMap.get(name)?.tools ?? []).filter((t) =>
+      !isInternalScriptHelper(t.name)
+    )
+  );
+  const firstPassPrimaryTools = primaryToolLists.flatMap((tools) =>
+    tools.slice(0, primaryToolsFirstPassCap)
+  );
+  const secondPassPrimaryTools = primaryToolLists.flatMap((tools) =>
+    tools.slice(primaryToolsFirstPassCap)
   );
   const remainingSkillTools = allSkills
     .filter((s) => !primaryAudioSkillOrder.includes(s.name.replace(/@.*/, "")))
     .flatMap((s) => s.tools);
   const combined = [
     ...specTools,
-    ...orderedPrimaryTools,
+    ...firstPassPrimaryTools,
+    ...secondPassPrimaryTools,
     ...remainingSkillTools,
   ];
   const seen = new Set<string>();
@@ -518,7 +532,7 @@ const collectAllAudioTools = (
     seen.add(t.name);
     return true;
   });
-  return deduped.slice(0, maxAudioTools);
+  return deduped.slice(0, limit);
 };
 
 const createSessionConfig = (
@@ -640,13 +654,14 @@ const processTurnOutput = async (
   if (!wasInterrupted) {
     await emitNonUtteranceEvents(safeEmit, sessionOutput);
   }
-  const allTools = collectAllAudioTools(spec.tools, spec.skills);
+  const allTools = collectAllAudioTools(spec.tools, spec.skills, Infinity);
   await resolveToolCalls(
     session,
     allTools,
     sessionOutput,
     spec.skills ?? [],
     safeEmit,
+    spec.toolOutputScratchPad,
   );
 };
 
