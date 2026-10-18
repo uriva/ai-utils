@@ -329,3 +329,28 @@ Deno.test(
     assertEquals(composioIdx < gmailIdx && gmailIdx < githubIdx, true);
   },
 );
+
+Deno.test(
+  "makeSessionEventHandler deduplicates cumulative output_transcript prefixes across flush boundaries",
+  () => {
+    const utterances: string[] = [];
+    const { handle, flushPending } = makeSessionEventHandler({
+      onAudio: () => {},
+      onUtterance: (t) => utterances.push(t),
+      onFlush: () => {},
+      onTurnOutput: () => {},
+    });
+    handle({
+      type: "output_transcript",
+      text: "אני מבין, שלחתי",
+      finished: false,
+    });
+    flushPending();
+    handle({
+      type: "output_transcript",
+      text: "אני מבין, שלחתי לה את ההודעה",
+      finished: true,
+    });
+    assertEquals(utterances, ["אני מבין, שלחתי", "לה את ההודעה"]);
+  },
+);

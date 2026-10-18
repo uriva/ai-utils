@@ -147,6 +147,7 @@ export const makeSessionEventHandler = (
   const runInContext = AsyncLocalStorage.snapshot();
   let interrupted = false;
   let latestOutputTranscript = "";
+  let emittedTranscript = "";
   let turnEvents: AudioSessionEvent[] = [];
   let debounceTimer: number | undefined;
   const cancelDebounce = () => {
@@ -155,10 +156,23 @@ export const makeSessionEventHandler = (
       debounceTimer = undefined;
     }
   };
+  const emitUtterance = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const prev = emittedTranscript.trim();
+    if (prev && trimmed.startsWith(prev)) {
+      const suffix = trimmed.slice(prev.length).trim();
+      emittedTranscript = trimmed;
+      if (suffix) callbacks.onUtterance(suffix);
+      return;
+    }
+    emittedTranscript = trimmed;
+    callbacks.onUtterance(text);
+  };
   const flushPending = () => {
     cancelDebounce();
     if (!interrupted && latestOutputTranscript) {
-      callbacks.onUtterance(latestOutputTranscript);
+      emitUtterance(latestOutputTranscript);
     }
     latestOutputTranscript = "";
   };
@@ -169,7 +183,7 @@ export const makeSessionEventHandler = (
         runInContext(() => {
           debounceTimer = undefined;
           if (!interrupted && latestOutputTranscript) {
-            callbacks.onUtterance(latestOutputTranscript);
+            emitUtterance(latestOutputTranscript);
             latestOutputTranscript = "";
           }
         }),
@@ -179,19 +193,23 @@ export const makeSessionEventHandler = (
   const handle = (event: AudioSessionEvent) => {
     if (event.type === "audio") {
       callbacks.onAudio(event.chunk);
+      if (latestOutputTranscript && debounceTimer !== undefined) {
+        scheduleDebouncedFlush();
+      }
     }
     turnEvents.push(event);
     if (event.type === "output_transcript") {
       if (isNoResponseText(event.text)) {
         cancelDebounce();
         latestOutputTranscript = "";
+        emittedTranscript = "";
         callbacks.onFlush();
         return;
       }
       latestOutputTranscript = event.text;
       if (event.finished && !interrupted) {
         cancelDebounce();
-        callbacks.onUtterance(event.text);
+        emitUtterance(event.text);
         latestOutputTranscript = "";
       } else {
         scheduleDebouncedFlush();
@@ -201,6 +219,7 @@ export const makeSessionEventHandler = (
       cancelDebounce();
       interrupted = true;
       latestOutputTranscript = "";
+      emittedTranscript = "";
       callbacks.onFlush();
     }
     if (
@@ -214,7 +233,7 @@ export const makeSessionEventHandler = (
         latestOutputTranscript
       ) {
         cancelDebounce();
-        callbacks.onUtterance(latestOutputTranscript);
+        emitUtterance(latestOutputTranscript);
         latestOutputTranscript = "";
       }
       const sessionOutput = turnEvents;
@@ -223,6 +242,7 @@ export const makeSessionEventHandler = (
       if (event.type !== "tool_call") {
         interrupted = false;
         latestOutputTranscript = "";
+        emittedTranscript = "";
       }
     }
   };
@@ -638,7 +658,7 @@ const createSessionConfig = (
   return {
     apiKey: accessGeminiToken(),
     prompt:
-      `${sanitizedPrompt}${historyPrompt}${skillsPrompt}\n\n${invisibleToolUseInstruction}\n\nIn this live audio session, if background noise or an irrelevant sound occurs and you have nothing to say, stay completely silent by replying with an empty string.`,
+      `${sanitizedPrompt}${historyPrompt}${skillsPrompt}\n\n${invisibleToolUseInstruction}\n\nIn this live audio session, if background noise or an irrelevant sound occurs and you have nothing to say, stay completely silent by replying with an empty string. Once the conversation language is established, stay strictly in that language throughout the call — telephone audio has narrow bandwidth, so never switch to an unrelated foreign language (such as German or Spanish) unless the caller explicitly asks you to switch languages.`,
     voiceName: spec.transport.voiceName,
     tools: allTools,
     onDebug: (msg) => {
