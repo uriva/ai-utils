@@ -69,6 +69,57 @@ const mergeTranscript = (current: string, incoming: string) => {
   return `${current}${incoming}`;
 };
 
+const rewriteSchemalessObjectProperty = (
+  prop: Record<string, unknown>,
+): Record<string, unknown> => {
+  const props = prop.properties as Record<string, unknown> | undefined;
+  if (
+    prop.type === "object" &&
+    (!props || Object.keys(props).length === 0)
+  ) {
+    const desc = typeof prop.description === "string" && prop.description
+      ? `${prop.description} `
+      : "";
+    return {
+      type: "string",
+      description:
+        `${desc}(Pass as a JSON-encoded object string, e.g. '{"key":"value"}')`,
+    };
+  }
+  if (props && typeof props === "object") {
+    return {
+      ...prop,
+      properties: Object.fromEntries(
+        Object.entries(props).map(([k, v]) => [
+          k,
+          v && typeof v === "object" && !Array.isArray(v)
+            ? rewriteSchemalessObjectProperty(v as Record<string, unknown>)
+            : v,
+        ]),
+      ),
+    };
+  }
+  return prop;
+};
+
+const prepareLiveParametersSchema = (
+  raw: Record<string, unknown>,
+): Record<string, unknown> => {
+  const props = raw.properties as Record<string, unknown> | undefined;
+  if (!props || typeof props !== "object") return raw;
+  return {
+    ...raw,
+    properties: Object.fromEntries(
+      Object.entries(props).map(([k, v]) => [
+        k,
+        v && typeof v === "object" && !Array.isArray(v)
+          ? rewriteSchemalessObjectProperty(v as Record<string, unknown>)
+          : v,
+      ]),
+    ),
+  };
+};
+
 export const toolsToDeclarations = (
   // deno-lint-ignore no-explicit-any
   tools: Tool<any>[] | undefined,
@@ -79,10 +130,12 @@ export const toolsToDeclarations = (
     ): LiveFunctionDeclaration => ({
       name,
       description,
-      parameters: zodToGeminiParameters(parameters) as unknown as Record<
-        string,
-        unknown
-      >,
+      parameters: prepareLiveParametersSchema(
+        zodToGeminiParameters(parameters) as unknown as Record<
+          string,
+          unknown
+        >,
+      ),
       behavior: "NON_BLOCKING",
     })),
   }];

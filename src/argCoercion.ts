@@ -169,6 +169,51 @@ const findWraps = (schema: any, args: any, path: Path): Wrap[] => {
   });
 };
 
+const objectSchemaNode = (node: any): any | undefined => {
+  if (!node || typeof node !== "object") return undefined;
+  if (node.type === "object" || node.properties !== undefined) return node;
+  if (Array.isArray(node.anyOf)) {
+    const objBranches = node.anyOf.filter(objectSchemaNode);
+    return objBranches.length === 1 ? objBranches[0] : undefined;
+  }
+  return undefined;
+};
+
+const parseJsonObjectSteps = (schema: any, args: any, path: Path): Wrap[] => {
+  if (!isPlainObject(args)) return [];
+  const props = schemaProperties(schema);
+  if (!props) return [];
+  return Object.entries(args).flatMap(([key, value]) => {
+    const child = props[key];
+    if (child === undefined || value === undefined || value === null) {
+      return [];
+    }
+    const here = [...path, key];
+    const objNode = objectSchemaNode(child);
+    if (objNode && typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed === "") return [{ path: here, value: {} }];
+      if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (isPlainObject(parsed)) {
+            return [
+              { path: here, value: parsed },
+              ...parseJsonObjectSteps(objNode, parsed, here),
+            ];
+          }
+        } catch {
+          return [];
+        }
+      }
+    }
+    if (isPlainObject(value)) {
+      return parseJsonObjectSteps(child, value, here);
+    }
+    return [];
+  });
+};
+
 export const coerceArgs = (
   schema: any,
   args: unknown,
@@ -179,9 +224,14 @@ export const coerceArgs = (
     }
   }
   if (!isPlainObject(args)) return { args, corrections: [] };
+  const jsonParsed = parseJsonObjectSteps(schema, args, []);
+  const afterJsonParse = jsonParsed.reduce(
+    (acc, { path, value }) => setAtPath(acc, path, value),
+    args,
+  );
   const pathIndex = new Map<string, Path[]>();
   collectPaths(schema, [], pathIndex);
-  let current: any = args;
+  let current: any = afterJsonParse;
   const corrections: string[] = [];
   for (let i = 0; i < 32; i++) {
     const rewrite = findRewrite(schema, current, pathIndex, current, []);

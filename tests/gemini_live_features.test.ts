@@ -235,3 +235,29 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "toolsToDeclarations rewrites schemaless record/object properties to JSON string for Gemini Live compatibility",
+  () => {
+    const execTool = tool({
+      name: "execute_composio_tool",
+      description: "Execute a Composio tool",
+      parameters: z.object({
+        tool_slug: z.string(),
+        arguments: z.record(z.string(), z.unknown()).describe("Tool arguments"),
+      }),
+      handler: () => Promise.resolve("ok"),
+    });
+    const decl = toolsToDeclarations([execTool])[0]?.functionDeclarations[0];
+    const props = decl?.parameters.properties as Record<
+      string,
+      { type: string; description?: string }
+    >;
+    assertEquals(props.tool_slug.type, "string");
+    assertEquals(props.arguments.type, "string");
+    assertEquals(
+      props.arguments.description?.includes("JSON-encoded object string"),
+      true,
+    );
+  },
+);
