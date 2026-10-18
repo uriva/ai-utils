@@ -195,7 +195,7 @@ export type AudioSession = {
 export const maxLiveSetupBytes = 65_000;
 const maxCompactToolDescriptionChars = 200;
 const minPromptCharsBeforePoppingTools = 16_000;
-const maxPreservedPromptTailChars = 12_000;
+const maxPreservedPromptTailChars = 22_000;
 
 const stripSchemaDescriptions = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(stripSchemaDescriptions);

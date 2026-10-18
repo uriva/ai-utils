@@ -6,7 +6,12 @@ import {
   createAudioSession,
   toolsToDeclarations,
 } from "../src/geminiLiveSession.ts";
-import { collectAllAudioTools } from "../src/audioTransportAgent.ts";
+import {
+  collectAllAudioTools,
+  formatAudioSkillsPrompt,
+  makeSessionEventHandler,
+  sanitizeAudioSystemPrompt,
+} from "../src/audioTransportAgent.ts";
 
 Deno.test(
   "toolsToDeclarations configures tools with NON_BLOCKING behavior for Gemini Live 3.8",
@@ -259,5 +264,68 @@ Deno.test(
       props.arguments.description?.includes("JSON-encoded object string"),
       true,
     );
+  },
+);
+
+Deno.test(
+  "sanitizeAudioSystemPrompt removes '[no response]' instructions and makeSessionEventHandler flushes audio on 'no response' output transcript",
+  () => {
+    const rawPrompt =
+      "You are Yaron.\nWhen you have nothing to say (e.g. the message is irrelevant), respond with exactly [no response] and nothing else.\nSimply stay silent with [no response].";
+    const sanitized = sanitizeAudioSystemPrompt(rawPrompt);
+    assertEquals(sanitized.toLowerCase().includes("no response"), false);
+
+    let flushed = 0;
+    const utterances: string[] = [];
+    const handler = makeSessionEventHandler({
+      onAudio: () => {},
+      onUtterance: (t) => utterances.push(t),
+      onFlush: () => {
+        flushed++;
+      },
+      onTurnOutput: () => {},
+    });
+    handler.handle({
+      type: "output_transcript",
+      text: "no response",
+      finished: true,
+    });
+    assertEquals(flushed, 1);
+    assertEquals(utterances.length, 0);
+  },
+);
+
+Deno.test(
+  "formatAudioSkillsPrompt orders primary skills by primaryAudioSkillOrder so composio and gmail appear first",
+  () => {
+    const skills = [
+      {
+        name: "github@1.0.11",
+        description: "GitHub",
+        instructions: "GitHub instructions",
+        tools: [],
+      },
+      {
+        name: "composio",
+        description: "Composio",
+        instructions: "Composio instructions",
+        tools: [],
+      },
+      {
+        name: "gmail",
+        description: "Gmail",
+        instructions: "Gmail instructions",
+        tools: [],
+      },
+    ];
+    const formatted = formatAudioSkillsPrompt(skills);
+    const composioIdx = formatted.indexOf("### Skill: composio");
+    const gmailIdx = formatted.indexOf("### Skill: gmail");
+    const githubIdx = formatted.indexOf("### Skill: github@1.0.11");
+    assertEquals(
+      composioIdx !== -1 && gmailIdx !== -1 && githubIdx !== -1,
+      true,
+    );
+    assertEquals(composioIdx < gmailIdx && gmailIdx < githubIdx, true);
   },
 );

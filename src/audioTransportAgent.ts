@@ -95,6 +95,23 @@ const resample24kTo16k = (pcm24k: Uint8Array) => {
   return new Uint8Array(output.buffer.slice(0));
 };
 
+export const isNoResponseText = (text: string): boolean => {
+  const normalized = text
+    .trim()
+    .toLowerCase()
+    .replace(/^[\[<]+|[\]>.,!?]+$/g, "")
+    .trim();
+  return normalized === "no response";
+};
+
+export const sanitizeAudioSystemPrompt = (prompt: string): string =>
+  prompt
+    .replace(
+      /When you have nothing to say[^.\n]*\[no response\][^.\n]*\./gi,
+      "When you have nothing to say, stay silent by replying with an empty string.",
+    )
+    .replace(/\[no response\]|<no response>/gi, "an empty string");
+
 export const spokenReplyOnly = (text: string) => {
   const stripped = stripReasoningPreamble(text);
   if (
@@ -106,8 +123,7 @@ export const spokenReplyOnly = (text: string) => {
   if (stripped.includes("Now, I will") && !stripped.includes("relay code is")) {
     return "";
   }
-  const trimmed = stripped.trim();
-  if (trimmed === "<no response>" || trimmed === "[no response]") {
+  if (isNoResponseText(stripped)) {
     return "";
   }
   return stripped;
@@ -166,6 +182,12 @@ export const makeSessionEventHandler = (
     }
     turnEvents.push(event);
     if (event.type === "output_transcript") {
+      if (isNoResponseText(event.text)) {
+        cancelDebounce();
+        latestOutputTranscript = "";
+        callbacks.onFlush();
+        return;
+      }
       latestOutputTranscript = event.text;
       if (event.finished && !interrupted) {
         cancelDebounce();
@@ -369,14 +391,19 @@ const reconnectWindowMs = 60_000;
 const reconnectBaseDelayMs = 500;
 const reconnectMaxDelayMs = 8_000;
 
-const maxSkillInstructionChars = 800;
+const maxSkillInstructionChars = 1200;
 
-const formatAudioSkillsPrompt = (skills?: AgentSpec["skills"]): string => {
+export const formatAudioSkillsPrompt = (
+  skills?: AgentSpec["skills"],
+): string => {
   if (!skills || skills.length === 0) return "";
   const allSkills = skills ?? [];
-  const primarySkills = allSkills.filter((s) =>
-    primaryAudioSkillOrder.includes(s.name.replace(/@.*/, ""))
+  const skillMap = new Map(
+    allSkills.map((s) => [s.name.replace(/@.*/, ""), s]),
   );
+  const primarySkills = primaryAudioSkillOrder
+    .map((name) => skillMap.get(name))
+    .filter((s): s is Skill => Boolean(s));
   const otherSkills = allSkills.filter((s) =>
     !primaryAudioSkillOrder.includes(s.name.replace(/@.*/, ""))
   );
@@ -463,7 +490,7 @@ const formatAudioHistoryEntry = (event: HistoryEvent): string | null => {
   }
   if (event.type === "own_utterance") {
     const text = event.text.replace(/<[^>]+>/g, "").trim();
-    return text
+    return text && !isNoResponseText(text)
       ? `Assistant: ${text.slice(0, maxAudioHistoryTurnChars)}`
       : null;
   }
@@ -607,10 +634,11 @@ const createSessionConfig = (
   state.flushPendingUtterance = sessionHandler.flushPending;
   const allTools = collectAllAudioTools(spec.tools, spec.skills);
   const skillsPrompt = formatAudioSkillsPrompt(spec.skills);
+  const sanitizedPrompt = sanitizeAudioSystemPrompt(spec.prompt);
   return {
     apiKey: accessGeminiToken(),
     prompt:
-      `${spec.prompt}${historyPrompt}${skillsPrompt}\n\n${invisibleToolUseInstruction}\n\nIn this live audio session, never speak or output '[no response]' or '<no response>'. If you have nothing to say or choose to stay silent, reply with an empty string.`,
+      `${sanitizedPrompt}${historyPrompt}${skillsPrompt}\n\n${invisibleToolUseInstruction}\n\nIn this live audio session, if background noise or an irrelevant sound occurs and you have nothing to say, stay completely silent by replying with an empty string.`,
     voiceName: spec.transport.voiceName,
     tools: allTools,
     onDebug: (msg) => {
