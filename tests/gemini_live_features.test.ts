@@ -2,6 +2,7 @@ import { assertEquals } from "@std/assert";
 import { z } from "zod/v4";
 import { tool } from "../mod.ts";
 import {
+  buildLiveSetupMessage,
   createAudioSession,
   toolsToDeclarations,
 } from "../src/geminiLiveSession.ts";
@@ -197,5 +198,40 @@ Deno.test(
     assertEquals(names.has("searchDocuments"), true);
     assertEquals(names.has("getDocument"), true);
     assertEquals(names.has("fetchDocument"), true);
+  },
+);
+
+Deno.test(
+  "buildLiveSetupMessage compaction preserves tool parameters named 'description' so required[0] does not fail Gemini Live 1007 validation",
+  () => {
+    const taskTool = tool({
+      name: "create_bot_task",
+      description: "Create a scheduled task",
+      parameters: z.object({
+        description: z.string().describe("What the task should do"),
+        preferredNetwork: z.string().optional().describe("Target network"),
+      }),
+      handler: () => Promise.resolve("ok"),
+    });
+    const decls = toolsToDeclarations([taskTool])[0]?.functionDeclarations;
+    const setupJson = buildLiveSetupMessage({
+      voiceName: "Charon",
+      prompt: "x".repeat(70_000),
+      declarations: decls,
+    });
+    const parsed = JSON.parse(setupJson);
+    const compactedDecl = parsed.setup.tools[0].functionDeclarations[0];
+    assertEquals(
+      compactedDecl.parameters.required.includes("description"),
+      true,
+    );
+    assertEquals(
+      typeof compactedDecl.parameters.properties.description,
+      "object",
+    );
+    assertEquals(
+      compactedDecl.parameters.properties.description.description,
+      undefined,
+    );
   },
 );

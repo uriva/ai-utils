@@ -149,7 +149,9 @@ const stripSchemaDescriptions = (value: unknown): unknown => {
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(
     Object.entries(value)
-      .filter(([key]) => key !== "description")
+      .filter(([key, val]) =>
+        !(key === "description" && typeof val === "string")
+      )
       .map(([key, val]) => [key, stripSchemaDescriptions(val)]),
   );
 };
