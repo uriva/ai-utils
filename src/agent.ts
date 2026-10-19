@@ -3431,6 +3431,7 @@ export const scheduleHistoryCompaction = (
   const compactHistory = spec.compactHistory;
   const threshold = spec.historyCompactionTokenThreshold;
   if (!compactHistory || !threshold) return;
+  if (estimateAgentInputTokensUpperBound(spec, history) < threshold) return;
   estimateAgentInputTokens(spec, history).then(async (totalTokens) => {
     if (await shouldCompactHistory(threshold, history, totalTokens)) {
       compactHistory(history);
@@ -3499,6 +3500,7 @@ const tokenCounterInjection: Injection<TokenCounter> = context(
   },
 );
 
+export const injectTokenCounter = tokenCounterInjection.inject;
 export const accessTokenCounter = tokenCounterInjection.access;
 
 // Provider metadata (Gemini `thoughtSignature`, Anthropic `thinkingContent`) is
@@ -3536,6 +3538,7 @@ const textTokenCounterInjection: Injection<TextTokenCounter> = context(
   },
 );
 
+export const injectTextTokenCounter = textTokenCounterInjection.inject;
 export const accessTextTokenCounter = textTokenCounterInjection.access;
 
 export const estimateTokens = async (e: HistoryEvent): Promise<number> => {
@@ -3554,6 +3557,39 @@ const estimateSkillTokensLocal = (
   countTokensLocal(name) + countTokensLocal(description) +
   countTokensLocal(instructions) + tools.reduce(
     (total, tool) => total + estimateToolTokensLocal(tool),
+    0,
+  );
+
+export const estimateEventTokenUpperBound = (e: HistoryEvent): number =>
+  eventToPlainTextLocal(e).length +
+  metadataTextForTokenEstimate(
+    "modelMetadata" in e ? e.modelMetadata : undefined,
+  ).length;
+
+export const estimateHistoryTokensUpperBound = (
+  events: HistoryEvent[],
+): number =>
+  events.reduce((sum, e) => sum + estimateEventTokenUpperBound(e), 0);
+
+const estimateToolTokenUpperBound = (
+  { name, description }: Tool<ZodType>,
+): number => name.length + description.length + 500;
+
+const estimateSkillTokenUpperBound = (
+  { name, description, instructions, tools }: Skill,
+): number =>
+  name.length + description.length + instructions.length +
+  tools.reduce((total, tool) => total + estimateToolTokenUpperBound(tool), 0);
+
+export const estimateAgentInputTokensUpperBound = (
+  { prompt, tools, skills = [] }: AgentSpec,
+  history: HistoryEvent[],
+): number =>
+  prompt.length +
+  estimateHistoryTokensUpperBound(history) +
+  tools.reduce((total, tool) => total + estimateToolTokenUpperBound(tool), 0) +
+  skills.reduce(
+    (total, skill) => total + estimateSkillTokenUpperBound(skill),
     0,
   );
 

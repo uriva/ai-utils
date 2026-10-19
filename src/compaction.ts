@@ -11,7 +11,11 @@ import {
   sum,
 } from "gamla";
 import { z } from "zod/v4";
-import { accessTokenCounter, type HistoryEvent } from "./agent.ts";
+import {
+  accessTokenCounter,
+  estimateHistoryTokensUpperBound,
+  type HistoryEvent,
+} from "./agent.ts";
 import { makeCache } from "./cacher.ts";
 import { genJson } from "./genJson.ts";
 import { formatInternalSentTimestamp } from "./internalMessageMetadata.ts";
@@ -481,6 +485,16 @@ export const projectSettledSessions = async (
 
   const settledSegments = segments.slice(0, -1);
   const activeSegment = segments[segments.length - 1];
+
+  const settledUpperBound = sum(
+    settledSegments.map((s) => estimateHistoryTokensUpperBound(s.events)),
+  );
+  if (settledUpperBound < settledTokenThreshold) {
+    return [
+      ...settledSegments.flatMap((s) => s.events),
+      ...activeSegment.events,
+    ];
+  }
 
   const pastTokensList = await Promise.all(
     settledSegments.map((s) => accessTokenCounter(s.events)),

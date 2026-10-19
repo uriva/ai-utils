@@ -31,6 +31,8 @@ import {
   createSkillTools,
   doNothingEventWithMetadata,
   estimateAgentInputTokens,
+  estimateAgentInputTokensUpperBound,
+  estimateHistoryTokensUpperBound,
   estimateTokens,
   formatExternalEvent,
   formatSystemNotification,
@@ -188,6 +190,7 @@ export const capEventsToTokenBudget = (maxTokens: number) =>
 async (
   events: GeminiHistoryEvent[],
 ): Promise<GeminiHistoryEvent[]> => {
+  if (estimateHistoryTokensUpperBound(events) <= maxTokens) return events;
   const tokenCounts = await map(estimateTokens)(events);
   const total = sum(tokenCounts);
   if (total <= maxTokens) return events;
@@ -1800,11 +1803,13 @@ export const isSafetyBlockReason = (reason: string | undefined): boolean => {
 export const geminiAgentCaller =
   (spec: AgentSpec) =>
   async (events: GeminiHistoryEvent[]): Promise<GeminiHistoryEvent[]> => {
-    const totalTokens = await estimateAgentInputTokens(spec, events);
-    if (totalTokens > 1040000) {
-      throw new Error(
-        `Token budget exceeded! Estimated ${totalTokens} tokens, limit is 1040000. This should never happen due to history compaction.`,
-      );
+    if (estimateAgentInputTokensUpperBound(spec, events) > 1040000) {
+      const totalTokens = await estimateAgentInputTokens(spec, events);
+      if (totalTokens > 1040000) {
+        throw new Error(
+          `Token budget exceeded! Estimated ${totalTokens} tokens, limit is 1040000. This should never happen due to history compaction.`,
+        );
+      }
     }
 
     const box: { reason?: string } = {};

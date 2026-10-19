@@ -1,7 +1,19 @@
 import { assert, assertEquals } from "@std/assert";
-import { capEventsToTokenBudget } from "../src/geminiAgent.ts";
-import { estimateTokensLocal } from "../src/agent.ts";
-import { map, sum } from "gamla";
+import {
+  capEventsToTokenBudget,
+  injectGeminiSdkExchange,
+} from "../src/geminiAgent.ts";
+import {
+  estimateTokensLocal,
+  type HistoryEvent,
+  injectAccessHistory,
+  injectOutputEvent,
+  injectTextTokenCounter,
+  injectTokenCounter,
+  participantUtteranceTurn,
+} from "../src/agent.ts";
+import { runAgent } from "../mod.ts";
+import { map, pipe, sum } from "gamla";
 
 const makeUtterance = (id: string, text: string, timestamp: number) => ({
   type: "participant_utterance" as const,
@@ -199,5 +211,46 @@ Deno.test(
         `tool_result ${tr.id} references missing tool_call ${toolCallId}`,
       );
     }
+  },
+);
+
+Deno.test(
+  "runAgent skips BPE token counting on hot path when input size is well below token budget",
+  async () => {
+    let tokenCounterCalls = 0;
+    let textTokenCounterCalls = 0;
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "Quick ping" }),
+    ];
+
+    await pipe(
+      injectTokenCounter(() => {
+        tokenCounterCalls++;
+        return Promise.resolve(10);
+      }),
+      injectTextTokenCounter(() => {
+        textTokenCounterCalls++;
+        return Promise.resolve(10);
+      }),
+      injectGeminiSdkExchange(() =>
+        Promise.resolve({
+          parts: [{ text: "Pong" }],
+          finishReason: "STOP",
+        })
+      ),
+      injectAccessHistory(() => Promise.resolve(history)),
+      injectOutputEvent((event) => {
+        history.push(event);
+        return Promise.resolve();
+      }),
+    )(runAgent)({
+      maxIterations: 1,
+      tools: [],
+      prompt: "Reply briefly.",
+      timezoneIANA: "UTC",
+    });
+
+    assertEquals(tokenCounterCalls, 0);
+    assertEquals(textTokenCounterCalls, 0);
   },
 );

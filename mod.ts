@@ -107,17 +107,23 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
 
   const dynamicCallModel = async (history: HistoryEvent[]) => {
     const specForTurn = getSpecForTurn(specWithBuiltins, history);
+    const usesGeminiThinking = specForTurn.provider !== "moonshot" &&
+      specForTurn.provider !== "anthropic";
     const [thinkingLevel, preparedHistory] = await Promise.all([
-      routeThinkingLevel(
-        formatAgentStateForDecisionModel(
-          specForTurn.prompt,
-          history,
-          specForTurn.tools,
-        ),
-      ),
+      usesGeminiThinking
+        ? routeThinkingLevel(
+          formatAgentStateForDecisionModel(
+            specForTurn.prompt,
+            history,
+            specForTurn.tools,
+          ),
+        )
+        : Promise.resolve(undefined),
       prepareHistory(specForTurn)(sanitizeHistorySkillsForModel(history)),
     ]);
-    console.log(`[decision-model] thinkingLevel=${thinkingLevel}`);
+    if (thinkingLevel !== undefined) {
+      console.log(`[decision-model] thinkingLevel=${thinkingLevel}`);
+    }
     return await resolvePreparedCallModel({
       ...specForTurn,
       thinkingLevel,
@@ -169,7 +175,9 @@ export {
   injectShouldAbort,
   injectStreamChunk,
   injectStreamThinkingChunk,
+  injectTextTokenCounter,
   injectTimerMs,
+  injectTokenCounter,
   injectToolNotFound,
   isRecord,
   isSafetyBlockUtterance,
