@@ -2971,7 +2971,8 @@ const runPreModelDecisions = async (
   const history = await getHistory();
   const canCleanup = shouldCleanup &&
     history.length >= 12 &&
-    sum(history.map(estimateTokensLocal)) >= 5000;
+    sum(history.map((e) => Math.ceil(eventToPlainTextLocal(e).length / 4))) >=
+      5000;
 
   if (!shouldAdjustSkills && !canCleanup) return;
 
