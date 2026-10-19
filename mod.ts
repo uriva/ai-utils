@@ -61,7 +61,7 @@ const prepareHistory =
 // - otherwise the provider-based caller is chosen from spec.provider.
 // Then injectCallModelWrapper wraps whatever was chosen (tests use this to
 // add rmmbr caching around a real provider caller).
-const resolveCallModel = (spec: AgentSpecForTurn): CallModel => {
+const resolvePreparedCallModel = (spec: AgentSpecForTurn): CallModel => {
   const base: CallModel = (events) => {
     try {
       return accessCallModel(events);
@@ -69,15 +69,12 @@ const resolveCallModel = (spec: AgentSpecForTurn): CallModel => {
       return providerCaller(spec)(events);
     }
   };
-  const wrapped = accessCallModelWrapper({
+  return accessCallModelWrapper({
     provider: spec.provider,
     systemPrompt: spec.prompt,
     thinkingLevel: spec.thinkingLevel,
     inner: base,
   });
-  const prepare = prepareHistory(spec);
-  return async (events) =>
-    wrapped(await prepare(sanitizeHistorySkillsForModel(events)));
 };
 
 const builtinTools = [inspectMediaUrlTool];
@@ -110,18 +107,21 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
 
   const dynamicCallModel = async (history: HistoryEvent[]) => {
     const specForTurn = getSpecForTurn(specWithBuiltins, history);
-    const thinkingLevel = await routeThinkingLevel(
-      formatAgentStateForDecisionModel(
-        specForTurn.prompt,
-        history,
-        specForTurn.tools,
+    const [thinkingLevel, preparedHistory] = await Promise.all([
+      routeThinkingLevel(
+        formatAgentStateForDecisionModel(
+          specForTurn.prompt,
+          history,
+          specForTurn.tools,
+        ),
       ),
-    );
+      prepareHistory(specForTurn)(sanitizeHistorySkillsForModel(history)),
+    ]);
     console.log(`[decision-model] thinkingLevel=${thinkingLevel}`);
-    return await resolveCallModel({
+    return await resolvePreparedCallModel({
       ...specForTurn,
       thinkingLevel,
-    })(history);
+    })(preparedHistory);
   };
 
   return spec.transport?.kind === "audio"
