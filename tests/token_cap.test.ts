@@ -7,12 +7,17 @@ import {
   estimateTokensLocal,
   type HistoryEvent,
   injectAccessHistory,
+  injectMetadataStore,
   injectOutputEvent,
   injectTextTokenCounter,
   injectTokenCounter,
   participantUtteranceTurn,
 } from "../src/agent.ts";
-import { runAgent } from "../mod.ts";
+import {
+  injectDecisionModel,
+  injectRouteThinkingLevelTimeoutMs,
+  runAgent,
+} from "../mod.ts";
 import { map, pipe, sum } from "gamla";
 
 const makeUtterance = (id: string, text: string, timestamp: number) => ({
@@ -252,5 +257,168 @@ Deno.test(
 
     assertEquals(tokenCounterCalls, 0);
     assertEquals(textTokenCounterCalls, 0);
+  },
+);
+
+Deno.test(
+  "runAgent avoids redundant metadata mget calls and duplicate scratchpad writes across consecutive turns",
+  async () => {
+    const mgetCalls: string[][] = [];
+    const scratchSetCalls: string[] = [];
+    const now = Date.now();
+    const thirtyMinsAgo = now - 30 * 60 * 1000;
+    const rawHistory: HistoryEvent[] = [
+      {
+        ...makeUtterance("u-1", "Run the report", thirtyMinsAgo),
+        isOwn: false,
+      },
+      { ...makeToolCall("tc-old", thirtyMinsAgo + 100), isOwn: true },
+      {
+        ...makeToolResult("tr-old", "tc-old", thirtyMinsAgo + 200),
+        isOwn: true,
+        result: "x".repeat(3000),
+      },
+      {
+        ...makeOwnUtterance("bot-1", "Done", thirtyMinsAgo + 300),
+        isOwn: true,
+      },
+      {
+        type: "tool_call" as const,
+        isOwn: true,
+        id: "auto-unlearn-123",
+        timestamp: thirtyMinsAgo + 400,
+        name: "unlearn_skill",
+        parameters: { skillName: "demo" },
+      },
+      {
+        ...makeToolResult(
+          "auto-unlearn-123-result",
+          "auto-unlearn-123",
+          thirtyMinsAgo + 450,
+        ),
+        isOwn: true,
+        result: "Unlearned",
+      },
+      {
+        ...makeUtterance("u-2", "First follow-up", now - 5000),
+        isOwn: false,
+      },
+    ];
+
+    const runTurn = pipe(
+      injectMetadataStore(() => ({
+        get: () => Promise.resolve(null),
+        set: () => Promise.resolve(),
+        mget: (ids: string[]) => {
+          mgetCalls.push(ids);
+          return Promise.resolve(ids.map(() => null));
+        },
+      })),
+      injectDecisionModel(() => Promise.resolve({})),
+      injectGeminiSdkExchange(() =>
+        Promise.resolve({
+          parts: [{ text: "Quick reply", thoughtSignature: "sig-reply" }],
+          finishReason: "STOP",
+        })
+      ),
+      injectAccessHistory(() => Promise.resolve([...rawHistory])),
+      injectOutputEvent((event) => {
+        rawHistory.push(event);
+        return Promise.resolve();
+      }),
+    )(runAgent);
+
+    const scratchPad = {
+      get: () => Promise.resolve(undefined),
+      set: (id: string) => {
+        scratchSetCalls.push(id);
+        return Promise.resolve();
+      },
+    };
+
+    await runTurn({
+      maxIterations: 1,
+      tools: [],
+      prompt: "Reply briefly.",
+      timezoneIANA: "UTC",
+      toolOutputScratchPad: scratchPad,
+    });
+
+    rawHistory.push({
+      ...makeUtterance("u-3", "Second follow-up", now),
+      isOwn: false,
+    });
+
+    await runTurn({
+      maxIterations: 1,
+      tools: [],
+      prompt: "Reply briefly.",
+      timezoneIANA: "UTC",
+      toolOutputScratchPad: scratchPad,
+    });
+
+    assertEquals(
+      mgetCalls.flat(),
+      [],
+      `Expected zero metadataStore.mget lookups when all model events carry inline metadata and remaining events are user/tool_result/auto-unlearn, got: ${
+        JSON.stringify(mgetCalls)
+      }`,
+    );
+    assertEquals(
+      scratchSetCalls,
+      ["tr-old"],
+      `Expected old tool result tr-old to be written to scratchpad only once across consecutive turns, got: ${
+        JSON.stringify(scratchSetCalls)
+      }`,
+    );
+  },
+);
+
+Deno.test(
+  "runAgent bounds routeThinkingLevel latency when decision model stalls",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "Hello there" }),
+    ];
+    let slowTimer: ReturnType<typeof setTimeout> | undefined;
+    const t0 = performance.now();
+
+    try {
+      await pipe(
+        injectRouteThinkingLevelTimeoutMs(() => 50),
+        injectDecisionModel(
+          () =>
+            new Promise((resolve) => {
+              slowTimer = setTimeout(() => resolve({}), 2000);
+            }),
+        ),
+        injectGeminiSdkExchange(() =>
+          Promise.resolve({
+            parts: [{ text: "Fast reply" }],
+            finishReason: "STOP",
+          })
+        ),
+        injectAccessHistory(() => Promise.resolve(history)),
+        injectOutputEvent((event) => {
+          history.push(event);
+          return Promise.resolve();
+        }),
+      )(runAgent)({
+        maxIterations: 5,
+        tools: [],
+        prompt: "Reply briefly.",
+        timezoneIANA: "UTC",
+      });
+    } finally {
+      if (slowTimer !== undefined) clearTimeout(slowTimer);
+    }
+
+    const elapsedMs = performance.now() - t0;
+    assert(
+      elapsedMs < 500,
+      `Expected runAgent not to block on stalled decision model, but took ${
+        Math.round(elapsedMs)
+      }ms`,
+    );
   },
 );

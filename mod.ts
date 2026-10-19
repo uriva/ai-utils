@@ -21,11 +21,27 @@ import { geminiAgentCaller, prepareGeminiHistory } from "./src/geminiAgent.ts";
 import { validateZodSchema } from "./src/gemini.ts";
 import { inspectMediaUrlTool } from "./src/inspectMediaTool.ts";
 import {
+  accessRouteThinkingLevelTimeoutMs,
   formatAgentStateForDecisionModel,
   routeThinkingLevel,
 } from "./src/decisionModel.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
-import type { ThinkingLevel } from "@google/genai";
+import { ThinkingLevel } from "@google/genai";
+
+const routeThinkingLevelBounded = (
+  state: Record<string, unknown>,
+): Promise<ThinkingLevel> => {
+  const timeoutMs = accessRouteThinkingLevelTimeoutMs();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    routeThinkingLevel(state),
+    new Promise<ThinkingLevel>((resolve) => {
+      timer = setTimeout(() => resolve(ThinkingLevel.HIGH), timeoutMs);
+    }),
+  ]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+};
 
 type AgentSpecForTurn = AgentSpec & {
   thinkingLevel?: ThinkingLevel;
@@ -111,7 +127,7 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
       specForTurn.provider !== "anthropic";
     const [thinkingLevel, preparedHistory] = await Promise.all([
       usesGeminiThinking
-        ? routeThinkingLevel(
+        ? routeThinkingLevelBounded(
           formatAgentStateForDecisionModel(
             specForTurn.prompt,
             history,
@@ -321,6 +337,7 @@ export {
   genDecision,
   injectDecisionModel,
   injectDecisionProvider,
+  injectRouteThinkingLevelTimeoutMs,
   isDecisionField,
   isDecisionModelAvailable,
   isDecisionModelInjected,

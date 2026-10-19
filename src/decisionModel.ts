@@ -576,6 +576,15 @@ export const formatAgentStateForDecisionModel = (
 export const formatAgentStateForRespan = formatAgentStateForDecisionModel;
 export const formatAgentStateForJev = formatAgentStateForDecisionModel;
 
+const routeThinkingLevelTimeoutMsInjection: Injection<() => number> = context(
+  () => 1500,
+);
+
+export const injectRouteThinkingLevelTimeoutMs =
+  routeThinkingLevelTimeoutMsInjection.inject;
+export const accessRouteThinkingLevelTimeoutMs =
+  routeThinkingLevelTimeoutMsInjection.access;
+
 export const routeThinkingLevel = async (
   state: string | Record<string, unknown> | unknown[],
 ): Promise<ThinkingLevel> => {

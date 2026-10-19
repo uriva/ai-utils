@@ -1651,14 +1651,40 @@ const enhancePrompt = (
 // 64KB value cap). Events that already carry inline `modelMetadata` are left
 // untouched — inline data is authoritative for the current run and may be
 // fresher than whatever rmmbr has persisted.
+const canHaveGeminiMetadata = (
+  event: HistoryEventWithMetadata<GeminiMetadata>,
+): boolean => {
+  if ("modelMetadata" in event && event.modelMetadata) return false;
+  if (
+    event.type === "own_utterance" ||
+    event.type === "own_reaction" ||
+    event.type === "own_edit_message"
+  ) {
+    return true;
+  }
+  if (event.type === "own_thought") {
+    return !event.id.startsWith("summary-");
+  }
+  return event.type === "tool_call" &&
+    !event.id.startsWith("auto-learn-") &&
+    !event.id.startsWith("auto-unlearn-") &&
+    !event.id.startsWith("auto-clean-");
+};
+
 const enrichGeminiEventsWithMetadata = async (
   events: HistoryEventWithMetadata<GeminiMetadata>[],
 ): Promise<HistoryEventWithMetadata<GeminiMetadata>[]> => {
-  const eventIds = events.map((e) => e.id);
-  const metadataList = await accessMetadataStore().mget(eventIds);
-  return events.map((event, i) => {
+  const missingIds = [
+    ...new Set(events.filter(canHaveGeminiMetadata).map((e) => e.id)),
+  ];
+  if (empty(missingIds)) return events;
+  const metadataList = await accessMetadataStore().mget(missingIds);
+  const metadataById = new Map<string, GeminiMetadata | null>(
+    missingIds.map((id, i) => [id, metadataList[i] as GeminiMetadata | null]),
+  );
+  return events.map((event) => {
     if ("modelMetadata" in event && event.modelMetadata) return event;
-    const metadata = metadataList[i] as GeminiMetadata | null;
+    const metadata = metadataById.get(event.id);
     if (!metadata) return event;
     return { ...event, modelMetadata: metadata };
   });

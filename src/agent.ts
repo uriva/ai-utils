@@ -2335,7 +2335,7 @@ export const projectHistoryToModelContext = async ({
     projectedEvents = await compactToolResultsInMemory(
       projectedEvents,
       {
-        setScratch: (id, content) => scratchPad.set(id, content),
+        setScratch: scratchPad.set,
         generateTLDR,
       },
     );

@@ -84,6 +84,34 @@ export type CompactionOptions = {
   ) => Promise<string>;
 };
 
+const maxSpilledIdsPerScratch = 2000;
+const spilledIdsBySetter = new WeakMap<
+  CompactionOptions["setScratch"],
+  Set<string>
+>();
+
+const hasSpilledToSetter = (
+  setScratch: CompactionOptions["setScratch"],
+  id: string,
+): boolean => spilledIdsBySetter.get(setScratch)?.has(id) ?? false;
+
+const markSpilledToSetter = (
+  setScratch: CompactionOptions["setScratch"],
+  id: string,
+): void => {
+  let set = spilledIdsBySetter.get(setScratch);
+  if (!set) {
+    set = new Set<string>();
+    spilledIdsBySetter.set(setScratch, set);
+  }
+  if (set.has(id)) set.delete(id);
+  set.add(id);
+  if (set.size > maxSpilledIdsPerScratch) {
+    const oldest = set.keys().next().value;
+    if (oldest !== undefined) set.delete(oldest);
+  }
+};
+
 export const compactToolResultsInMemory = async (
   events: HistoryEvent[],
   { setScratch, generateTLDR }: CompactionOptions,
@@ -137,8 +165,9 @@ export const compactToolResultsInMemory = async (
         : toolResult.id;
 
       // If not already spilled to scratchpad on turn 0, save original full text to scratchpad
-      if (!isAlreadySpilled) {
+      if (!isAlreadySpilled && !hasSpilledToSetter(setScratch, toolResult.id)) {
         await setScratch(toolResult.id, originalResult);
+        markSpilledToSetter(setScratch, toolResult.id);
       }
 
       let tldr = defaultDeterministicTLDR(toolCall, originalResult);
