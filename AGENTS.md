@@ -1,210 +1,84 @@
 # General
 
-Never fix quality issue without first a reproducing test.
+- **Reproduce first:** Never fix a quality or behavior issue without a failing
+  reproducing test first.
+- **Fix at the earliest point of failure:** When one root defect cascades into
+  several downstream symptoms, fix the root mechanism rather than stacking
+  guards at downstream symptoms.
+- **Target the first failure point in history:** When reproducing a
+  hallucination or quality regression, isolate the earliest turn where the bad
+  behavior first enters history rather than replaying the downstream cascade.
+- **No consumer-specific data (open source):** Never put consumer-specific or
+  bot-specific data into this repo (no real system prompts, persona text,
+  customer/brand names, pricing, bot/conversation IDs, or production excerpts)
+  in source, tests, scripts, or comments. Use short, generic, synthetic English
+  inputs that exercise the same mechanism.
+- **English test suite:** All test prompts, instructions, mock tool outputs, and
+  assertions MUST be in English, except in tests specifically verifying
+  language- or script-dependent mechanisms (e.g., script-drift detection,
+  non-ASCII token estimation, RTL sanitization).
+- **Avoid regexes, keyword whitelists, and name lists (CRITICAL):** Never use
+  long regexes, keyword dictionaries, or lists of names/words to classify
+  intent, gender, language, or semantic attributes. Expose explicit tool
+  parameters so the agent selects options during creation, or use LLM
+  intelligence (`genJson` / model calls cached with `rmmbr`) when dynamic
+  inference is required.
+- **No string duplication:** Never duplicate system-audit thoughts, warning
+  utterances, error messages, or tool names across source and tests. Export
+  shared strings as module-level constants from source and import them in tests.
 
-Fix at the **earliest point of failure**, not somewhere along the stack. When
-one root defect cascades into several downstream symptoms, fix the root
-mechanism — do not stack guards at each downstream symptom. If the symptoms are
-only _maybe_ connected, still prefer the single earliest-point fix and verify
-the cascade disappears.
+# Token Cost Discipline
 
-When reproducing a hallucination or quality regression, target the **first
-failure point in history** — the earliest turn where the model emits the bad
-behavior. Do not try to reproduce the downstream cascade (the bot trusting its
-own prior fabrication, the user noticing, the retraction loop). Catch the
-hallucination at its core: the single turn where an unverified claim, a
-fabricated entity, or an unsupported specific first enters history. Shorter
-repros are sharper, more deterministic, and isolate the actual defect from
-everything that piles on top of it.
+Every harness feature or quality fix must account for its token cost (one-shot
+vs. re-sent per model call, and extra model calls):
 
-To run the tests with the required env vars consult the deno task "test" in the
-`deno.json` file.
-
-This is a Deno project published to JSR. CI publishes on push to main. Do not
-attempt `deno publish` locally. Bump the version in `deno.json` before pushing
-if the previous version was already published.
-
-### Workflow for Updating this Package
-
-When modifying this library to use in another project like `prompt2bot`:
-
-1. Make your changes in this repo.
-2. Bump the version in `deno.json`.
-3. Commit and push your changes to GitHub. CI will automatically publish to JSR.
-   **Do not run `deno publish` yourself**.
-4. Go to the consumer project (`prompt2bot`), bump the version of `ai-utils` in
-   its `deno.json`, commit and push to deploy the consumer project.
-
-### No Consumer-Specific Data Principle (open source)
-
-This library is open source and shared across many consumers. NEVER put any
-consumer-specific or bot-specific data into this repo — no real system prompts,
-persona text, customer names, brand names, product/pricing details, bot IDs,
-conversation IDs, or verbatim excerpts pulled from a production bot/incident.
-This applies to source, tests, scripts, comments, and fixtures alike.
-
-When reproducing or testing a behavior first observed in a specific production
-bot, reconstruct the scenario with generic, synthetic inputs that exercise the
-same mechanism (e.g. a made-up short English string instead of the actual bot's
-prompt). The test must prove the generic behavior, not embed the real artifact.
-
-### Avoid Regexes, Keyword Whitelists, and Name Lists (CRITICAL)
-
-Never use long regular expressions, hardcoded keyword dictionaries, or lists of
-names/words to classify intent, gender, language, or semantic attributes. Such
-heuristics are brittle, overfitted, and fail across different languages and
-naming conventions.
-
-- **Empower agent selection during creation:** Expose explicit parameters in
-  tool schemas so the agent can select options (such as voice, language, or
-  format) based on its own persona and task context during creation.
-- **Use LLM intelligence for inference:** When dynamic inference is necessary
-  and not provided explicitly, use LLM intelligence (such as `genJson` or model
-  calls, cached with `rmmbr` where appropriate) rather than manual regex
-  matching or word/name whitelists.
-
-### English Test Suite Principle
-
-All test prompts, instructions, mock tool outputs, and assertions in this
-repository MUST be written in English. Non-English text (e.g., Hebrew) is
-permitted ONLY in tests that specifically verify language- or script-dependent
-mechanisms (such as script-drift detection, non-ASCII token estimation, or RTL
-text sanitization). General harness behavior, commitment checks, tool routing,
-and agent logic tests must always be written in English for clarity,
-maintainability, and accessibility.
-
-### No String Duplication Principle
-
-Never duplicate strings (such as system-audit thoughts, model warning/safety
-utterances, error messages, or tool names) across the codebase or even within
-tests. If a test asserts on a constant string or utterance generated by the
-model or the agent, always define it once as an exported module-level constant
-in the source file, and import it into the test file rather than duplicating the
-raw string literal.
-
-### Token Cost Discipline
-
-Every harness feature or quality fix must come with an exact account of its
-token cost: what text enters model context, on which turns, one-shot vs. re-sent
-per model call, and whether it triggers extra model calls.
-
-- Prefer deterministic (CPU-only) checks over LLM judges; a `callModel`-based
-  check pays prompt + completion tokens on every invocation.
+- Prefer deterministic (CPU-only) checks over LLM judges.
 - Anything appended to `ephemeralHistory` is re-sent on every subsequent model
-  call within the run — price injected notices/corrections as per-call cost for
-  the rest of the run, not one-shot.
-- Always-on guards must be zero-cost on the happy path: no context growth and no
-  extra model calls unless the guard fires.
-- Weigh a guard's cost against the tokens it prevents — error payloads and retry
-  spirals enter history and are re-sent on every subsequent model call.
+  call within the run — price injected notices as per-call cost, not one-shot.
+- Always-on guards must be zero-cost on the happy path (no context growth and no
+  extra model calls unless the guard fires).
 
-Pre-commit hook runs
-`deno fmt --check && deno lint && deno check *.ts src/**/*.ts tests/**/*.ts`.
+# Architecture & Testing
 
-Don't use `case`, prefer an `if` with early return.
+- **`agent.ts` is provider-agnostic:** It must not import provider-specific
+  files (`geminiAgent.ts`, `anthropicAgent.ts`, `kimiAgent.ts`). Provider
+  dispatch lives in `mod.ts` under `providerCaller`. Factor provider-specific
+  behavior behind an injection point.
+- **Provider-agnostic loop invariants → inject a fake `CallModel`:** Tests for
+  `runAgent` invariants (streaming contract, iteration logic, event emission)
+  should use `injectCallModel(fake)` rather than hitting live providers (see
+  `tests/thinking.test.ts`).
+- **Integration & bug-repro tests → real agent + all providers + `rmmbr`:**
+  - Run the real agent (`runAgent` / `agentDeps` / `runForAllProviders`) against
+    the real API and assert on history events. Only set `geminiOnly=true` when
+    testing a Gemini-specific feature (and state why).
+  - Wrap live-API tests with `injectSecrets` (`test_helpers.ts`) so they use the
+    `rmmbr` cache (`injectCallModelWrapper`). Never fall back to a passthrough
+    or uncached runner; missing `RMMBR_TOKEN` must fail immediately at startup.
+  - **Explicit cache keys:** `rmmbrCacheWithKey` requires an explicit
+    `customKeyFn` that strips per-run randomness (`id`, `timestamp` — see
+    `eventsCacheKey`). If you add a new random/timestamp field to
+    `HistoryEvent`, strip it in the cache key or CI will miss the cache.
+- **Running tests:** Check `deno.json` (`deno task test`). Run only the tests
+  affected by your changes locally; CI runs the full suite and `deno task check`
+  on push. Avoid `try`/`catch` and mocking in tests unless explicitly approved.
 
-Avoid using `as`, prefer type guards or figuring out the type another way.
+# Coding Style
 
-Avoid try/catch in tests unless explicitly approved by user.
+- Minimal comments and no JSDoc unless necessary; rely on types and naming.
+- Functional style with `gamla` (`pipe`, `map`, `filter`, `empty`, `nonempty`).
+  Avoid `class`, `for`/`while` loops, `let`, and `switch`/`case` (prefer `if`
+  with early return or ternaries).
+- Arrow functions instead of `function`. Destructure in function signatures when
+  clean. Inline single-use variables or extract a named function.
+- Avoid nesting functions; keep functions at module level (use currying for
+  dependencies). Keep function bodies small when adding logic.
+- Avoid `as` type assertions; prefer type guards or type inference. Omit return
+  type annotations when inferrable.
 
-Avoid nested functions, unless necessary. Consider currying if you need to
-inject dependencies.
+# Publishing & Downstream Updates
 
-If a variable is used only once, consider inlining it. If it is too complex,
-factor it into a well-named function instead.
-
-Prefer gamla's `empty` than length checks - more readable.
-
-Don't use commenting or jsdoc unless instructed or in extreme cases. Typings and
-names of variables should do most of the documenting.
-
-Use arrow functions instead of `function` keyword.
-
-Use a functional style, prefer `map`, `filter`, `pipe` from Gamla instead of
-loops and mutable variables. Don't use `class` or `for`/`while` loops unless
-absolutely necessary.
-
-When writing tests that verify a behaviour against the api, actually call the
-api instead of mocking it. Only mock when given explicit permission by the user.
-
-**All bug reproductions and behaviour tests MUST be agent-level.** Write a test
-that runs the real agent (via `runAgent` / `agentDeps` / `runForAllProviders`)
-against the real API, and asserts on the resulting history events. This is the
-only way to catch real integration issues, because bugs live in the interaction
-between Zod schemas, JSON-schema conversion, provider-specific function
-declarations, strict validators on the provider side, and our call-site code. A
-pure-logic unit test on e.g. `buildReq` output shape or a schema-transform
-function is insufficient by itself — it will pass while production still breaks.
-
-**All agent-level tests MUST run on every provider.** Use `runForAllProviders`
-unless the bug is strictly provider-specific (and state why in a comment). Only
-set `geminiOnly=true` when the test uses a Gemini-specific feature or input
-format.
-
-**All agent-level tests MUST use a real rmmbr cacher.** `test_helpers.ts` wires
-a real rmmbr cache into `injectSecrets`. Do not replace it with a passthrough
-cacher. Deterministic fixtures make test runs fast, stable, and cheap; uncached
-runs burn tokens on every push and introduce flakiness. If you add a new test
-that hits the API, make sure it's wrapped with `injectSecrets` so it picks up
-the cache.
-
-**If the rmmbr token is unavailable, the test suite MUST fail violently at
-startup.** `test_helpers.ts` reads `RMMBR_TOKEN` from the environment and throws
-immediately if it's missing. Never fall back to a passthrough cacher, an
-empty-token in-memory/on-disk cache, or skip caching "just for this run". A
-silent fallback hides configuration bugs, produces non-deterministic test
-results, and burns API tokens on every push. Missing token → loud crash before
-any test runs.
-
-**Caching is a test-only concern, injected via `injectCallModelWrapper`.**
-`test_helpers.ts` wraps whatever `CallModel` `runAgent` resolves with an rmmbr
-cache (keyed on `provider + events`). Production does not inject this wrapper,
-so real calls are never cached in prod. When you add a new provider, make sure
-the `callModel` you expose flows through `resolveCallModel` in `mod.ts` so the
-injected wrapper applies — do not add ad-hoc caching layers inside the provider
-files.
-
-**Cache keys must be explicit, never implicit.** `rmmbrCacheWithKey` in
-`test_helpers.ts` refuses to run without a `customKeyFn` argument. rmmbr's
-default key function hashes all args, which silently picks up timestamps and
-random ids — every call misses the cache, every CI run burns API dollars.
-Passing an explicit key function forces you to decide which fields matter. For
-the CallModel wrapper the key strips `id` and `timestamp` from events (see
-`eventsCacheKey`). If you introduce a new source of per-run randomness into a
-HistoryEvent (a new uuid, a fresh timestamp), include it in the stripped set or
-the cache breaks.
-
-**`agent.ts` is provider-agnostic.** It must not import any provider-specific
-file (`geminiAgent.ts`, `anthropicAgent.ts`, `kimiAgent.ts`). Provider dispatch
-lives in `mod.ts` under `providerCaller`. If you find yourself needing provider-
-specific behavior inside the agent loop, factor it behind an injection point and
-let the provider implementation supply it.
-
-**Provider-agnostic behavior tests inject a fake `CallModel`.** Tests that
-verify invariants of `runAgent` itself (streaming contract, iteration logic,
-event emission, etc.) should NOT run against the live providers. Use
-`injectCallModel(fake)` to supply a deterministic in-memory model that fires
-whatever chunks / returns whatever events the test needs. This is fast, stable,
-and provider-agnostic. See
-`tests/thinking.test.ts:"onStreamThinkingChunk receives thinking chunks fired
-during callModel"`
-for the canonical example.
-
-When running tests after changes, run only the tests affected by your changes.
-Do not run the full local test suite for final verification - CI will run the
-full suite after you push.
-
-When adding logic, function bodies typically should not enlarge. New logic can
-be encapsulated in a new function. Or, one can refactor such that the old
-functions are even smaller than before. The added benefit is that there are less
-diffs hard to review.
-
-Typically it's better to "solve for the single case" then use functions like
-`map` and `filter` to handle the more complex cases. To prevent indent, one can
-define the single case and use `map` or similar functions in the call site.
-
-Destructuring in the function signature makes for more readable code rather than
-repeat myArg.x myArg.y everywhere. Most times this is possible, but not always.
-
-If a type is inferrable from the function, prefer not to annotate it. This is
-the common case.
+CI publishes to JSR on push to `main` when the `deno.json` version is bumped.
+Never run `deno publish` locally. To use changes in a consumer repo (e.g.
+`prompt2bot`): bump `version` in `deno.json` here, push to `main`, then bump the
+`@uri/ai-utils` version in the consumer's `deno.json` and run `deno install`.
