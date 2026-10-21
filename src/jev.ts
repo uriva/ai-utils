@@ -2,7 +2,7 @@ import { context, type Injection, type Injector } from "@uri/inject";
 import { pipe } from "gamla";
 import { cache } from "rmmbr";
 import { ThinkingLevel } from "@google/genai";
-import { makeCache } from "./cacher.ts";
+import { isCustomCacherInjected, makeCache } from "./cacher.ts";
 import {
   decideCleanupWithDecisionModel,
   decideSkillsWithDecisionModel,
@@ -95,14 +95,18 @@ const inMemoryJevCache = new Map<
 >();
 const memoryTtlMs = 60 * 60 * 1000;
 
+export const jevDecisionCacheId = "jev-decision-v1";
+export const jevThinkingLevelCacheId = "jev-thinking-level-v1";
+
 const getRmmbrJevCacher = () => {
   const token = Deno.env.get("RMMBR_TOKEN");
   return token
     ? cache({
-      cacheId: "jev-thinking-level-v1",
+      cacheId: jevThinkingLevelCacheId,
       ttl: 60 * 60 * 24 * 7,
       url: rmmbrUrl,
       token,
+      customKeyFn: (_token: string, state: string) => state,
     })
     : undefined;
 };
@@ -114,24 +118,32 @@ let rmmbrJevCaller:
 export const routeThinkingLevelWithJev = async (
   state: string | Record<string, unknown> | unknown[],
 ): Promise<ThinkingLevel> => {
-  const token = accessJevToken();
-  if (!token) throw new Error("No Jev token available");
+  const rawToken = accessJevToken();
+  const token = rawToken ? String(rawToken).trim() : "";
+  if (!token || token === "undefined") {
+    throw new Error("No Jev token available");
+  }
 
-  const serializedState = typeof state === "string"
-    ? state
-    : JSON.stringify(state);
+  const serializedState =
+    (typeof state === "string" ? state : JSON.stringify(state)).toWellFormed();
   const memCached = inMemoryJevCache.get(serializedState);
   if (memCached && Date.now() < memCached.expiresAt) {
     return memCached.level;
   }
 
-  if (!rmmbrJevCaller) {
-    const cacher = getRmmbrJevCacher();
-    rmmbrJevCaller = cacher
-      ? cacher((t: string, s: string) => rawCallJev(t, s))
-      : (t: string, s: string) => rawCallJev(t, s);
-  }
-  const level = await rmmbrJevCaller(token, serializedState);
+  const level = isCustomCacherInjected()
+    ? await makeCache(jevThinkingLevelCacheId, 60 * 60 * 24 * 7)(
+      (s: string) => rawCallJev(token, s),
+    )(serializedState)
+    : await (() => {
+      if (!rmmbrJevCaller) {
+        const cacher = getRmmbrJevCacher();
+        rmmbrJevCaller = cacher
+          ? cacher((t: string, s: string) => rawCallJev(t, s))
+          : (t: string, s: string) => rawCallJev(t, s);
+      }
+      return rmmbrJevCaller(token, serializedState);
+    })();
   inMemoryJevCache.set(serializedState, {
     level,
     expiresAt: Date.now() + memoryTtlMs,
@@ -184,7 +196,7 @@ const getRmmbrDecisionCacher = () => {
   const token = Deno.env.get("RMMBR_TOKEN");
   return token
     ? cache({
-      cacheId: "jev-decision-v1",
+      cacheId: jevDecisionCacheId,
       ttl: 60 * 60 * 24 * 30,
       url: rmmbrUrl,
       token,
@@ -197,8 +209,11 @@ export const callJevDecisionModel = async (
   state: unknown,
   questions: Record<string, DecisionQuestion>,
 ): Promise<Record<string, DecisionAnswer>> => {
-  const token = accessJevToken();
-  if (!token) throw new Error("No Jev token available");
+  const rawToken = accessJevToken();
+  const token = rawToken ? String(rawToken).trim() : "";
+  if (!token || token === "undefined") {
+    throw new Error("No Jev token available");
+  }
 
   const payload = JSON.stringify({
     model: "jev-latest",
@@ -211,16 +226,19 @@ export const callJevDecisionModel = async (
     return memCached.answers;
   }
 
-  if (!rmmbrDecisionCaller) {
-    const rmmbrCacher = getRmmbrDecisionCacher();
-    const injected = makeCache("jev-decision-v1");
-    const base = rmmbrCacher
-      ? rmmbrCacher(rawCallJevDecision)
-      : rawCallJevDecision;
-    rmmbrDecisionCaller = injected(base);
-  }
-
-  const answers = await rmmbrDecisionCaller(token, payload);
+  const answers = isCustomCacherInjected()
+    ? await makeCache(jevDecisionCacheId, 60 * 60 * 24 * 30)(
+      (p: string) => rawCallJevDecision(token, p),
+    )(payload)
+    : await (() => {
+      if (!rmmbrDecisionCaller) {
+        const rmmbrCacher = getRmmbrDecisionCacher();
+        rmmbrDecisionCaller = rmmbrCacher
+          ? rmmbrCacher(rawCallJevDecision)
+          : rawCallJevDecision;
+      }
+      return rmmbrDecisionCaller(token, payload);
+    })();
   inMemoryDecisionCache.set(payload, {
     answers,
     expiresAt: Date.now() + memoryTtlMs,

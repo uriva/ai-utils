@@ -4,8 +4,10 @@ import {
   decide,
   decideWithReasoningOnPositive,
   type DecisionProvider,
+  formatAgentStateForDecisionModel,
   genDecision,
   genJson,
+  injectCacher,
   injectDecisionProvider,
   injectGeminiToken,
   injectJevToken,
@@ -13,6 +15,7 @@ import {
   injectRespanUrl,
   z,
 } from "../mod.ts";
+import { routeThinkingLevelWithRespan } from "../src/respan.ts";
 import { injectSecrets } from "../test_helpers.ts";
 
 const sampleInquiry =
@@ -313,6 +316,96 @@ Deno.test(
         });
       });
     });
+
+    await server.shutdown();
+  },
+);
+
+Deno.test(
+  "formatAgentStateForDecisionModel and routeThinkingLevelWithRespan handle emojis split at UTF-16 slice boundaries without lone surrogates",
+  injectSecrets(async () => {
+    const promptWithBoundaryEmoji = `${"a".repeat(499)}🔥 trailing prompt text`;
+    const turnWith300BoundaryEmoji = `${"b".repeat(299)}🔥 trailing turn text`;
+    const triggerWith1000BoundaryEmoji = `${
+      "c".repeat(999)
+    }🔥 simple greeting hello`;
+
+    const state = formatAgentStateForDecisionModel(
+      promptWithBoundaryEmoji,
+      [
+        {
+          id: "1",
+          timestamp: 1000,
+          type: "participant_utterance",
+          isOwn: false,
+          name: "User",
+          text: turnWith300BoundaryEmoji,
+        },
+        {
+          id: "2",
+          timestamp: 2000,
+          type: "participant_utterance",
+          isOwn: false,
+          name: "User",
+          text: triggerWith1000BoundaryEmoji,
+        },
+      ],
+      [],
+    );
+
+    const serialized = JSON.stringify(state);
+    assertEquals(
+      /\\u[dD][89a-fA-F][0-9a-fA-F]{2}/.test(serialized),
+      false,
+      "Serialized decision state must not contain lone UTF-16 surrogates",
+    );
+
+    const level = await routeThinkingLevelWithRespan(state);
+    assertEquals(level === "LOW" || level === "HIGH", true);
+  }),
+);
+
+Deno.test(
+  "routeThinkingLevelWithRespan routes caching through injected makeCache rather than bypassing injectCacher",
+  async () => {
+    const seenCacheIds: string[] = [];
+    const customCacher = (cacheId: string) =>
+      ((fn: (...args: unknown[]) => Promise<unknown>) =>
+      (...args: unknown[]) => {
+        seenCacheIds.push(cacheId);
+        return fn(...args);
+      }) as never;
+
+    const server = Deno.serve({ port: 0 }, async (req) => {
+      await req.json();
+      return new Response(
+        JSON.stringify({
+          model: "span-01-free",
+          results: [
+            {
+              id: "requires_high_thinking",
+              p_present: 0.02,
+              p_absent: 0.96,
+              p_not_observable: 0.02,
+            },
+          ],
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    const url = `http://localhost:${server.addr.port}`;
+    await injectCacher(customCacher)(
+      injectRespanUrl(url)(
+        injectRespanToken("fake-token")(async () => {
+          const level = await routeThinkingLevelWithRespan(
+            `unique-route-state-${Date.now()}-${Math.random()}`,
+          );
+          assertEquals(level, "LOW");
+          assertEquals(seenCacheIds.includes("respan-thinking-level-v1"), true);
+        }),
+      ),
+    )();
 
     await server.shutdown();
   },

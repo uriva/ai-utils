@@ -810,12 +810,16 @@ export type CallModelWrapper = (args: {
   inner: CallModel;
 }) => CallModel;
 
+const defaultCallModelWrapper: CallModelWrapper = ({ inner }) => inner;
+
 const callModelWrapperInjection: Injection<CallModelWrapper> = context(
-  ({ inner }) => inner,
+  defaultCallModelWrapper,
 );
 
 export const injectCallModelWrapper = callModelWrapperInjection.inject;
 export const accessCallModelWrapper = callModelWrapperInjection.access;
+export const isDefaultCallModelWrapper = (): boolean =>
+  callModelWrapperInjection.getStore() === defaultCallModelWrapper;
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -3309,10 +3313,11 @@ export const runAbstractAgent = (
         `[agent-iter] iter=${c} histLen=${history.length} ephLen=${ephemeralHistory.length} normLen=${normalizedHistory.length}`,
       );
       await reportHistoryForDebug(normalizedHistory);
-      scheduleHistoryCompaction(spec, normalizedHistory);
-      const rawModelResponse = await timeit(reportTimeElapsedMs, callModel)(
+      const modelResponsePromise = timeit(reportTimeElapsedMs, callModel)(
         normalizedHistory,
       );
+      scheduleHistoryCompaction(spec, normalizedHistory);
+      const rawModelResponse = await modelResponsePromise;
 
       // Ordered post-response gates: each blocked response retries the model
       // call with a correctional thought (or aborts on persistent flooding).
@@ -3431,8 +3436,15 @@ export const scheduleHistoryCompaction = (
   const compactHistory = spec.compactHistory;
   const threshold = spec.historyCompactionTokenThreshold;
   if (!compactHistory || !threshold) return;
-  if (estimateAgentInputTokensUpperBound(spec, history) < threshold) return;
-  estimateAgentInputTokens(spec, history).then(async (totalTokens) => {
+  const specForTurn = getSpecForTurn(spec, history);
+  if (
+    estimateAgentInputTokensUpperBound(specForTurn, history) < threshold &&
+    estimateHistoryTokensUpperBound(history) <=
+      defaultSettledHistoryTokenThreshold
+  ) {
+    return;
+  }
+  estimateAgentInputTokens(specForTurn, history).then(async (totalTokens) => {
     if (await shouldCompactHistory(threshold, history, totalTokens)) {
       compactHistory(history);
     }
@@ -3441,10 +3453,23 @@ export const scheduleHistoryCompaction = (
 
 let cachedEncoding: ReturnType<typeof getEncoding> | undefined;
 
+const maxTextTokenCacheEntries = 512;
+const textTokenCache = new Map<string, number>();
+
 const countTokensLocal = (text: string | undefined): number => {
   if (!text) return 0;
+  const hit = textTokenCache.get(text);
+  if (hit !== undefined) return hit;
   cachedEncoding ??= getEncoding("cl100k_base");
-  return cachedEncoding.encode(text).length;
+  const count = cachedEncoding.encode(text).length;
+  if (text.length <= 200_000) {
+    if (textTokenCache.size >= maxTextTokenCacheEntries) {
+      const oldest = textTokenCache.keys().next().value;
+      if (oldest !== undefined) textTokenCache.delete(oldest);
+    }
+    textTokenCache.set(text, count);
+  }
+  return count;
 };
 
 // Attachment payloads (base64 blobs) must never enter plain-text projections
@@ -3545,20 +3570,37 @@ export const estimateTokens = async (e: HistoryEvent): Promise<number> => {
   return await accessTokenCounter([e]);
 };
 
+const toolTokenCache = new WeakMap<Tool<ZodType>, number>();
+
 const estimateToolTokensLocal = (
-  { name, description, parameters }: Tool<ZodType>,
-): number =>
-  countTokensLocal(name) + countTokensLocal(description) +
-  countTokensLocal(zodToTypingString(parameters));
+  toolObj: Tool<ZodType>,
+): number => {
+  const cached = toolTokenCache.get(toolObj);
+  if (cached !== undefined) return cached;
+  const count = countTokensLocal(toolObj.name) +
+    countTokensLocal(toolObj.description) +
+    countTokensLocal(zodToTypingString(toolObj.parameters));
+  toolTokenCache.set(toolObj, count);
+  return count;
+};
+
+const skillTokenCache = new WeakMap<Skill, number>();
 
 const estimateSkillTokensLocal = (
-  { name, description, instructions, tools }: Skill,
-): number =>
-  countTokensLocal(name) + countTokensLocal(description) +
-  countTokensLocal(instructions) + tools.reduce(
-    (total, tool) => total + estimateToolTokensLocal(tool),
-    0,
-  );
+  skillObj: Skill,
+): number => {
+  const cached = skillTokenCache.get(skillObj);
+  if (cached !== undefined) return cached;
+  const count = countTokensLocal(skillObj.name) +
+    countTokensLocal(skillObj.description) +
+    countTokensLocal(skillObj.instructions) +
+    skillObj.tools.reduce(
+      (total, tool) => total + estimateToolTokensLocal(tool),
+      0,
+    );
+  skillTokenCache.set(skillObj, count);
+  return count;
+};
 
 export const estimateEventTokenUpperBound = (e: HistoryEvent): number =>
   eventToPlainTextLocal(e).length +

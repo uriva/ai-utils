@@ -97,11 +97,16 @@ export const accessDecisionProvider = decisionProviderInjection.access;
 export const injectDecisionProvider = (provider: DecisionProvider): Injector =>
   decisionProviderInjection.inject(() => provider);
 
+const hasNonEmptyToken = (raw: string | undefined): boolean => {
+  const s = raw ? String(raw).trim() : "";
+  return Boolean(s && s !== "undefined");
+};
+
 export const resolveDecisionProvider = (): DecisionProvider => {
   const configured = accessDecisionProvider();
   if (configured) return configured;
-  if (accessRespanToken()) return "respan";
-  if (accessJevToken()) return "jev";
+  if (hasNonEmptyToken(accessRespanToken())) return "respan";
+  if (hasNonEmptyToken(accessJevToken())) return "jev";
   return "respan";
 };
 
@@ -119,8 +124,8 @@ export const isDecisionModelInjected = (): boolean =>
 export const isDecisionModelAvailable = (): boolean => {
   if (decisionModelOverrideInjection.access()) return true;
   const provider = resolveDecisionProvider();
-  if (provider === "jev") return Boolean(accessJevToken());
-  return Boolean(accessRespanToken());
+  if (provider === "jev") return hasNonEmptyToken(accessJevToken());
+  return hasNonEmptyToken(accessRespanToken());
 };
 
 export const callDecisionModel = async (
@@ -136,7 +141,7 @@ export const callDecisionModel = async (
     try {
       return await callJevDecisionModel(state, questions);
     } catch (err) {
-      if (accessRespanToken()) {
+      if (hasNonEmptyToken(accessRespanToken())) {
         console.warn(
           "[decision-model] Jev failed, falling back to Respan:",
           err,
@@ -149,7 +154,7 @@ export const callDecisionModel = async (
   try {
     return await callRespanDecisionModel(state, questions);
   } catch (err) {
-    if (accessJevToken()) {
+    if (hasNonEmptyToken(accessJevToken())) {
       console.warn(
         "[decision-model] Respan failed, falling back to Jev:",
         err,
@@ -494,7 +499,7 @@ export const verifiedToolFacts = (history: HistoryEvent[]): string => {
       return [];
     })
     .join("\n\n");
-  return `${toolResults}\n\n${otherFacts}`.slice(-10000).trim();
+  return `${toolResults}\n\n${otherFacts}`.slice(-10000).toWellFormed().trim();
 };
 
 export const cleanHistoryEventForDecision = (e: HistoryEvent) => {
@@ -554,20 +559,20 @@ export const formatAgentStateForDecisionModel = (
     .find((e) => e.type === "participant_utterance");
   const lastEventText = lastEvent ? eventContent(lastEvent) : undefined;
   const triggerContent = lastEventText
-    ? lastEventText.slice(0, 1000)
+    ? lastEventText.slice(0, 1000).toWellFormed()
     : (lastUserMsg && "text" in lastUserMsg &&
         typeof lastUserMsg.text === "string"
-      ? lastUserMsg.text.slice(0, 1000)
+      ? lastUserMsg.text.slice(0, 1000).toWellFormed()
       : "Empty user request");
   const triggerType = lastEvent ? lastEvent.type : "conversation_start";
   const recentEvents = history.slice(-4).map((e) => ({
     type: e.type,
-    text: eventContent(e)?.slice(0, 300),
+    text: eventContent(e)?.slice(0, 300).toWellFormed(),
   }));
   return {
     trigger_type: triggerType,
     trigger_content: triggerContent,
-    agent_role: prompt.slice(0, 500),
+    agent_role: prompt.slice(0, 500).toWellFormed(),
     tools_available: (tools ?? []).map((t) => t.name).slice(0, 15),
     recent_turns: recentEvents,
   };
@@ -606,7 +611,10 @@ export const routeThinkingLevel = async (
     }
     return ThinkingLevel.HIGH;
   }
-  if (!accessRespanToken() && !accessJevToken()) {
+  if (
+    !hasNonEmptyToken(accessRespanToken()) &&
+    !hasNonEmptyToken(accessJevToken())
+  ) {
     return ThinkingLevel.HIGH;
   }
   const provider = resolveDecisionProvider();
@@ -614,7 +622,7 @@ export const routeThinkingLevel = async (
     try {
       return await routeThinkingLevelWithJev(state);
     } catch (err) {
-      if (accessRespanToken()) {
+      if (hasNonEmptyToken(accessRespanToken())) {
         console.warn(
           "[decision-model] Jev routeThinkingLevel failed, falling back to Respan:",
           err,
@@ -635,7 +643,7 @@ export const routeThinkingLevel = async (
   try {
     return await routeThinkingLevelWithRespan(state);
   } catch (err) {
-    if (accessJevToken()) {
+    if (hasNonEmptyToken(accessJevToken())) {
       console.warn(
         "[decision-model] Respan routeThinkingLevel failed, falling back to Jev:",
         err,
@@ -714,7 +722,7 @@ export const extractCandidateToolEpisodes = (
         currentEpisode.toolCalls?.push({ name: e.name, params: e.parameters });
       } else if (e.type === "tool_result") {
         const preview = typeof e.result === "string"
-          ? e.result.slice(0, 150).replace(/\n/g, " ")
+          ? e.result.slice(0, 150).toWellFormed().replace(/\n/g, " ")
           : "";
         currentEpisode.toolResultsSummary?.push(preview);
       } else if (e.type === "own_utterance") {
@@ -770,10 +778,11 @@ export const decideSkillsWithDecisionModel = async (
   const facts = verifiedToolFacts(history);
 
   const state = {
-    agent_role: prompt.slice(0, 1000),
+    agent_role: prompt.slice(0, 1000).toWellFormed(),
     verified_conversation_facts_and_history:
-      (recentDialogue + (facts ? `\n\nFacts:\n${facts}` : "")).slice(-10000),
-    current_user_request: lastUser.text,
+      (recentDialogue + (facts ? `\n\nFacts:\n${facts}` : "")).slice(-10000)
+        .toWellFormed(),
+    current_user_request: lastUser.text.toWellFormed(),
   };
 
   const inactiveSkills = candidateSkills.filter(
@@ -857,15 +866,15 @@ export const decideCleanupWithDecisionModel = async (
     : "No prompt";
 
   const state = {
-    agent_role: prompt.slice(0, 1000),
-    current_user_request: currentUserRequest,
+    agent_role: prompt.slice(0, 1000).toWellFormed(),
+    current_user_request: currentUserRequest.toWellFormed(),
     past_tool_episodes: candidateEpisodes.map((ep) => ({
       turn_id: `turn_${ep.turnIndex}`,
-      user_request: ep.userText.slice(0, 150),
+      user_request: ep.userText.slice(0, 150).toWellFormed(),
       tools_invoked: ep.toolCalls.map((t) => t.name).join(", "),
       tool_results_preview: ep.toolResultsSummary.slice(0, 2).join(" | ")
-        .slice(0, 200),
-      bot_response: ep.botText.slice(0, 150),
+        .slice(0, 200).toWellFormed(),
+      bot_response: ep.botText.slice(0, 150).toWellFormed(),
     })),
   };
 
@@ -876,12 +885,12 @@ export const decideCleanupWithDecisionModel = async (
         type: "noul" as const,
         instructions:
           `Should the intermediate tool execution logs of Turn ${ep.turnIndex} ("${
-            ep.userText.slice(0, 60)
+            ep.userText.slice(0, 60).toWellFormed()
           }") be compacted into a summary?`,
         criteria: {
           true:
             `The action or subtask in Turn ${ep.turnIndex} has been completed and responded to. The current user request ("${
-              currentUserRequest.slice(0, 60)
+              currentUserRequest.slice(0, 60).toWellFormed()
             }") does not require re-inspecting the exact raw tool output, error stack traces, or intermediate line numbers from Turn ${ep.turnIndex}.`,
           false:
             `The current user request is directly asking about, debugging, or relying on specific raw details from Turn ${ep.turnIndex} that would be lost if summarized.`,

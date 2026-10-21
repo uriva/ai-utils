@@ -11,13 +11,18 @@ import {
   injectScratchPad,
   injectStreamChunk,
   injectStreamThinkingChunk,
+  isDefaultCallModelWrapper,
   runAbstractAgent,
   sanitizeHistorySkillsForModel,
   searchPastHistoryTool,
 } from "./src/agent.ts";
 import { anthropicAgentCaller } from "./src/anthropicAgent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
-import { geminiAgentCaller, prepareGeminiHistory } from "./src/geminiAgent.ts";
+import {
+  geminiAgentCaller,
+  prepareGeminiHistory,
+  warmGeminiContextCacheForSpec,
+} from "./src/geminiAgent.ts";
 import { validateZodSchema } from "./src/gemini.ts";
 import { inspectMediaUrlTool } from "./src/inspectMediaTool.ts";
 import {
@@ -136,6 +141,9 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
         )
         : Promise.resolve(undefined),
       prepareHistory(specForTurn)(sanitizeHistorySkillsForModel(history)),
+      ...(usesGeminiThinking && isDefaultCallModelWrapper()
+        ? [warmGeminiContextCacheForSpec(specForTurn, history)]
+        : []),
     ]);
     if (thinkingLevel !== undefined) {
       console.log(`[decision-model] thinkingLevel=${thinkingLevel}`);
@@ -374,7 +382,10 @@ export {
   injectRespanUrl,
   proRespanModel,
   respanApiUrl,
+  respanDecisionCacheId,
+  respanThinkingLevelCacheId,
   routeTaskWithRespan,
+  routeThinkingLevelWithRespan,
 } from "./src/respan.ts";
 export {
   accessJevToken,
@@ -384,7 +395,10 @@ export {
   formatAgentStateForJev,
   injectJevToken,
   jevApiUrl,
+  jevDecisionCacheId,
+  jevThinkingLevelCacheId,
   routeTaskWithJev,
+  routeThinkingLevelWithJev,
 } from "./src/jev.ts";
 export { injectOpenAiToken } from "./src/openai.ts";
 export {

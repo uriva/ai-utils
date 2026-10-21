@@ -2,7 +2,7 @@ import { context, type Injection, type Injector } from "@uri/inject";
 import { empty } from "gamla";
 import { cache } from "rmmbr";
 import { ThinkingLevel } from "@google/genai";
-import { makeCache } from "./cacher.ts";
+import { isCustomCacherInjected, makeCache } from "./cacher.ts";
 import {
   type ChoiceDecisionAnswer,
   decideCleanupWithDecisionModel,
@@ -151,14 +151,29 @@ const isRespanSpan = (val: unknown): val is RespanSpan =>
   (val as RespanSpan).output !== null &&
   (val as RespanSpan).output.role === "assistant";
 
-export const stateToSpan = (state: unknown): RespanSpan => {
+const sanitizeSpanWellFormed = (span: RespanSpan): RespanSpan => ({
+  input: span.input.map((m) => ({
+    ...m,
+    content: typeof m.content === "string"
+      ? m.content.toWellFormed()
+      : String(m.content),
+  })),
+  output: {
+    ...span.output,
+    content: typeof span.output.content === "string"
+      ? span.output.content.toWellFormed()
+      : String(span.output.content),
+  },
+});
+
+const rawStateToSpan = (state: unknown): RespanSpan => {
   if (isRespanSpan(state)) return state;
 
   if (typeof state === "string") {
     try {
       const parsed = JSON.parse(state);
       if (typeof parsed === "object" && parsed !== null) {
-        return stateToSpan(parsed);
+        return rawStateToSpan(parsed);
       }
     } catch {
       // plain text string, fall through
@@ -356,6 +371,9 @@ export const stateToSpan = (state: unknown): RespanSpan => {
     output: { role: "assistant", content: "" },
   };
 };
+
+export const stateToSpan = (state: unknown): RespanSpan =>
+  sanitizeSpanWellFormed(rawStateToSpan(state));
 
 const formatNoulDefinition = (
   q: NoulDecisionQuestion,
@@ -558,11 +576,14 @@ const inMemoryDecisionCache = new Map<
 >();
 const memoryTtlMs = 60 * 60 * 1000;
 
+export const respanDecisionCacheId = "respan-decision-v1";
+export const respanThinkingLevelCacheId = "respan-thinking-level-v1";
+
 const getRmmbrDecisionCacher = () => {
   const token = Deno.env.get("RMMBR_TOKEN");
   return token
     ? cache({
-      cacheId: "respan-decision-v1",
+      cacheId: respanDecisionCacheId,
       ttl: 60 * 60 * 24 * 30,
       url: rmmbrUrl,
       token,
@@ -579,8 +600,11 @@ export const callRespanDecisionModel = async (
   state: unknown,
   questions: Record<string, DecisionQuestion>,
 ): Promise<Record<string, DecisionAnswer>> => {
-  const token = accessRespanToken();
-  if (!token) throw new Error("No Respan token available");
+  const rawToken = accessRespanToken();
+  const token = rawToken ? String(rawToken).trim() : "";
+  if (!token || token === "undefined") {
+    throw new Error("No Respan token available");
+  }
   if (empty(Object.keys(questions))) return {};
 
   const span = stateToSpan(state);
@@ -597,16 +621,19 @@ export const callRespanDecisionModel = async (
     return memCached.answers;
   }
 
-  if (!rmmbrDecisionCaller) {
-    const rmmbrCacher = getRmmbrDecisionCacher();
-    const injected = makeCache("respan-decision-v1");
-    const base = rmmbrCacher
-      ? rmmbrCacher(rawCallRespanScores)
-      : rawCallRespanScores;
-    rmmbrDecisionCaller = injected(base);
-  }
-
-  const response = await rmmbrDecisionCaller(token, payload);
+  const response = isCustomCacherInjected()
+    ? await makeCache(respanDecisionCacheId, 60 * 60 * 24 * 30)(
+      (p: string) => rawCallRespanScores(token, p),
+    )(payload)
+    : await (() => {
+      if (!rmmbrDecisionCaller) {
+        const rmmbrCacher = getRmmbrDecisionCacher();
+        rmmbrDecisionCaller = rmmbrCacher
+          ? rmmbrCacher(rawCallRespanScores)
+          : rawCallRespanScores;
+      }
+      return rmmbrDecisionCaller(token, payload);
+    })();
   const answers = parseScoresToAnswers(questions, response.results ?? []);
   inMemoryDecisionCache.set(payload, {
     answers,
@@ -654,7 +681,7 @@ const getRmmbrRouteCacher = () => {
   const token = Deno.env.get("RMMBR_TOKEN");
   return token
     ? cache({
-      cacheId: "respan-thinking-level-v1",
+      cacheId: respanThinkingLevelCacheId,
       ttl: 60 * 60 * 24 * 7,
       url: rmmbrUrl,
       token,
@@ -670,8 +697,11 @@ let rmmbrRouteCaller:
 export const routeThinkingLevelWithRespan = async (
   state: string | Record<string, unknown> | unknown[],
 ): Promise<ThinkingLevel> => {
-  const token = accessRespanToken();
-  if (!token) throw new Error("No Respan token available");
+  const rawToken = accessRespanToken();
+  const token = rawToken ? String(rawToken).trim() : "";
+  if (!token || token === "undefined") {
+    throw new Error("No Respan token available");
+  }
 
   const span = stateToSpan(state);
   const payload = JSON.stringify({
@@ -685,13 +715,19 @@ export const routeThinkingLevelWithRespan = async (
     return memCached.level;
   }
 
-  if (!rmmbrRouteCaller) {
-    const cacher = getRmmbrRouteCacher();
-    rmmbrRouteCaller = cacher
-      ? cacher((t: string, p: string) => rawCallRespanRoute(t, p))
-      : (t: string, p: string) => rawCallRespanRoute(t, p);
-  }
-  const level = await rmmbrRouteCaller(token, payload);
+  const level = isCustomCacherInjected()
+    ? await makeCache(respanThinkingLevelCacheId, 60 * 60 * 24 * 7)(
+      (p: string) => rawCallRespanRoute(token, p),
+    )(payload)
+    : await (() => {
+      if (!rmmbrRouteCaller) {
+        const cacher = getRmmbrRouteCacher();
+        rmmbrRouteCaller = cacher
+          ? cacher((t: string, p: string) => rawCallRespanRoute(t, p))
+          : (t: string, p: string) => rawCallRespanRoute(t, p);
+      }
+      return rmmbrRouteCaller(token, payload);
+    })();
   inMemoryRouteCache.set(payload, {
     level,
     expiresAt: Date.now() + memoryTtlMs,

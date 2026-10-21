@@ -39,9 +39,11 @@ import {
   generateId,
   getStreamChunk,
   getStreamThinkingChunk,
+  type HistoryEvent,
   type HistoryEventWithMetadata,
   historyHasPendingDeferredUserWaitingNudge,
   injectIsMockModel,
+  isMockModelInjected,
   isRecord,
   type MediaAttachment,
   type MessageId,
@@ -1859,6 +1861,48 @@ export const geminiAgentCaller =
       ? markTruncatedUtterances(result)
       : result;
   };
+
+export const warmGeminiContextCacheForSpec = async (
+  {
+    prompt,
+    tools,
+    skills,
+    allSkills,
+    toolOutputScratchPad,
+  }: AgentSpec,
+  events: HistoryEvent[],
+): Promise<void> => {
+  if (!isGeminiContextCachingEnabled() || isMockModelInjected()) return;
+  let rawToken: string;
+  try {
+    rawToken = accessGeminiToken();
+  } catch {
+    return;
+  }
+  const token = rawToken ? String(rawToken).trim() : "";
+  if (!token || token === "undefined") return;
+  const silenceLicense = historyHasPendingDeferredUserWaitingNudge(events)
+    ? ""
+    : noResponseInstruction;
+  const sysInstr = `${
+    enhancePrompt(prompt, toolOutputScratchPad)
+  }${silenceLicense}`;
+  const fullTools = [
+    ...tools,
+    ...((allSkills ?? skills ?? []).length > 0
+      ? createSkillTools(allSkills ?? skills ?? [])
+      : []),
+  ];
+  const cfg = toolingConfig(fullTools);
+  const sdk = new GoogleGenAI({ apiKey: token });
+  await getOrCreateGeminiContextCache(
+    sdk,
+    geminiModelVersion("flash"),
+    sysInstr,
+    "tools" in cfg ? cfg.tools : undefined,
+    cfg.toolConfig,
+  ).catch(() => {});
+};
 
 const geminiAgentCallerInner = ({
   thinkingLevel,
