@@ -1204,9 +1204,28 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
       )
       : normalizedName;
 
-  const directMatch: Tool<T> | undefined = actions.find((
+  const directMatchByName: Tool<T> | undefined = actions.find((
     { name: n },
   ) => n === normalizedName || n === bareName);
+  const embeddedCommand = !directMatchByName &&
+      isRecord(normalizedArgs) &&
+      typeof normalizedArgs.command === "string"
+    ? normalizedArgs.command
+    : undefined;
+  const embeddedDirectMatch: Tool<T> | undefined = embeddedCommand
+    ? actions.find(({ name: n }) => n === embeddedCommand)
+    : undefined;
+  const embeddedRunCommand: Tool<T> | undefined = embeddedCommand &&
+      !embeddedDirectMatch
+    ? actions.find(({ name: n }) => n === runCommandToolName)
+    : undefined;
+  const directMatch: Tool<T> | undefined = directMatchByName ??
+    embeddedDirectMatch ??
+    embeddedRunCommand;
+  const effectiveDirectArgs = embeddedDirectMatch && isRecord(normalizedArgs) &&
+      isRecord(normalizedArgs.params)
+    ? normalizedArgs.params
+    : normalizedArgs;
   const slashSkillCall = !directMatch &&
     (normalizedName.includes("/") || normalizedName.includes(":"));
   const underscoreSkillCall = !directMatch && !slashSkillCall
@@ -1216,15 +1235,36 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
     !directMatch && !slashSkillCall && !underscoreSkillCall
       ? resolveUnambiguousBareName(normalizedName, skills)
       : undefined;
+  const closeTopLevelMatch: Tool<T> | undefined = !directMatch &&
+      !slashSkillCall &&
+      underscoreSkillCall === undefined &&
+      unambiguousBare === undefined
+    ? (() => {
+      const closeName = closestName(
+        normalizedName,
+        actions.map((a) => a.name).filter((n) => n !== runCommandToolName),
+      );
+      return closeName
+        ? actions.find(({ name: n }) => n === closeName)
+        : undefined;
+    })()
+    : undefined;
   const isSkillCall = slashSkillCall || underscoreSkillCall !== undefined ||
     unambiguousBare !== undefined;
   const skillCommand = underscoreSkillCall ?? unambiguousBare ?? normalizedName;
-  const invocationCorrections = (underscoreSkillCall !== undefined ||
-      unambiguousBare !== undefined)
+  const invocationCorrections = embeddedDirectMatch
+    ? [commandRewrittenCorrection(normalizedName, embeddedDirectMatch.name)]
+    : embeddedRunCommand
+    ? [commandRewrittenCorrection(normalizedName, runCommandToolName)]
+    : closeTopLevelMatch
+    ? [commandRewrittenCorrection(normalizedName, closeTopLevelMatch.name)]
+    : (underscoreSkillCall !== undefined || unambiguousBare !== undefined)
     ? [commandRewrittenCorrection(normalizedName, skillCommand)]
     : [];
   const [action, effectiveArgs] = directMatch
-    ? [directMatch, normalizedArgs]
+    ? [directMatch, effectiveDirectArgs]
+    : closeTopLevelMatch
+    ? [closeTopLevelMatch, normalizedArgs]
     : isSkillCall
     ? [
       actions.find(({ name: n }) => n === runCommandToolName) as

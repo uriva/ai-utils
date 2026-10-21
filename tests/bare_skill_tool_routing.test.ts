@@ -635,3 +635,85 @@ Deno.test(
     assertEquals(toolResult.result.includes("echoed: test-note"), true);
   },
 );
+
+Deno.test(
+  "agent-level: blended tool calls (run_scratch_pad with embedded command and run_scratch_file typo) resolve to read_scratch_file",
+  async () => {
+    const store = new Map<string, string>([
+      ["call_1", "alpha\nbeta\ngamma"],
+    ]);
+    const scratchPad = {
+      get: (id: string) => Promise.resolve(store.get(id)),
+      set: (id: string, content: string) => {
+        store.set(id, content);
+        return Promise.resolve();
+      },
+    };
+    let step = 0;
+    const fakeModel: CallModel = () => {
+      step++;
+      if (step === 1) {
+        return Promise.resolve([{
+          type: "tool_call",
+          isOwn: true,
+          id: "blend-1",
+          timestamp: Date.now(),
+          name: "run_scratch_pad",
+          parameters: {
+            command: readScratchFileToolName,
+            params: { id: "call_1", startLine: 1, limit: 10 },
+          },
+        }]);
+      }
+      if (step === 2) {
+        return Promise.resolve([{
+          type: "tool_call",
+          isOwn: true,
+          id: "blend-2",
+          timestamp: Date.now(),
+          name: "run_scratch_file",
+          parameters: { id: "call_1", startLine: 1, limit: 10 },
+        }]);
+      }
+      return Promise.resolve([ownUtteranceTurn("done")]);
+    };
+    const history: HistoryEvent[] = [participantUtteranceTurn({
+      name: "user",
+      text: "Read the scratch pad.",
+    })];
+    await injectCallModel(fakeModel)(() =>
+      agentDeps(history)(runAgent)({
+        maxIterations: 5,
+        tools: [],
+        skills: [todoSkill],
+        prompt: "You help users.",
+        timezoneIANA: "UTC",
+        toolOutputScratchPad: scratchPad,
+      })
+    )();
+    const res1 = history.find(
+      (e): e is Extract<HistoryEvent, { type: "tool_result" }> =>
+        e.type === "tool_result" && e.toolCallId === "blend-1",
+    );
+    const res2 = history.find(
+      (e): e is Extract<HistoryEvent, { type: "tool_result" }> =>
+        e.type === "tool_result" && e.toolCallId === "blend-2",
+    );
+    assert(res1, "expected tool result for blend-1");
+    assert(res2, "expected tool result for blend-2");
+    assertEquals(res1.result.includes("alpha"), true);
+    assertEquals(
+      res1.result.includes(
+        commandRewrittenCorrection("run_scratch_pad", readScratchFileToolName),
+      ),
+      true,
+    );
+    assertEquals(res2.result.includes("alpha"), true);
+    assertEquals(
+      res2.result.includes(
+        commandRewrittenCorrection("run_scratch_file", readScratchFileToolName),
+      ),
+      true,
+    );
+  },
+);
