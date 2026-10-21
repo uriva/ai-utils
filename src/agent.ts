@@ -1099,6 +1099,61 @@ const collapseRepeatedLines = (text: string): string => {
 const sanitizeToolOutput = (text: string): string =>
   collapseRepeatedLines(resolveCarriageReturns(stripAnsi(text)));
 
+// deno-lint-ignore no-explicit-any
+const hoistNestedSpinnerText = (jsonSchema: any, args: unknown): unknown => {
+  if (
+    !args ||
+    typeof args !== "object" ||
+    Array.isArray(args) ||
+    !jsonSchema?.properties ||
+    !("spinnerText" in jsonSchema.properties) ||
+    !("params" in jsonSchema.properties) ||
+    (jsonSchema.properties.params?.properties &&
+      "spinnerText" in jsonSchema.properties.params.properties)
+  ) {
+    return args;
+  }
+  const record = args as Record<string, unknown>;
+  const nestedParams = record.params;
+  if (
+    !nestedParams ||
+    typeof nestedParams !== "object" ||
+    Array.isArray(nestedParams) ||
+    typeof (nestedParams as Record<string, unknown>).spinnerText !== "string"
+  ) {
+    return args;
+  }
+  const { spinnerText, ...restParams } = nestedParams as Record<
+    string,
+    unknown
+  >;
+  return {
+    ...record,
+    params: restParams,
+    ...(typeof record.spinnerText === "string" && record.spinnerText
+      ? {}
+      : { spinnerText }),
+  };
+};
+
+const stripNestedSpinnerText = (
+  // deno-lint-ignore no-explicit-any
+  toolJsonSchema: any,
+  params: unknown,
+): unknown => {
+  if (
+    !params ||
+    typeof params !== "object" ||
+    Array.isArray(params) ||
+    !("spinnerText" in params) ||
+    (toolJsonSchema?.properties && "spinnerText" in toolJsonSchema.properties)
+  ) {
+    return params;
+  }
+  const { spinnerText: _ignored, ...rest } = params as Record<string, unknown>;
+  return rest;
+};
+
 export const callToResult = (
   // deno-lint-ignore no-explicit-any
   actions: Tool<any>[],
@@ -1191,7 +1246,10 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
   }
   const { handler, parameters } = action;
   const jsonSchema = z.toJSONSchema(parameters);
-  const coerced = coerceArgs(jsonSchema, effectiveArgs);
+  const coerced = coerceArgs(
+    jsonSchema,
+    hoistNestedSpinnerText(jsonSchema, effectiveArgs),
+  );
   const prefix = correctionPrefix([
     ...invocationCorrections,
     ...coerced.corrections,
@@ -2747,7 +2805,10 @@ export const createSkillTools = (
         (!skillMap[skillName] || !toolMap[`${skillName}/${toolName}`])
       ) {
         const toolJsonSchema = z.toJSONSchema(topLevelMatch.parameters);
-        const coerced = coerceArgs(toolJsonSchema, params);
+        const coerced = coerceArgs(
+          toolJsonSchema,
+          stripNestedSpinnerText(toolJsonSchema, params),
+        );
         const prefix = correctionPrefix([
           topLevelToolCorrection(rawCommand),
           ...coerced.corrections,
@@ -2799,7 +2860,10 @@ export const createSkillTools = (
         return `Tool "${toolName}" not found in skill "${skillName}".\n\nSkill "${skillName}" instructions:\n${skill.instructions}\n\nAvailable tools in this skill:\n${toolList}`;
       }
       const toolJsonSchema = z.toJSONSchema(tool.parameters);
-      const coerced = coerceArgs(toolJsonSchema, params);
+      const coerced = coerceArgs(
+        toolJsonSchema,
+        stripNestedSpinnerText(toolJsonSchema, params),
+      );
       const prefix = correctionPrefix([
         ...(rawCommand !== fullToolName
           ? [commandRewrittenCorrection(rawCommand, fullToolName)]

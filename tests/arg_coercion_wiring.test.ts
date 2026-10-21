@@ -261,3 +261,35 @@ Deno.test("run_command handles undefined params when sub-tool expects object", a
   if (typeof out !== "string") throw new Error("expected string result");
   assertEquals(out.includes("success"), true);
 });
+
+Deno.test("callToResult with run_command silently accepts params.spinnerText without auto-correction warning", async () => {
+  const skillTools = createSkillTools([
+    {
+      name: "video",
+      description: "video skill",
+      instructions: "x",
+      tools: [findEpisode],
+    },
+  ]);
+  const out = await callToResult(skillTools, [
+    {
+      name: "video",
+      description: "video skill",
+      instructions: "x",
+      tools: [findEpisode],
+    },
+  ])({
+    name: "run_command",
+    args: {
+      command: "video/find_episode",
+      params: {
+        query: { name: "Lost", episode: 1, season: 2 },
+        spinnerText: "Searching episode...",
+      },
+    },
+    id: "call-spinner-nested",
+  });
+  if (!out) throw new Error("expected a result");
+  assertEquals(out.result.startsWith("[arguments auto-corrected"), false);
+  assertEquals(out.result, "found Lost s2e1 timeout=n/a");
+});
