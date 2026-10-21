@@ -410,3 +410,53 @@ Deno.test(
     await server.shutdown();
   },
 );
+
+Deno.test(
+  "decide evaluates boolean schema with 'Whether ... is classified as ...' description and empty Jev token in pipe",
+  injectSecrets(async () => {
+    const moderatorPrompt = [
+      "You are a group moderator agent.",
+      "Your task is to analyze incoming group messages and determine if they are spam or violate the group's custom rules.",
+      "CRITICAL: If custom group rules are provided under 'CRITICAL CUSTOM GROUP RULES FOR ALLOWED/DISALLOWED CONTENT', they strictly override any default rules. For example, if a custom rule explicitly allows publishing links to events or parties, you must classify event/party link messages as NOT spam (isSpam: false), even if they appear promotional or broadcasted. Conversely, if a custom rule forbids certain topics, languages, or message types (even without links), any message violating that custom rule MUST be classified as spam (isSpam: true). Custom admin rules always take absolute precedence over default spam criteria.",
+      "A message is classified as spam if it contains promotional links, unsolicited advertisements, scam links, affiliate marketing, phishing, bulk broadcast advertising, or violates the group's custom rules. This includes unsolicited invitations to join other chat groups or channels (especially those about stock trading, investments, crypto, courses, or general community promotion).",
+      "Ignore regular conversational messages, helpful resource shares, or official team links unless they violate a custom group rule.",
+      "Be decisive and accurate. If it is clearly spam/advertisement/unsolicited promotion or violates a custom group rule, return isSpam: true. Otherwise, return isSpam: false.",
+    ].join(" ");
+
+    const ModerationSchema = z.object({
+      isSpam: z.boolean().describe(
+        "Whether the message is classified as spam, unsolicited promotion, scam, or a violation of the custom group rules.",
+      ),
+    });
+
+    const spamMsg = [
+      "Group Name: Developers Chat",
+      "Group Description: General developer discussion",
+      "Sender Name: Alice",
+      "Sender ID: user-123",
+      "Message: Join our VIP stock trading group for daily market signals and analysis! https://example.com/join-stocks",
+    ].join("\n");
+
+    const cleanMsg = [
+      "Group Name: Developers Chat",
+      "Group Description: General developer discussion",
+      "Sender Name: Bob",
+      "Sender ID: user-456",
+      "Message: Bug reported.\ndebug-report: https://example.com/debug?id=123",
+    ].join("\n");
+
+    const checkSpam = decide(moderatorPrompt, ModerationSchema);
+
+    await injectDecisionProvider("respan")(
+      injectRespanToken(Deno.env.get("RESPAN_API_KEY")!)(
+        injectJevToken("")(async () => {
+          const spamRes = await checkSpam(spamMsg);
+          assertEquals(spamRes.isSpam, true);
+
+          const cleanRes = await checkSpam(cleanMsg);
+          assertEquals(cleanRes.isSpam, false);
+        }),
+      ),
+    )();
+  }),
+);

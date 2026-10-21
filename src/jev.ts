@@ -1,5 +1,4 @@
 import { context, type Injection, type Injector } from "@uri/inject";
-import { pipe } from "gamla";
 import { cache } from "rmmbr";
 import { ThinkingLevel } from "@google/genai";
 import { isCustomCacherInjected, makeCache } from "./cacher.ts";
@@ -20,7 +19,6 @@ import {
   decisionThinkingLevelInstructions,
   type ModelTier,
 } from "./utils.ts";
-import { injectRespanToken } from "./respan.ts";
 
 export {
   decideCleanupWithDecisionModel as decideCleanupWithJev,
@@ -39,13 +37,8 @@ const jevToken: Injection<() => string | undefined> = context(
 );
 
 export const accessJevToken = jevToken.access;
-export const injectJevToken = (token: string): Injector => {
-  const injectJev = jevToken.inject(() => token);
-  if (token === "") {
-    return pipe(injectRespanToken(""), injectJev);
-  }
-  return injectJev;
-};
+export const injectJevToken = (token: string): Injector =>
+  jevToken.inject(() => token);
 
 export const jevThinkingLevelInstructions = decisionThinkingLevelInstructions;
 export const jevThinkingLevelCriteria = decisionThinkingLevelCriteria;

@@ -231,7 +231,7 @@ Deno.test(
         return Promise.resolve([{
           type: "tool_call" as const,
           isOwn: true as const,
-          name: "send_emial", // typo, not registered
+          name: "invented_tool", // hallucinated tool, not registered
           parameters: { to: "x@y.com" },
           id: "fake-call-1",
           timestamp: Date.now(),

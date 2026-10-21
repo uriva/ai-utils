@@ -375,12 +375,19 @@ const rawStateToSpan = (state: unknown): RespanSpan => {
 export const stateToSpan = (state: unknown): RespanSpan =>
   sanitizeSpanWellFormed(rawStateToSpan(state));
 
+const normalizeNoulInstruction = (instr: string): string => {
+  const withoutWhether = instr.replace(/^whether\s+(?:or\s+not\s+)?/i, "");
+  if (withoutWhether === instr || !withoutWhether) return instr;
+  const capitalized = withoutWhether[0].toUpperCase() + withoutWhether.slice(1);
+  return capitalized.replace(/\bis\s+classified\s+as\b/gi, "is");
+};
+
 const formatNoulDefinition = (
   q: NoulDecisionQuestion,
   name: string,
 ): string => {
   const parts = [
-    q.instructions || name,
+    q.instructions ? normalizeNoulInstruction(q.instructions) : name,
     q.criteria?.true ? `Present if: ${q.criteria.true}.` : "",
     q.criteria?.false ? `Absent if: ${q.criteria.false}.` : "",
   ].filter(Boolean);
