@@ -16,7 +16,11 @@ import {
   routeThinkingLevel,
   type ScoreDecisionAnswer,
 } from "./decisionModel.ts";
-import type { ModelTier } from "./utils.ts";
+import {
+  decisionThinkingLevelCriteria,
+  decisionThinkingLevelInstructions,
+  type ModelTier,
+} from "./utils.ts";
 
 export {
   decideCleanupWithDecisionModel as decideCleanupWithRespan,
@@ -26,8 +30,10 @@ export {
   routeThinkingLevel,
 };
 
-export const respanApiUrl = "https://api.respan.ai/api/v1/scores";
-export const defaultRespanModel = "span-01-free";
+export const respanApiUrl = "https://api.respan.ai/api/v1/decisions";
+export const respanScoresApiUrl = "https://api.respan.ai/api/v1/scores";
+export const defaultRespanModel = "span-02";
+export const fallbackRespanModel = "span-01-free";
 export const proRespanModel = "span-01-pro";
 const rmmbrUrl = "https://rmmbr.net";
 
@@ -38,6 +44,11 @@ const respanUrlInjection: Injection<() => string> = context(
 export const accessRespanUrl = respanUrlInjection.access;
 export const injectRespanUrl = (url: string): Injector =>
   respanUrlInjection.inject(() => url);
+
+const resolveScoresUrl = (): string => {
+  const current = accessRespanUrl();
+  return current === respanApiUrl ? respanScoresApiUrl : current;
+};
 
 const respanToken: Injection<() => string | undefined> = context(
   (): string | undefined => Deno.env.get("RESPAN_API_KEY"),
@@ -71,9 +82,11 @@ export type RespanBehaviorResult = {
 
 export type RespanScoreResponse = {
   model: string;
-  results: RespanBehaviorResult[];
+  answers?: Record<string, DecisionAnswer>;
+  results?: RespanBehaviorResult[];
   usage?: {
     input_tokens: number;
+    output_tokens?: number;
   };
 };
 
@@ -521,8 +534,13 @@ const parseScoresToAnswers = (
   );
 };
 
-const postRespan = (token: string, body: string, timeoutMs: number) =>
-  fetch(accessRespanUrl(), {
+const postRespanToUrl = (
+  url: string,
+  token: string,
+  body: string,
+  timeoutMs: number,
+) =>
+  fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -532,7 +550,37 @@ const postRespan = (token: string, body: string, timeoutMs: number) =>
     signal: AbortSignal.timeout(timeoutMs),
   });
 
+const postRespan = (token: string, body: string, timeoutMs: number) =>
+  postRespanToUrl(accessRespanUrl(), token, body, timeoutMs);
+
 const isDepletedStatus = (status: number) => status === 429 || status === 402;
+
+const toSpan01FallbackPayload = (
+  payload: string,
+  targetModel: string,
+): string | undefined => {
+  try {
+    const parsed = JSON.parse(payload);
+    if (
+      typeof parsed !== "object" || parsed === null || !("questions" in parsed)
+    ) {
+      return undefined;
+    }
+    const questions = parsed.questions as Record<string, DecisionQuestion>;
+    const qKeys = Object.keys(questions);
+    const isRouteOnly = qKeys.length === 1 && qKeys[0] === "thinking_level";
+    const behaviors = isRouteOnly
+      ? [respanReasoningBehavior]
+      : buildBehaviorsForQuestions(questions);
+    return JSON.stringify({
+      model: targetModel,
+      span: stateToSpan(parsed.state),
+      behaviors,
+    });
+  } catch {
+    return undefined;
+  }
+};
 
 const fetchRespanWithFallback = async (
   token: string,
@@ -543,21 +591,49 @@ const fetchRespanWithFallback = async (
 
   if (
     isDepletedStatus(response.status) &&
-    payload.includes(defaultRespanModel)
+    payload.includes(`"model":"${defaultRespanModel}"`)
+  ) {
+    const span01Payload = toSpan01FallbackPayload(payload, fallbackRespanModel);
+    if (span01Payload) {
+      await response.body?.cancel();
+      const fallbackRes = await postRespanToUrl(
+        resolveScoresUrl(),
+        token,
+        span01Payload,
+        timeoutMs,
+      );
+      if (isDepletedStatus(fallbackRes.status)) {
+        await fallbackRes.body?.cancel();
+        return postRespanToUrl(
+          resolveScoresUrl(),
+          token,
+          span01Payload.replaceAll(fallbackRespanModel, proRespanModel),
+          timeoutMs,
+        );
+      }
+      return fallbackRes;
+    }
+  }
+
+  if (
+    isDepletedStatus(response.status) &&
+    payload.includes(fallbackRespanModel)
   ) {
     await response.body?.cancel();
-    return postRespan(
+    return postRespanToUrl(
+      resolveScoresUrl(),
       token,
-      payload.replaceAll(defaultRespanModel, proRespanModel),
+      payload.replaceAll(fallbackRespanModel, proRespanModel),
       timeoutMs,
     );
   }
 
   if (response.status === 402 && payload.includes(proRespanModel)) {
     await response.body?.cancel();
-    return postRespan(
+    return postRespanToUrl(
+      resolveScoresUrl(),
       token,
-      payload.replaceAll(proRespanModel, defaultRespanModel),
+      payload.replaceAll(proRespanModel, fallbackRespanModel),
       timeoutMs,
     );
   }
@@ -614,14 +690,18 @@ export const callRespanDecisionModel = async (
   }
   if (empty(Object.keys(questions))) return {};
 
-  const span = stateToSpan(state);
-  const behaviors = buildBehaviorsForQuestions(questions);
-
-  const payload = JSON.stringify({
-    model: Deno.env.get("RESPAN_MODEL") || defaultRespanModel,
-    span,
-    behaviors,
-  });
+  const model = Deno.env.get("RESPAN_MODEL") || defaultRespanModel;
+  const payload = model.startsWith("span-01")
+    ? JSON.stringify({
+      model,
+      span: stateToSpan(state),
+      behaviors: buildBehaviorsForQuestions(questions),
+    })
+    : JSON.stringify({
+      model,
+      state,
+      questions,
+    }).toWellFormed();
 
   const memCached = inMemoryDecisionCache.get(payload);
   if (memCached && Date.now() < memCached.expiresAt) {
@@ -641,7 +721,9 @@ export const callRespanDecisionModel = async (
       }
       return rmmbrDecisionCaller(token, payload);
     })();
-  const answers = parseScoresToAnswers(questions, response.results ?? []);
+  const answers = response.answers
+    ? response.answers
+    : parseScoresToAnswers(questions, response.results ?? []);
   inMemoryDecisionCache.set(payload, {
     answers,
     expiresAt: Date.now() + memoryTtlMs,
@@ -672,6 +754,13 @@ const rawCallRespanRoute = async (
     throw new Error(`Respan API error (${response.status}): ${errorText}`);
   }
   const data = await response.json();
+  const choice = data?.answers?.thinking_level?.choice ??
+    data?.answers?.model_selection?.choice;
+  if (typeof choice === "string") {
+    return choice === "low" || choice === "lite"
+      ? ThinkingLevel.LOW
+      : ThinkingLevel.HIGH;
+  }
   const result = (data?.results as RespanBehaviorResult[] | undefined)?.find(
     (r) => r.id === "requires_high_thinking" || r.id === "requires_flash",
   );
@@ -710,12 +799,24 @@ export const routeThinkingLevelWithRespan = async (
     throw new Error("No Respan token available");
   }
 
-  const span = stateToSpan(state);
-  const payload = JSON.stringify({
-    model: Deno.env.get("RESPAN_MODEL") || defaultRespanModel,
-    span,
-    behaviors: [respanReasoningBehavior],
-  });
+  const model = Deno.env.get("RESPAN_MODEL") || defaultRespanModel;
+  const payload = model.startsWith("span-01")
+    ? JSON.stringify({
+      model,
+      span: stateToSpan(state),
+      behaviors: [respanReasoningBehavior],
+    })
+    : JSON.stringify({
+      model,
+      state,
+      questions: {
+        thinking_level: {
+          type: "choice",
+          instructions: decisionThinkingLevelInstructions,
+          criteria: decisionThinkingLevelCriteria,
+        },
+      },
+    }).toWellFormed();
 
   const memCached = inMemoryRouteCache.get(payload);
   if (memCached && Date.now() < memCached.expiresAt) {

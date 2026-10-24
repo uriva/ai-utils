@@ -49,10 +49,16 @@ export type ScoreDecisionQuestion = {
   criteria: string[];
 };
 
+export type NumberDecisionQuestion = {
+  type: "number";
+  instructions?: string;
+};
+
 export type DecisionQuestion =
   | ChoiceDecisionQuestion
   | NoulDecisionQuestion
-  | ScoreDecisionQuestion;
+  | ScoreDecisionQuestion
+  | NumberDecisionQuestion;
 
 export type ChoiceDecisionAnswer = {
   type: "choice";
@@ -74,10 +80,18 @@ export type ScoreDecisionAnswer = {
   probabilities?: Record<string, number>;
 };
 
+export type NumberDecisionAnswer = {
+  type: "number";
+  number: number;
+  text?: string;
+  confidence?: number;
+};
+
 export type DecisionAnswer =
   | ChoiceDecisionAnswer
   | NoulDecisionAnswer
-  | ScoreDecisionAnswer;
+  | ScoreDecisionAnswer
+  | NumberDecisionAnswer;
 
 export type DecisionModelCaller = (
   state: unknown,
@@ -374,6 +388,7 @@ export const parseDecisionAnswer = (
   if (answer.type === "choice") return answer.choice;
   if (answer.type === "noul") return answer.noul >= 0.5;
   if (answer.type === "score") return answer.score;
+  if (answer.type === "number") return answer.number;
   return undefined;
 };
 

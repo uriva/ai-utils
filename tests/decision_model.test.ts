@@ -267,12 +267,15 @@ Deno.test(
 );
 
 Deno.test(
-  "Respan falls back from defaultRespanModel to proRespanModel on 429 quota exhaustion",
+  "Respan uses span-02 by default and falls back to span-01-free and span-01-pro on 429/402 quota exhaustion",
   async () => {
     const requestedModels: string[] = [];
     const server = Deno.serve({ port: 0 }, async (req) => {
       const body = await req.json();
       requestedModels.push(body.model);
+      if (body.model === "span-02") {
+        return new Response("Credits depleted", { status: 402 });
+      }
       if (body.model === "span-01-free") {
         return new Response("Daily free quota exceeded", { status: 429 });
       }
@@ -312,7 +315,11 @@ Deno.test(
             answers.urgency.type === "noul" && answers.urgency.noul > 0.9,
             true,
           );
-          assertEquals(requestedModels, ["span-01-free", "span-01-pro"]);
+          assertEquals(requestedModels, [
+            "span-02",
+            "span-01-free",
+            "span-01-pro",
+          ]);
         });
       });
     });
@@ -380,15 +387,15 @@ Deno.test(
       await req.json();
       return new Response(
         JSON.stringify({
-          model: "span-01-free",
-          results: [
-            {
-              id: "requires_high_thinking",
-              p_present: 0.02,
-              p_absent: 0.96,
-              p_not_observable: 0.02,
+          model: "span-02",
+          answers: {
+            thinking_level: {
+              type: "choice",
+              choice: "low",
+              confidence: 0.98,
+              probabilities: { low: 0.99, high: 0.01 },
             },
-          ],
+          },
         }),
         { headers: { "Content-Type": "application/json" } },
       );
