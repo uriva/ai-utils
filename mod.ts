@@ -291,6 +291,8 @@ export {
   geminiThinkingConfig,
   injectGeminiModelVersions,
   injectGeminiToken,
+  isTextLikeGeminiMimeType,
+  maxGeminiTextAttachmentBytes,
   validateSchema,
   validateZodSchema,
   zodToGeminiParameters,
@@ -307,6 +309,7 @@ export {
   invalidateGeminiContextCache,
 } from "./src/geminiContextCache.ts";
 export {
+  getOversizedMediaText,
   injectGeminiErrorLogger,
   injectGeminiModelCallTimeoutMs,
   injectPromptBlockedLogger,

@@ -174,7 +174,9 @@ const isUnsupportedMimeTypeError = (error: Error) =>
 
 const isTokenLimitExceeded = (error: Error) =>
   "status" in error && (error as { status: number }).status === 400 &&
-  error.message.includes("token count exceeds");
+  (error.message.includes("token count exceeds") ||
+    (error.message.includes("token count") &&
+      error.message.includes("exceeds the maximum number of tokens")));
 
 const isImageProcessingOrInternalError = (error: Error) =>
   error.message.includes("Unable to process input image") ||
@@ -1456,35 +1458,59 @@ const getCorruptedMediaText = (attachments: MediaAttachment[]) =>
     }>`
     : "";
 
-const stripAllCorruptedFileAttachments = (
-  events: GeminiHistoryEvent[],
-): {
-  updatedHistory: GeminiHistoryEvent[];
-  replacements: Record<string, GeminiHistoryEvent>;
-} => {
-  const replacements: Record<string, GeminiHistoryEvent> = {};
-  const updatedHistory = map(
-    (event: GeminiHistoryEvent): GeminiHistoryEvent => {
-      if (!("attachments" in event) || !event.attachments) return event;
-      const fileAttachments = event.attachments.filter((att) =>
-        att.kind === "file"
-      );
-      if (empty(fileAttachments)) return event;
-      const placeholder = getCorruptedMediaText(fileAttachments);
-      const kept = event.attachments.filter((att) => att.kind !== "file");
-      const updated = {
-        ...event,
-        ...event.type === "tool_result"
-          ? { result: event.result + placeholder }
-          : { text: ((event as { text?: string }).text ?? "") + placeholder },
-        attachments: empty(kept) ? undefined : kept,
-      } as GeminiHistoryEvent;
-      replacements[event.id] = updated;
-      return updated;
-    },
-  )(events);
-  return { updatedHistory, replacements };
-};
+export const getOversizedMediaText = (
+  attachments: MediaAttachment[],
+): string =>
+  !empty(attachments)
+    ? ` <media file too large for model context: ${
+      attachments.map((a: MediaAttachment) => a.caption || a.mimeType)
+        .join(", ")
+    }>`
+    : "";
+
+const stripAllFileAttachmentsWithPlaceholder =
+  (getPlaceholder: (attachments: MediaAttachment[]) => string) =>
+  (
+    events: GeminiHistoryEvent[],
+  ): {
+    updatedHistory: GeminiHistoryEvent[];
+    replacements: Record<string, GeminiHistoryEvent>;
+  } => {
+    const replacements: Record<string, GeminiHistoryEvent> = {};
+    const updatedHistory = map(
+      (event: GeminiHistoryEvent): GeminiHistoryEvent => {
+        if (!("attachments" in event) || !event.attachments) return event;
+        const fileAttachments = event.attachments.filter((att) =>
+          att.kind === "file"
+        );
+        if (empty(fileAttachments)) return event;
+        const placeholder = getPlaceholder(fileAttachments);
+        const kept = event.attachments.filter((att) => att.kind !== "file");
+        const updated = {
+          ...event,
+          ...event.type === "tool_result"
+            ? { result: event.result + placeholder }
+            : { text: ((event as { text?: string }).text ?? "") + placeholder },
+          attachments: empty(kept) ? undefined : kept,
+        } as GeminiHistoryEvent;
+        replacements[event.id] = updated;
+        return updated;
+      },
+    )(events);
+    return { updatedHistory, replacements };
+  };
+
+const stripAllCorruptedFileAttachments = stripAllFileAttachmentsWithPlaceholder(
+  getCorruptedMediaText,
+);
+
+const stripAllFileAttachments = stripAllFileAttachmentsWithPlaceholder(
+  getExpiredMediaText,
+);
+
+const stripAllOversizedFileAttachments = stripAllFileAttachmentsWithPlaceholder(
+  getOversizedMediaText,
+);
 
 const stripAllCorruptedFileAttachmentsAndRetry = async (
   originalError: Error,
@@ -1506,34 +1532,40 @@ const stripAllCorruptedFileAttachmentsAndRetry = async (
   );
 };
 
-const stripAllFileAttachments = (
+const recoverFromTokenLimitExceeded = async (
+  originalError: Error,
   events: GeminiHistoryEvent[],
-): {
-  updatedHistory: GeminiHistoryEvent[];
-  replacements: Record<string, GeminiHistoryEvent>;
-} => {
-  const replacements: Record<string, GeminiHistoryEvent> = {};
-  const updatedHistory = map(
-    (event: GeminiHistoryEvent): GeminiHistoryEvent => {
-      if (!("attachments" in event) || !event.attachments) return event;
-      const fileAttachments = event.attachments.filter((att) =>
-        att.kind === "file"
-      );
-      if (empty(fileAttachments)) return event;
-      const placeholder = getExpiredMediaText(fileAttachments);
-      const kept = event.attachments.filter((att) => att.kind !== "file");
-      const updated = {
-        ...event,
-        ...event.type === "tool_result"
-          ? { result: event.result + placeholder }
-          : { text: ((event as { text?: string }).text ?? "") + placeholder },
-        attachments: empty(kept) ? undefined : kept,
-      } as GeminiHistoryEvent;
-      replacements[event.id] = updated;
-      return updated;
-    },
-  )(events);
-  return { updatedHistory, replacements };
+  eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
+  disableStreaming?: boolean,
+): Promise<GeminiOutput> => {
+  const stripped = stripAllOversizedFileAttachments(events);
+  if (nonempty(Object.keys(stripped.replacements))) {
+    console.warn(
+      "Stripping file attachments due to token limit exceeded:",
+      originalError.message,
+    );
+    return await callGeminiWithFixHistory(
+      eventsToRequest,
+      disableStreaming,
+    )(stripped.updatedHistory);
+  }
+  const truncated = events.length > 1
+    ? filterOrphanedToolResults(events.slice(Math.floor(events.length / 2)))
+    : events;
+  if (nonempty(truncated) && truncated.length < events.length) {
+    const totalTokens = sum(await map(estimateTokens)(events));
+    console.warn(
+      `Token limit exceeded (estimated ${totalTokens} tokens, ${events.length} events). Dropping oldest half.`,
+    );
+    return await callGeminiWithFixHistory(
+      eventsToRequest,
+      disableStreaming,
+    )(truncated);
+  }
+  const totalTokens = sum(await map(estimateTokens)(events));
+  throw new Error(
+    `Token limit exceeded (estimated ${totalTokens} tokens, ${events.length} events). This should never happen due to history compaction.`,
+  );
 };
 
 export const stripAllExpiredFiles = async (
@@ -1593,9 +1625,11 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
     } catch (error) {
       const err = normalizeError(error);
       if (isTokenLimitExceeded(err)) {
-        const totalTokens = sum(await map(estimateTokens)(events));
-        throw new Error(
-          `Token limit exceeded (estimated ${totalTokens} tokens, ${events.length} events). This should never happen due to history compaction.`,
+        return recoverFromTokenLimitExceeded(
+          err,
+          events,
+          eventsToRequest,
+          disableStreaming,
         );
       }
       if (isFileNotActiveError(err)) {

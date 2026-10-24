@@ -1,8 +1,13 @@
 import { assert, assertEquals } from "@std/assert";
 import {
   capEventsToTokenBudget,
+  getOversizedMediaText,
   injectGeminiSdkExchange,
 } from "../src/geminiAgent.ts";
+import {
+  injectRawUploadBlobToGemini,
+  maxGeminiTextAttachmentBytes,
+} from "../src/gemini.ts";
 import {
   estimateTokensLocal,
   type HistoryEvent,
@@ -419,6 +424,146 @@ Deno.test(
       `Expected runAgent not to block on stalled decision model, but took ${
         Math.round(elapsedMs)
       }ms`,
+    );
+  },
+);
+
+Deno.test(
+  "runAgent recovers from Gemini token limit exceeded caused by oversized file attachment",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text:
+          "Please improve the design of this site [Attached file: text/html - Download URL: https://example.com/site.html]",
+        attachments: [
+          {
+            kind: "file",
+            mimeType: "text/html",
+            fileUri:
+              "https://generativelanguage.googleapis.com/v1beta/files/hugehtml123",
+          },
+        ],
+      }),
+    ];
+    let callCount = 0;
+
+    await pipe(
+      injectDecisionModel(() => Promise.resolve({})),
+      injectGeminiSdkExchange((_signal, { req }) => {
+        callCount++;
+        const contents = Array.isArray(req.contents) ? req.contents : [];
+        const hasFileData = contents.some((c) =>
+          typeof c === "object" && c !== null && "parts" in c &&
+          Array.isArray(c.parts) &&
+          c.parts.some((p) => "fileData" in p && p.fileData)
+        );
+        if (hasFileData) {
+          const err = new Error(
+            "The input token count exceeds the maximum number of tokens allowed (1048576).",
+          );
+          Object.assign(err, { status: 400 });
+          return Promise.reject(err);
+        }
+        return Promise.resolve({
+          parts: [{
+            text: "I can fetch the HTML from the download URL and update it.",
+            thoughtSignature: "sig-ok",
+          }],
+          finishReason: "STOP",
+        });
+      }),
+      injectAccessHistory(() => Promise.resolve(history)),
+      injectOutputEvent((event) => {
+        history.push(event);
+        return Promise.resolve();
+      }),
+    )(runAgent)({
+      maxIterations: 1,
+      tools: [],
+      prompt: "Reply briefly.",
+      timezoneIANA: "UTC",
+    });
+
+    assertEquals(callCount, 2);
+    const utterances = history.filter((e) => e.type === "own_utterance");
+    assertEquals(utterances.length, 1);
+  },
+);
+
+Deno.test(
+  "runAgent degrades oversized inline text attachment without uploading it to Gemini",
+  async () => {
+    const oversizedHtml = "<html><body>" +
+      "A".repeat(maxGeminiTextAttachmentBytes + 1024) + "</body></html>";
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text:
+          "Please improve this page [Attached file: text/html - Download URL: https://example.com/page.html]",
+        attachments: [
+          {
+            kind: "inline",
+            mimeType: "text/html",
+            dataBase64: btoa(oversizedHtml),
+          },
+        ],
+      }),
+    ];
+    let uploadCalled = false;
+    let receivedFileData = false;
+
+    await pipe(
+      injectDecisionModel(() => Promise.resolve({})),
+      injectRawUploadBlobToGemini(() => () => {
+        uploadCalled = true;
+        return Promise.resolve({
+          geminiUri:
+            "https://generativelanguage.googleapis.com/v1beta/files/unexpected",
+          mimeType: "text/html",
+        });
+      }),
+      injectGeminiSdkExchange((_signal, { req }) => {
+        const contents = Array.isArray(req.contents) ? req.contents : [];
+        receivedFileData = contents.some((c) =>
+          typeof c === "object" && c !== null && "parts" in c &&
+          Array.isArray(c.parts) &&
+          c.parts.some((p) => "fileData" in p && p.fileData)
+        );
+        return Promise.resolve({
+          parts: [{
+            text: "I will inspect the HTML via the download link.",
+            thoughtSignature: "sig-ok",
+          }],
+          finishReason: "STOP",
+        });
+      }),
+      injectAccessHistory(() => Promise.resolve(history)),
+      injectOutputEvent((event) => {
+        history.push(event);
+        return Promise.resolve();
+      }),
+    )(runAgent)({
+      maxIterations: 1,
+      tools: [],
+      prompt: "Reply briefly.",
+      timezoneIANA: "UTC",
+    });
+
+    assertEquals(uploadCalled, false);
+    assertEquals(receivedFileData, false);
+    assertEquals(
+      history.filter((e) => e.type === "own_utterance").length,
+      1,
+    );
+    assert(
+      getOversizedMediaText([
+        {
+          kind: "file",
+          mimeType: "text/html",
+          fileUri: "https://example.com/page.html",
+        },
+      ]).includes("text/html"),
     );
   },
 );

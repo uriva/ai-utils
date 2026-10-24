@@ -489,6 +489,22 @@ export const uploadBlobToGemini = conditionalRetry(isRetryableUploadError)(
     accessRawUploadBlobToGemini()(blob, mimeType),
 );
 
+export const maxGeminiTextAttachmentBytes = 200 * 1024;
+
+const textLikeMimeTypes = new Set([
+  "application/json",
+  "application/xml",
+  "application/javascript",
+  "application/x-javascript",
+  "application/typescript",
+  "application/x-typescript",
+]);
+
+export const isTextLikeGeminiMimeType = (mimeType: string): boolean => {
+  const baseMime = mimeType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return baseMime.startsWith("text/") || textLikeMimeTypes.has(baseMime);
+};
+
 const fetchAndUploadToGemini = async (
   url: string,
   mimeType: string,
@@ -497,6 +513,25 @@ const fetchAndUploadToGemini = async (
   if (!res.ok || !res.body) {
     await res.body?.cancel();
     throw new Error(`Failed to fetch file for Gemini upload: ${url}`);
+  }
+  if (isTextLikeGeminiMimeType(mimeType)) {
+    const contentLength = Number(res.headers.get("content-length") || "0");
+    if (contentLength > maxGeminiTextAttachmentBytes) {
+      await res.body.cancel();
+      throw new Error(
+        `Text attachment exceeds maximum size for direct Gemini upload (${contentLength} bytes > ${maxGeminiTextAttachmentBytes} bytes)`,
+      );
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.byteLength > maxGeminiTextAttachmentBytes) {
+      throw new Error(
+        `Text attachment exceeds maximum size for direct Gemini upload (${bytes.byteLength} bytes > ${maxGeminiTextAttachmentBytes} bytes)`,
+      );
+    }
+    return accessRawUploadBlobToGemini()(
+      new Blob([bytes], { type: mimeType }),
+      mimeType,
+    );
   }
   return accessRawUploadBlobToGemini()(res.body, mimeType);
 };
@@ -514,14 +549,26 @@ const uploadToGeminiFromUrl = fetchAndUploadToGeminiCached;
 const uploadToGeminiFromFileInner = (
   mimeType: string,
   dataBase64: string,
-): Promise<UploadResult> =>
-  uploadBlobToGemini(
+): Promise<UploadResult> => {
+  const approxBytes = Math.floor(dataBase64.length * 0.75);
+  if (
+    isTextLikeGeminiMimeType(mimeType) &&
+    approxBytes > maxGeminiTextAttachmentBytes
+  ) {
+    return Promise.reject(
+      new Error(
+        `Text attachment exceeds maximum size for direct Gemini upload (${approxBytes} bytes > ${maxGeminiTextAttachmentBytes} bytes)`,
+      ),
+    );
+  }
+  return uploadBlobToGemini(
     new Blob(
       [Uint8Array.from(atob(dataBase64), (c) => c.charCodeAt(0))],
       { type: mimeType },
     ),
     mimeType,
   );
+};
 
 const uploadToGeminiFromFile = (
   mimeType: string,
