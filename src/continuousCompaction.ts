@@ -112,6 +112,33 @@ const markSpilledToSetter = (
   }
 };
 
+const unreadFreshWindowMs = 60_000;
+
+const isModelActionEvent = (e: HistoryEvent): boolean =>
+  e.type === "tool_call" ||
+  e.type === "own_utterance" ||
+  e.type === "own_edit_message";
+
+const hasModelActedSinceResult = (
+  events: HistoryEvent[],
+  toolResult: HistoryEvent & { type: "tool_result" },
+): boolean => {
+  const idx = events.findIndex((e) => e.id === toolResult.id);
+  return idx !== -1 &&
+    events
+      .slice(idx + 1)
+      .some((e) =>
+        e.timestamp >= toolResult.timestamp && isModelActionEvent(e)
+      );
+};
+
+const isUnreadFreshToolResult = (
+  events: HistoryEvent[],
+  toolResult: HistoryEvent & { type: "tool_result" },
+): boolean =>
+  !hasModelActedSinceResult(events, toolResult) &&
+  Date.now() - toolResult.timestamp < unreadFreshWindowMs;
+
 export const compactToolResultsInMemory = async (
   events: HistoryEvent[],
   { setScratch, generateTLDR }: CompactionOptions,
@@ -136,7 +163,12 @@ export const compactToolResultsInMemory = async (
       e.type === "tool_result"
     );
 
-    if (toolCall && toolResult && toolResult.result) {
+    if (
+      toolCall &&
+      toolResult &&
+      toolResult.result &&
+      !isUnreadFreshToolResult(events, toolResult)
+    ) {
       const threshold = getSpillThreshold(toolResult.timestamp, turnDistance);
       const { command } = toolCallCommandAndParams(toolCall);
 

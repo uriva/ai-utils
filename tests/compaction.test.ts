@@ -7,6 +7,7 @@ import {
   groupToolCallPairs,
   partitionSegments,
   segmentHistoryEvents,
+  shouldCompactHistory,
   summarizeEvents,
 } from "../src/compaction.ts";
 import { injectSecrets, llmTest } from "../test_helpers.ts";
@@ -900,6 +901,63 @@ Deno.test(
       segments.length,
       1,
       "In-flight unanswered turn must not be split into multiple segments despite 30m gap",
+    );
+  },
+);
+
+Deno.test(
+  "shouldCompactHistory and projectSettledSessions ignore already-compacted summary segments",
+  async () => {
+    const base = Date.now() - 10 * 24 * 60 * 60 * 1000;
+    const twoHours = 2 * 60 * 60 * 1000;
+    const summaryPayload =
+      "Past conversation history was compacted into a structured summary.\n" +
+      "Summary details ".repeat(300);
+    const events: HistoryEvent[] = [];
+    for (let i = 0; i < 15; i++) {
+      const start = base + i * twoHours;
+      events.push({
+        id: `summary-${start}-${start + 1000}`,
+        type: "own_thought",
+        isOwn: true,
+        text:
+          `[This summary covers the period from Jan 1 to Jan 1]\n\n${summaryPayload}`,
+        timestamp: start,
+      });
+      events.push({
+        id: `learn-${i}`,
+        type: "tool_call",
+        isOwn: true,
+        name: "learn_skill",
+        parameters: { skillName: "web" },
+        timestamp: start + 100,
+      });
+      events.push({
+        id: `learn-res-${i}`,
+        type: "tool_result",
+        isOwn: true,
+        toolCallId: `learn-${i}`,
+        result: "Skill learned",
+        timestamp: start + 200,
+      });
+    }
+    const activeStart = base + 20 * twoHours;
+    events.push(
+      makeParticipantUtterance("What workshops are this morning?", activeStart),
+    );
+
+    const totalTokens = sum(map(estimateTokensLocal)(events));
+    const shouldCompact = await shouldCompactHistory(
+      100_000,
+      events,
+      totalTokens,
+      segmentGapMs,
+      6_000,
+    );
+    assertEquals(
+      shouldCompact,
+      false,
+      "shouldCompactHistory must return false when past segments are already compacted summaries and totalTokens <= threshold",
     );
   },
 );

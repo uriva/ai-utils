@@ -519,3 +519,149 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "dynamic history projection - unread fresh tool result and deferred tool result are not compacted before the model sees them",
+  async () => {
+    const scratchStore = new Map<string, string>();
+    const scratchPad: ToolOutputScratchPad = {
+      get: (id: string) => Promise.resolve(scratchStore.get(id)),
+      set: (id: string, content: string) => {
+        scratchStore.set(id, content);
+        return Promise.resolve();
+      },
+      threshold: 20_000,
+    };
+
+    const pageWithGoogleDocLink = "Navigation header\n".repeat(1050) +
+      "Schedule link: https://docs.google.com/document/d/1pJPgZydMZS2rcfgrCgthYjAo4_qOjlJP8bn1qvK_hhs/edit?usp=sharing\n";
+
+    const now = Date.now();
+    const rawHistoryWithFreshReadUrl: HistoryEvent[] = [
+      {
+        id: "p1",
+        type: "participant_utterance",
+        isOwn: false,
+        name: "user",
+        text: "Find the schedule",
+        timestamp: now - 3000,
+      },
+      {
+        id: "call-read-url",
+        type: "tool_call",
+        name: "run_command",
+        parameters: {
+          command: "web/read_url",
+          params: { url: "https://example.com/festival" },
+        },
+        isOwn: true,
+        timestamp: now - 2000,
+      },
+      {
+        id: "res-read-url",
+        type: "tool_result",
+        toolCallId: "call-read-url",
+        result: pageWithGoogleDocLink,
+        isOwn: true,
+        timestamp: now - 500,
+      },
+    ];
+
+    const projectedFresh = await projectHistoryToModelContext({
+      rawHistory: rawHistoryWithFreshReadUrl,
+      scratchPad,
+    });
+    const freshToolRes = projectedFresh.find((e) => e.id === "res-read-url");
+    assertEquals(
+      freshToolRes?.type === "tool_result" &&
+        !freshToolRes.result.includes("Because time has passed") &&
+        freshToolRes.result.includes(
+          "https://docs.google.com/document/d/1pJPgZydMZS2rcfgrCgthYjAo4_qOjlJP8bn1qvK_hhs/edit?usp=sharing",
+        ),
+      true,
+      "Expected unread fresh 19k tool result to remain intact in model context so the model does not waste a turn calling read_scratch_file",
+    );
+
+    const deferredScheduleText = "Header line\n" +
+      "Workshop schedule details\n".repeat(220);
+    const rawHistoryWithDeferredResult: HistoryEvent[] = [
+      {
+        id: "p1",
+        type: "participant_utterance",
+        isOwn: false,
+        name: "user",
+        text: "What is the schedule today?",
+        timestamp: now - 90_000,
+      },
+      {
+        id: "call-thread",
+        type: "tool_call",
+        name: "run_in_new_thread",
+        parameters: { prompt: "Find schedule" },
+        isOwn: true,
+        timestamp: now - 85_000,
+      },
+      {
+        id: "ack-1",
+        type: "own_utterance",
+        isOwn: true,
+        text: "Checking the schedule now...",
+        timestamp: now - 84_000,
+      },
+      {
+        id: "p2",
+        type: "participant_utterance",
+        isOwn: false,
+        name: "user",
+        text: "Well?",
+        timestamp: now - 50_000,
+      },
+      {
+        id: "ack-2",
+        type: "own_utterance",
+        isOwn: true,
+        text: "Still scanning the festival pages, almost done!",
+        timestamp: now - 45_000,
+      },
+      {
+        id: "call-unlearn",
+        type: "tool_call",
+        name: "unlearn_skill",
+        parameters: { skillName: "web" },
+        isOwn: true,
+        timestamp: now - 44_000,
+      },
+      {
+        id: "res-unlearn",
+        type: "tool_result",
+        toolCallId: "call-unlearn",
+        result: "Unlearned web",
+        isOwn: true,
+        timestamp: now - 43_900,
+      },
+      {
+        id: "res-thread",
+        type: "tool_result",
+        toolCallId: "call-thread",
+        result: deferredScheduleText,
+        isOwn: true,
+        timestamp: now - 200,
+      },
+    ];
+
+    const projectedDeferred = await projectHistoryToModelContext({
+      rawHistory: rawHistoryWithDeferredResult,
+      scratchPad,
+    });
+    const deferredToolRes = projectedDeferred.find((e) =>
+      e.id === "res-thread"
+    );
+    assertEquals(
+      deferredToolRes?.type === "tool_result" &&
+        !deferredToolRes.result.includes("Because time has passed") &&
+        deferredToolRes.result.includes("Workshop schedule details"),
+      true,
+      "Expected unread fresh deferred tool result to remain intact even when its originating tool_call was several turns earlier",
+    );
+  },
+);

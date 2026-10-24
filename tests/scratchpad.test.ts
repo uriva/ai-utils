@@ -779,3 +779,120 @@ Deno.test(
     assertEquals(stored, code);
   },
 );
+
+Deno.test(
+  "read_scratch_file caps slice within maxToolOutputChars so middle lines are never trimmed by truncateToolOutput",
+  async () => {
+    const store = new Map<string, string>();
+    const scratchPad: ToolOutputScratchPad = {
+      set: (id, content) => {
+        store.set(id, content);
+        return Promise.resolve();
+      },
+      get: (id) => Promise.resolve(store.get(id)),
+      threshold: maxToolOutputChars,
+    };
+
+    const lines = Array.from(
+      { length: 260 },
+      (_, i) =>
+        `Line ${i + 1}: Workshop details and description text ${
+          "x".repeat(90)
+        }`,
+    );
+    const fullDoc = lines.join("\n");
+    store.set("schedule-doc", fullDoc);
+
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Read the schedule from scratch pad",
+      }),
+    ];
+
+    let callCount = 0;
+    let firstPageResult = "";
+    let secondPageStartLine = 1;
+    let secondPageResult = "";
+
+    await injectCallModel((events) => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve([
+          {
+            type: "tool_call" as const,
+            isOwn: true as const,
+            name: readScratchFileToolName,
+            parameters: { id: "schedule-doc", startLine: 1, limit: 200 },
+            id: "call-read-1",
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+      if (callCount === 2) {
+        const res1 = events.find((e) =>
+          e.type === "tool_result" && e.toolCallId === "call-read-1"
+        ) as Extract<HistoryEvent, { type: "tool_result" }> | undefined;
+        assert(res1, "Expected first read_scratch_file result");
+        firstPageResult = res1.result;
+        const match = firstPageResult.match(/startLine=(\d+)/);
+        secondPageStartLine = match ? Number(match[1]) : 201;
+        return Promise.resolve([
+          {
+            type: "tool_call" as const,
+            isOwn: true as const,
+            name: readScratchFileToolName,
+            parameters: {
+              id: "schedule-doc",
+              startLine: secondPageStartLine,
+              limit: 200,
+            },
+            id: "call-read-2",
+            timestamp: Date.now(),
+          },
+        ]);
+      }
+      const res2 = events.find((e) =>
+        e.type === "tool_result" && e.toolCallId === "call-read-2"
+      ) as Extract<HistoryEvent, { type: "tool_result" }> | undefined;
+      assert(res2, "Expected second read_scratch_file result");
+      secondPageResult = res2.result;
+      return Promise.resolve([
+        {
+          type: "own_utterance" as const,
+          isOwn: true as const,
+          text: "Read complete",
+          id: "done-read",
+          timestamp: Date.now(),
+        },
+      ]);
+    })(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        provider: "moonshot",
+        maxIterations: 4,
+        tools: [],
+        prompt: "Test assistant",
+        timezoneIANA: "UTC",
+        toolOutputScratchPad: scratchPad,
+      });
+    })();
+
+    assertEquals(
+      firstPageResult.includes("<content trimmed due to length>"),
+      false,
+      "read_scratch_file output must not exceed maxToolOutputChars and have middle lines trimmed",
+    );
+    assertEquals(
+      firstPageResult.includes(`Line ${secondPageStartLine - 1}:`),
+      true,
+      `First page should include Line ${
+        secondPageStartLine - 1
+      } right before continuation`,
+    );
+    assertEquals(
+      secondPageResult.includes(`Line ${secondPageStartLine}:`),
+      true,
+      `Second page should start seamlessly at Line ${secondPageStartLine} with zero missing lines`,
+    );
+  },
+);

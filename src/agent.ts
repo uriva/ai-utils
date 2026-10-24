@@ -256,6 +256,20 @@ const clampScratchLines = (n: number | undefined): number =>
     ? maxScratchReadLines
     : Math.min(n, maxScratchReadLines);
 
+const maxScratchSliceChars = maxToolOutputChars - 1000;
+
+const takeLinesWithinCharBudget = (
+  lines: string[],
+  budget: number,
+): string[] =>
+  lines.reduce<string[]>((acc, line) => {
+    const truncated = truncateScratchLine(line);
+    const currentLen = acc.join("\n").length;
+    return acc.length === 0 || currentLen + 1 + truncated.length <= budget
+      ? [...acc, truncated]
+      : acc;
+  }, []);
+
 const sliceScratchLines = (
   content: string,
   startLine: number,
@@ -265,10 +279,18 @@ const sliceScratchLines = (
   const total = lines.length;
   const safeStart = Math.max(1, startLine);
   const fromIdx = safeStart - 1;
-  const toIdx = Math.min(total, fromIdx + numLines);
-  const slice = lines.slice(fromIdx, toIdx).map(truncateScratchLine).join("\n");
+  const maxLines = lines.slice(fromIdx, Math.min(total, fromIdx + numLines));
+  const fittingLines = takeLinesWithinCharBudget(
+    maxLines,
+    maxScratchSliceChars,
+  );
+  const toIdx = fromIdx + fittingLines.length;
   const next = toIdx < total ? toIdx + 1 : undefined;
-  return { text: slice, nextStartLine: next, totalLines: total };
+  return {
+    text: fittingLines.join("\n"),
+    nextStartLine: next,
+    totalLines: total,
+  };
 };
 
 const jsFlagChars = new Set(["i", "m", "s", "u", "y", "g"]);

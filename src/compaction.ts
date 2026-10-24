@@ -246,6 +246,30 @@ export const compactionRetentionRatio = 0.1;
 export const defaultSegmentGapMs = 30 * 60 * 1000;
 export const defaultSettledHistoryTokenThreshold = 6_000;
 
+const isSkillLifecycleCall = (e: HistoryEvent): boolean =>
+  e.type === "tool_call" &&
+  (e.name === "learn_skill" || e.name === "unlearn_skill");
+
+const isSkillLifecycleEventIn =
+  (allEvents: HistoryEvent[]) => (e: HistoryEvent): boolean =>
+    isSkillLifecycleCall(e) ||
+    (e.type === "tool_result" &&
+      Boolean(
+        e.toolCallId &&
+          allEvents.some((x) =>
+            x.id === e.toolCallId && isSkillLifecycleCall(x)
+          ),
+      ));
+
+const isSummaryThought = (e: HistoryEvent): boolean =>
+  e.type === "own_thought" &&
+  (e.id.startsWith("summary-") || isCompactedSummaryText(e.text));
+
+const segmentNeedsCompaction = (events: HistoryEvent[]): boolean => {
+  const nonSkill = events.filter((e) => !isSkillLifecycleEventIn(events)(e));
+  return nonempty(nonSkill) && !nonSkill.every(isSummaryThought);
+};
+
 export const shouldCompactHistory = async (
   threshold: number,
   history: HistoryEvent[],
@@ -256,9 +280,12 @@ export const shouldCompactHistory = async (
   if (totalTokens > threshold) return true;
   const segments = segmentHistoryEvents(history, segmentGapMs);
   if (segments.length <= 1) return false;
-  const pastSegments = segments.slice(0, -1);
+  const uncompactedPastSegments = segments
+    .slice(0, -1)
+    .filter((s) => segmentNeedsCompaction(s.events));
+  if (empty(uncompactedPastSegments)) return false;
   const pastTokensList = await Promise.all(
-    pastSegments.map((s) => accessTokenCounter(s.events)),
+    uncompactedPastSegments.map((s) => accessTokenCounter(s.events)),
   );
   return sum(pastTokensList) > settledThreshold;
 };
@@ -505,9 +532,16 @@ export const projectSettledSessions = async (
   const processedSettled = await Promise.all(
     settledSegments.map(async (seg, idx) => {
       const segTokens = pastTokensList[idx];
-      if (shouldCompactSettled && segTokens >= 500) {
+      if (
+        shouldCompactSettled &&
+        segTokens >= 500 &&
+        segmentNeedsCompaction(seg.events)
+      ) {
         const summary = await summarizeSegmentToHistoryEvent(timezone)(seg);
-        return [summary];
+        const skillEvents = seg.events.filter(
+          isSkillLifecycleEventIn(seg.events),
+        );
+        return [summary, ...skillEvents];
       }
       return seg.events;
     }),
