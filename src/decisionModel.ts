@@ -3,6 +3,7 @@ import { empty } from "gamla";
 import type { z, ZodType } from "zod/v4";
 import { ThinkingLevel } from "@google/genai";
 import type { HistoryEvent, ParticipantUtterance, Skill } from "./agent.ts";
+import { hasInterveningConversationTurn } from "./compaction.ts";
 import {
   accessJevToken,
   callJevDecisionModel,
@@ -697,11 +698,47 @@ export type PastToolEpisode = {
   eventsCount: number;
 };
 
+const isLifecycleToolCallName = (name: string): boolean =>
+  name === "learn_skill" ||
+  name === "unlearn_skill" ||
+  name === cleanActiveMemoryToolName;
+
+const isCrossTurnToolEvent = (
+  history: HistoryEvent[],
+  callId: string,
+): boolean => {
+  const callIdx = history.findIndex(
+    (e) => e.type === "tool_call" && e.id === callId,
+  );
+  const resIdx = history.findIndex(
+    (e) => e.type === "tool_result" && e.toolCallId === callId,
+  );
+  if (callIdx === -1 || resIdx === -1) return false;
+  return hasInterveningConversationTurn(
+    history,
+    Math.min(callIdx, resIdx),
+    Math.max(callIdx, resIdx),
+  );
+};
+
 export const extractCandidateToolEpisodes = (
   history: HistoryEvent[],
 ): PastToolEpisode[] => {
+  const lifecycleCallIds = new Set(
+    history
+      .filter(
+        (e): e is Extract<HistoryEvent, { type: "tool_call" }> =>
+          e.type === "tool_call" && isLifecycleToolCallName(e.name),
+      )
+      .map((e) => e.id),
+  );
   const episodes: PastToolEpisode[] = [];
-  let currentEpisode: Partial<PastToolEpisode> | null = null;
+  let currentEpisode:
+    | (Partial<PastToolEpisode> & {
+      hasCrossTurnTool?: boolean;
+      hasReplyAfterTools?: boolean;
+    })
+    | null = null;
   let turnIdx = 0;
 
   for (let i = 0; i < history.length; i++) {
@@ -711,6 +748,11 @@ export const extractCandidateToolEpisodes = (
         currentEpisode &&
         currentEpisode.toolCalls &&
         currentEpisode.toolCalls.length > 0 &&
+        currentEpisode.toolResultsSummary &&
+        currentEpisode.toolResultsSummary.length >=
+          currentEpisode.toolCalls.length &&
+        !currentEpisode.hasCrossTurnTool &&
+        currentEpisode.hasReplyAfterTools &&
         currentEpisode.botText
       ) {
         episodes.push(currentEpisode as PastToolEpisode);
@@ -727,6 +769,8 @@ export const extractCandidateToolEpisodes = (
         toolCalls: [],
         toolResultsSummary: [],
         eventsCount: 1,
+        hasCrossTurnTool: false,
+        hasReplyAfterTools: false,
       };
     } else if (currentEpisode) {
       currentEpisode.endTime = e.timestamp;
@@ -734,14 +778,31 @@ export const extractCandidateToolEpisodes = (
       currentEpisode.eventsCount = (currentEpisode.eventsCount ?? 0) + 1;
 
       if (e.type === "tool_call") {
-        currentEpisode.toolCalls?.push({ name: e.name, params: e.parameters });
+        if (!isLifecycleToolCallName(e.name)) {
+          currentEpisode.toolCalls?.push({
+            name: e.name,
+            params: e.parameters,
+          });
+          currentEpisode.hasReplyAfterTools = false;
+          if (isCrossTurnToolEvent(history, e.id)) {
+            currentEpisode.hasCrossTurnTool = true;
+          }
+        }
       } else if (e.type === "tool_result") {
-        const preview = typeof e.result === "string"
-          ? e.result.slice(0, 150).toWellFormed().replace(/\n/g, " ")
-          : "";
-        currentEpisode.toolResultsSummary?.push(preview);
+        if (!e.toolCallId || !lifecycleCallIds.has(e.toolCallId)) {
+          const preview = typeof e.result === "string"
+            ? e.result.slice(0, 150).toWellFormed().replace(/\n/g, " ")
+            : "";
+          currentEpisode.toolResultsSummary?.push(preview);
+          if (e.toolCallId && isCrossTurnToolEvent(history, e.toolCallId)) {
+            currentEpisode.hasCrossTurnTool = true;
+          }
+        }
       } else if (e.type === "own_utterance") {
         currentEpisode.botText = e.text ?? "";
+        if ((currentEpisode.toolCalls?.length ?? 0) > 0) {
+          currentEpisode.hasReplyAfterTools = true;
+        }
       }
     }
   }

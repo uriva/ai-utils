@@ -325,3 +325,105 @@ Deno.test("runAgent auto-cleanup with decision model: automatically emits clean_
     "Raw storage retains original tool result",
   );
 });
+
+Deno.test("extractCandidateToolEpisodes and applyCleanActiveMemoryDirectives: skips skill-lifecycle-only or cross-turn deferred episodes and preserves cross-turn deferred results", () => {
+  const baseTime = 1700000000000;
+  const filler = "verbose diagnostic log output line from build system ".repeat(
+    500,
+  );
+
+  const history: HistoryEvent[] = [
+    // Turn 1: starts a deferred tool call (run_in_new_thread) whose result arrives in Turn 2
+    {
+      ...participantUtteranceTurn({
+        name: "user",
+        text: "Fetch live market data in background",
+      }),
+      timestamp: baseTime + 1000,
+    },
+    {
+      ...toolUseTurn({
+        id: "deferred-call-1",
+        name: "run_in_new_thread",
+        args: { prompt: "Fetch market data" },
+      }),
+      id: "deferred-call-1",
+      timestamp: baseTime + 1100,
+    },
+    {
+      ...ownUtteranceTurn("Starting background check now..."),
+      timestamp: baseTime + 1200,
+    },
+
+    // Turn 2: user asks "are you there?", bot replies, unlearns a skill, and then deferred-call-1's result arrives
+    {
+      ...participantUtteranceTurn({
+        name: "user",
+        text: "Are you still with me?",
+      }),
+      timestamp: baseTime + 2000,
+    },
+    {
+      ...ownUtteranceTurn("Yes, still here!"),
+      timestamp: baseTime + 2100,
+    },
+    {
+      ...toolUseTurn({
+        id: "unlearn-call-1",
+        name: "unlearn_skill",
+        args: { skillName: "web" },
+      }),
+      id: "unlearn-call-1",
+      timestamp: baseTime + 2200,
+    },
+    {
+      ...toolResultTurn({
+        toolCallId: "unlearn-call-1",
+        result: "Unlearned web",
+      }),
+      id: "unlearn-res-1",
+      timestamp: baseTime + 2250,
+    },
+    {
+      ...toolResultTurn({
+        toolCallId: "deferred-call-1",
+        result: `Live market data: ${filler}`,
+      }),
+      id: "deferred-res-1",
+      timestamp: baseTime + 2500,
+    },
+    {
+      ...ownUtteranceTurn("Here is the action plan based on the market data."),
+      timestamp: baseTime + 2600,
+    },
+
+    // Turn 3 (N-1)
+    {
+      ...participantUtteranceTurn({
+        name: "user",
+        text: "What about links?",
+      }),
+      timestamp: baseTime + 3000,
+    },
+    {
+      ...ownUtteranceTurn("Checking links..."),
+      timestamp: baseTime + 3100,
+    },
+
+    // Turn 4 (active)
+    {
+      ...participantUtteranceTurn({
+        name: "user",
+        text: "Send the links please",
+      }),
+      timestamp: baseTime + 4000,
+    },
+  ];
+
+  const candidates = extractCandidateToolEpisodes(history);
+  assertEquals(
+    candidates.length,
+    0,
+    "Episodes with only skill lifecycle calls or cross-turn deferred tool calls/results must not be compacted",
+  );
+});

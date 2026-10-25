@@ -18,6 +18,7 @@ import {
   cleanActiveMemoryToolRaw,
   defaultSegmentGapMs,
   defaultSettledHistoryTokenThreshold,
+  hasInterveningConversationTurn,
   isCompactedSummaryText,
   projectSettledSessions,
   segmentHistoryEvents,
@@ -2304,13 +2305,63 @@ export const normalizeHistoryForModel = (
   });
 
   const groupedResults = toolResultsByCallId(filteredHistory);
+  const firstResultIndexByCallId = new Map<string, number>();
+  filteredHistory.forEach((event, index) => {
+    if (
+      event.type === "tool_result" &&
+      event.toolCallId &&
+      !firstResultIndexByCallId.has(event.toolCallId)
+    ) {
+      firstResultIndexByCallId.set(event.toolCallId, index);
+    }
+  });
+  const deferredCallByResultId = new Map<string, HistoryEvent>();
   const consumedResultIds = new Set<string>();
   let hasPendingDeferredWithUserWaiting = false;
 
+  filteredHistory.forEach((event, index) => {
+    if (event.type !== "tool_call") return;
+    const matchedResults = (groupedResults.get(event.id) ?? [])
+      .filter((result) => !consumedResultIds.has(result.id));
+    if (empty(matchedResults)) return;
+    const firstResult = matchedResults[0];
+    const resultIdx = firstResultIndexByCallId.get(event.id);
+    if (
+      resultIdx !== undefined &&
+      hasInterveningConversationTurn(filteredHistory, index, resultIdx)
+    ) {
+      consumedResultIds.add(firstResult.id);
+      deferredCallByResultId.set(firstResult.id, event);
+    }
+  });
+
   const interleaved = filteredHistory.reduce<HistoryEvent[]>(
     (acc, event, index) => {
-      if (event.type === "tool_result") return acc;
+      if (event.type === "tool_result") {
+        const deferredCall = deferredCallByResultId.get(event.id);
+        return deferredCall ? [...acc, deferredCall, event] : acc;
+      }
       if (event.type !== "tool_call") return [...acc, event];
+      if (
+        [...deferredCallByResultId.values()].some((c) => c.id === event.id)
+      ) {
+        const firstResultIdx = firstResultIndexByCallId.get(event.id) ??
+          filteredHistory.length;
+        const sliceBeforeResult = filteredHistory.slice(
+          index + 1,
+          firstResultIdx,
+        );
+        return laterUnansweredUserMessage(
+            filteredHistory.slice(0, firstResultIdx),
+            index,
+          ) &&
+            !sliceBeforeResult.some(
+              (e) =>
+                e.type === "own_utterance" || e.type === "own_edit_message",
+            )
+          ? [...acc, ownUtteranceTurn(pendingDeferredAcknowledgement)]
+          : acc;
+      }
       const matchedResults = (groupedResults.get(event.id) ?? [])
         .filter((result) => !consumedResultIds.has(result.id));
       if (nonempty(matchedResults)) {
@@ -3444,6 +3495,7 @@ export const runAbstractAgent = (
       );
       scheduleHistoryCompaction(spec, normalizedHistory);
       const rawModelResponse = await modelResponsePromise;
+      if (await shouldAbort()) return;
 
       // Ordered post-response gates: each blocked response retries the model
       // call with a correctional thought (or aborts on persistent flooding).

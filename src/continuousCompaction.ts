@@ -6,6 +6,7 @@ import {
   unlearnSkillToolName,
 } from "./agent.ts";
 import { groupToolCallPairs } from "./compaction.ts";
+import { cleanActiveMemoryToolName } from "./utils.ts";
 
 export const getSpillThreshold = (
   timestamp: number,
@@ -139,11 +140,26 @@ const isUnreadFreshToolResult = (
   !hasModelActedSinceResult(events, toolResult) &&
   Date.now() - toolResult.timestamp < unreadFreshWindowMs;
 
+const isNonLifecycleToolPair = (pair: HistoryEvent[]): boolean => {
+  const toolCall = pair.find((
+    e,
+  ): e is Extract<HistoryEvent, { type: "tool_call" }> =>
+    e.type === "tool_call"
+  );
+  if (!toolCall) return false;
+  const { command } = toolCallCommandAndParams(toolCall);
+  return (
+    command !== learnSkillToolName &&
+    command !== unlearnSkillToolName &&
+    command !== cleanActiveMemoryToolName
+  );
+};
+
 export const compactToolResultsInMemory = async (
   events: HistoryEvent[],
   { setScratch, generateTLDR }: CompactionOptions,
 ): Promise<HistoryEvent[]> => {
-  const pairs = groupToolCallPairs(events);
+  const pairs = groupToolCallPairs(events).filter(isNonLifecycleToolPair);
   const candidates: {
     toolCall: HistoryEvent & { type: "tool_call" };
     toolResult: HistoryEvent & { type: "tool_result" };

@@ -12,6 +12,7 @@ import {
   historyHasPendingDeferredUserWaitingNudge,
   injectAccessHistory,
   injectOutputEvent,
+  injectShouldAbort,
   learnSkillToolName,
   maxUtteranceChars,
   normalizeHistoryForModel,
@@ -1786,6 +1787,16 @@ Deno.test("normalizeHistoryForModel: a real result for a late-resolving deferred
     "result" in results[0] && results[0].result.includes("TIMEOUT WAKEUP"),
     "the real deferred result must survive normalization",
   );
+  assertEquals(
+    normalized.at(-1)?.id,
+    "real-result",
+    "late-resolving deferred result must remain at its chronological arrival position at the tail",
+  );
+  assertEquals(
+    normalized.at(-2)?.id,
+    call.id,
+    "deferred tool_call must be paired immediately before its late-resolving result at the tail",
+  );
 });
 
 Deno.test("normalizeHistoryForModel: recent proactive task survives when participant replies afterwards", () => {
@@ -1856,6 +1867,64 @@ Deno.test(
     assertEquals(
       Boolean(lastContent.parts && lastContent.parts.length > 0),
       true,
+    );
+  },
+);
+
+Deno.test(
+  "runAbstractAgent aborts after callModel when shouldAbort becomes true while model call was in flight",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "First question" }),
+    ];
+    let aborted = false;
+    let toolExecuted = false;
+    const deferredTool = tool({
+      name: "run_in_new_thread",
+      description: "Run in new thread",
+      parameters: z.object({}),
+      handler: () => {
+        toolExecuted = true;
+        return Promise.resolve();
+      },
+    });
+    await injectShouldAbort(() => Promise.resolve(aborted))(
+      injectAccessHistory(() => Promise.resolve(history))(
+        injectOutputEvent((e) => {
+          history.push(e);
+          return Promise.resolve();
+        })(() =>
+          runAbstractAgent(
+            {
+              maxIterations: 3,
+              tools: [deferredTool],
+              prompt: "You are a helpful assistant.",
+              timezoneIANA: "UTC",
+            },
+            () => {
+              aborted = true;
+              return Promise.resolve([
+                toolUseTurn({
+                  id: "superseded-call",
+                  name: "run_in_new_thread",
+                  args: {},
+                }),
+                ownUtteranceTurn("Stale reply"),
+              ]);
+            },
+          )
+        ),
+      ),
+    )();
+    assertEquals(
+      toolExecuted,
+      false,
+      "Superseded run must not execute tool calls",
+    );
+    assertEquals(
+      history.length,
+      1,
+      "Superseded run must not emit stale events to history",
     );
   },
 );

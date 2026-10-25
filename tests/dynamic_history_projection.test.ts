@@ -663,5 +663,135 @@ Deno.test(
       true,
       "Expected unread fresh deferred tool result to remain intact even when its originating tool_call was several turns earlier",
     );
+    assertEquals(
+      projectedDeferred.at(-1)?.id,
+      "res-thread",
+      "Expected late-resolving deferred tool_result to stay at the end of projected history after intervening conversation turns",
+    );
+    assertEquals(
+      projectedDeferred.at(-2)?.id,
+      "call-thread",
+      "Expected originating deferred tool_call to be paired immediately before its late-resolving tool_result at the tail",
+    );
+  },
+);
+
+Deno.test(
+  "dynamic history projection - skill lifecycle and utterance events do not inflate turnDistance for tool result compaction",
+  async () => {
+    const scratchStore = new Map<string, string>();
+    const scratchPad: ToolOutputScratchPad = {
+      get: (id: string) => Promise.resolve(scratchStore.get(id)),
+      set: (id: string, content: string) => {
+        scratchStore.set(id, content);
+        return Promise.resolve();
+      },
+      threshold: 20_000,
+    };
+
+    const now = Date.now();
+    const apiPayload = "Market listing details line\n".repeat(200);
+    const rawHistory: HistoryEvent[] = [
+      {
+        id: "p1",
+        type: "participant_utterance",
+        isOwn: false,
+        name: "user",
+        text: "Fetch the active market listings",
+        timestamp: now - 120_000,
+      },
+      {
+        id: "call-fetch",
+        type: "tool_call",
+        name: "fetch_markets",
+        parameters: { category: "tech" },
+        isOwn: true,
+        timestamp: now - 115_000,
+      },
+      {
+        id: "res-fetch",
+        type: "tool_result",
+        toolCallId: "call-fetch",
+        result: apiPayload,
+        isOwn: true,
+        timestamp: now - 110_000,
+      },
+      {
+        id: "reply-1",
+        type: "own_utterance",
+        isOwn: true,
+        text: "Here is the summary of the markets.",
+        timestamp: now - 105_000,
+      },
+      {
+        id: "unlearn-1",
+        type: "tool_call",
+        name: "unlearn_skill",
+        parameters: { skillName: "web" },
+        isOwn: true,
+        timestamp: now - 104_000,
+      },
+      {
+        id: "unlearn-1-res",
+        type: "tool_result",
+        toolCallId: "unlearn-1",
+        result: "Unlearned web",
+        isOwn: true,
+        timestamp: now - 103_900,
+      },
+      {
+        id: "unlearn-2",
+        type: "tool_call",
+        name: "unlearn_skill",
+        parameters: { skillName: "browser" },
+        isOwn: true,
+        timestamp: now - 103_800,
+      },
+      {
+        id: "unlearn-2-res",
+        type: "tool_result",
+        toolCallId: "unlearn-2",
+        result: "Unlearned browser",
+        isOwn: true,
+        timestamp: now - 103_700,
+      },
+      {
+        id: "unlearn-3",
+        type: "tool_call",
+        name: "unlearn_skill",
+        parameters: { skillName: "automation" },
+        isOwn: true,
+        timestamp: now - 103_600,
+      },
+      {
+        id: "unlearn-3-res",
+        type: "tool_result",
+        toolCallId: "unlearn-3",
+        result: "Unlearned automation",
+        isOwn: true,
+        timestamp: now - 103_500,
+      },
+      {
+        id: "p2",
+        type: "participant_utterance",
+        isOwn: false,
+        name: "user",
+        text: "Give me the direct links from what you found",
+        timestamp: now - 5_000,
+      },
+    ];
+
+    const projected = await projectHistoryToModelContext({
+      rawHistory,
+      scratchPad,
+    });
+    const fetchRes = projected.find((e) => e.id === "res-fetch");
+    assertEquals(
+      fetchRes?.type === "tool_result" &&
+        !fetchRes.result.includes("Because time has passed") &&
+        fetchRes.result.includes("Market listing details line"),
+      true,
+      "Expected 5.6k tool result from 2 minutes ago to remain uncompacted when only skill lifecycle and utterance events followed it",
+    );
   },
 );

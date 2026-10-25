@@ -40,39 +40,68 @@ const isToolResult = (
 ): e is Extract<HistoryEvent, { type: "tool_result" }> =>
   e.type === "tool_result";
 
+const isConversationTurnEvent = (e: HistoryEvent): boolean =>
+  e.type === "participant_utterance" ||
+  e.type === "participant_edit_message" ||
+  e.type === "own_utterance" ||
+  e.type === "own_edit_message" ||
+  e.type === "external_event";
+
+export const hasInterveningConversationTurn = (
+  events: HistoryEvent[],
+  fromIndex: number,
+  toIndex: number,
+): boolean =>
+  toIndex > fromIndex + 1 &&
+  events.slice(fromIndex + 1, toIndex).some(isConversationTurnEvent);
+
 export const groupToolCallPairs = (
   events: HistoryEvent[],
 ): HistoryEvent[][] => {
-  // Build a map from tool_call id to its matching tool_results
   const callIdToResults = new Map<string, HistoryEvent[]>();
-  const matchedResultIds = new Set<string>();
-  for (const e of events) {
-    if (isToolResult(e) && e.toolCallId) {
-      const existing = callIdToResults.get(e.toolCallId);
-      if (existing) {
-        existing.push(e);
-      } else {
-        callIdToResults.set(e.toolCallId, [e]);
-      }
+  const firstResultIndexByCallId = new Map<string, number>();
+  events.forEach((e, i) => {
+    if (!isToolResult(e) || !e.toolCallId) return;
+    const existing = callIdToResults.get(e.toolCallId);
+    if (existing) {
+      existing.push(e);
+    } else {
+      callIdToResults.set(e.toolCallId, [e]);
+      firstResultIndexByCallId.set(e.toolCallId, i);
     }
-  }
-  // Walk events in order, emitting groups
-  const result: HistoryEvent[][] = [];
-  for (const e of events) {
-    if (matchedResultIds.has(e.id)) continue;
+  });
+  const deferredGroupByResultId = new Map<string, HistoryEvent[]>();
+  const matchedResultIds = new Set<string>();
+  const deferredCallIds = new Set<string>();
+  events.forEach((e, i) => {
+    if (!isToolCall(e)) return;
+    const results = callIdToResults.get(e.id);
+    const firstResultIdx = firstResultIndexByCallId.get(e.id);
+    if (
+      results &&
+      nonempty(results) &&
+      firstResultIdx !== undefined &&
+      hasInterveningConversationTurn(events, i, firstResultIdx)
+    ) {
+      deferredCallIds.add(e.id);
+      deferredGroupByResultId.set(results[0].id, [e, ...results]);
+      results.slice(1).forEach((r) => matchedResultIds.add(r.id));
+    }
+  });
+  return events.reduce<HistoryEvent[][]>((result, e) => {
+    if (matchedResultIds.has(e.id) || deferredCallIds.has(e.id)) return result;
+    const deferredGroup = deferredGroupByResultId.get(e.id);
+    if (deferredGroup) return [...result, deferredGroup];
     if (isToolCall(e)) {
       const results = callIdToResults.get(e.id);
-      if (results && results.length > 0) {
-        result.push([e, ...results]);
-        for (const r of results) matchedResultIds.add(r.id);
-      } else {
-        result.push([e]);
+      if (results && nonempty(results)) {
+        results.forEach((r) => matchedResultIds.add(r.id));
+        return [...result, [e, ...results]];
       }
-    } else {
-      result.push([e]);
+      return [...result, [e]];
     }
-  }
-  return result;
+    return [...result, [e]];
+  }, []);
 };
 
 export const isCompactedSummaryText = (text: string): boolean =>
@@ -624,6 +653,24 @@ const isDirectCleanCandidate = (
   event.id !== directive.toolCallId &&
   !(event.type === "tool_result" && event.toolCallId === directive.toolCallId);
 
+const isSameTurnToolPair = (
+  events: HistoryEvent[],
+  callId: string,
+): boolean => {
+  const callIdx = events.findIndex(
+    (e) => e.type === "tool_call" && e.id === callId,
+  );
+  const resIdx = events.findIndex(
+    (e) => e.type === "tool_result" && e.toolCallId === callId,
+  );
+  if (callIdx === -1 || resIdx === -1) return true;
+  return !hasInterveningConversationTurn(
+    events,
+    Math.min(callIdx, resIdx),
+    Math.max(callIdx, resIdx),
+  );
+};
+
 const collectCleanTargetCallIds = (
   events: HistoryEvent[],
   directive: {
@@ -637,16 +684,19 @@ const collectCleanTargetCallIds = (
     events
       .filter((event) => isDirectCleanCandidate(directive, event))
       .flatMap((event) =>
-        event.type === "tool_call"
+        event.type === "tool_call" && isSameTurnToolPair(events, event.id)
           ? [event.id]
-          : event.type === "tool_result" && event.toolCallId &&
-              event.toolCallId !== directive.toolCallId
+          : event.type === "tool_result" &&
+              event.toolCallId &&
+              event.toolCallId !== directive.toolCallId &&
+              isSameTurnToolPair(events, event.toolCallId)
           ? [event.toolCallId]
           : []
       ),
   );
 
 const isCleanTargetEvent = (
+  events: HistoryEvent[],
   directive: {
     start: number;
     end: number;
@@ -655,11 +705,29 @@ const isCleanTargetEvent = (
   },
   targetCallIds: Set<string>,
   event: HistoryEvent,
-): boolean =>
-  isDirectCleanCandidate(directive, event) ||
-  (event.type === "tool_call" && targetCallIds.has(event.id)) ||
-  (event.type === "tool_result" &&
-    Boolean(event.toolCallId && targetCallIds.has(event.toolCallId)));
+): boolean => {
+  if (
+    event.type === "tool_call" &&
+    !targetCallIds.has(event.id) &&
+    !isSameTurnToolPair(events, event.id)
+  ) {
+    return false;
+  }
+  if (
+    event.type === "tool_result" &&
+    event.toolCallId &&
+    !targetCallIds.has(event.toolCallId) &&
+    !isSameTurnToolPair(events, event.toolCallId)
+  ) {
+    return false;
+  }
+  return (
+    isDirectCleanCandidate(directive, event) ||
+    (event.type === "tool_call" && targetCallIds.has(event.id)) ||
+    (event.type === "tool_result" &&
+      Boolean(event.toolCallId && targetCallIds.has(event.toolCallId)))
+  );
+};
 
 const applyOneCleanDirective = (
   events: HistoryEvent[],
@@ -669,7 +737,7 @@ const applyOneCleanDirective = (
   let placedSummary = false;
   const result: HistoryEvent[] = [];
   for (const event of events) {
-    if (isCleanTargetEvent(directive, targetCallIds, event)) {
+    if (isCleanTargetEvent(events, directive, targetCallIds, event)) {
       if (directive.summary && !placedSummary) {
         result.push({
           id: `clean-summary-${directive.toolCallId}`,
@@ -738,7 +806,7 @@ export const cleanActiveMemoryToolRaw = (
     const spanBounds = { start, end };
     const targetCallIds = collectCleanTargetCallIds(history, spanBounds);
     const match = history.filter((e) =>
-      isCleanTargetEvent(spanBounds, targetCallIds, e)
+      isCleanTargetEvent(history, spanBounds, targetCallIds, e)
     );
     if (empty(match)) {
       return "Memory cleanup aborted: You cannot delete or summarize user messages (participant_utterance). Only select time spans containing tool results, tool calls, or thoughts.";
