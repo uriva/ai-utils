@@ -1,7 +1,6 @@
 import {
   accessCallModel,
   accessCallModelWrapper,
-  accessHistory,
   activeThinkingLevel,
   type AgentSpec,
   type CallModel,
@@ -13,18 +12,13 @@ import {
   injectScratchPad,
   injectStreamChunk,
   injectStreamThinkingChunk,
-  isDefaultCallModelWrapper,
   runAbstractAgent,
   sanitizeHistorySkillsForModel,
   searchPastHistoryTool,
 } from "./src/agent.ts";
 import { anthropicAgentCaller } from "./src/anthropicAgent.ts";
 import { runAudioTransportAgent } from "./src/audioTransportAgent.ts";
-import {
-  geminiAgentCaller,
-  prepareGeminiHistory,
-  warmGeminiContextCacheForSpec,
-} from "./src/geminiAgent.ts";
+import { geminiAgentCaller, prepareGeminiHistory } from "./src/geminiAgent.ts";
 import { validateZodSchema } from "./src/gemini.ts";
 import { inspectMediaUrlTool } from "./src/inspectMediaTool.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
@@ -107,18 +101,6 @@ const addBuiltinTools = (spec: AgentSpec): AgentSpec => {
 
 const runAgentInner = (spec: AgentSpec): Promise<void> => {
   const specWithBuiltins = addBuiltinTools(spec);
-  const usesGemini = specWithBuiltins.provider !== "moonshot" &&
-    specWithBuiltins.provider !== "anthropic";
-  if (usesGemini && isDefaultCallModelWrapper()) {
-    accessHistory()
-      .then((rawHistory) =>
-        warmGeminiContextCacheForSpec(
-          getSpecForTurn(specWithBuiltins, rawHistory),
-          rawHistory,
-        )
-      )
-      .catch(() => {});
-  }
 
   const dynamicCallModel = async (history: HistoryEvent[]) => {
     const specForTurn = getSpecForTurn(specWithBuiltins, history);
@@ -127,12 +109,9 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
     const thinkingLevel = usesGeminiThinking
       ? (specForTurn.thinkingLevel ?? activeThinkingLevel(history))
       : undefined;
-    const [preparedHistory] = await Promise.all([
-      prepareHistory(specForTurn)(sanitizeHistorySkillsForModel(history)),
-      ...(usesGeminiThinking && isDefaultCallModelWrapper()
-        ? [warmGeminiContextCacheForSpec(specForTurn, history)]
-        : []),
-    ]);
+    const preparedHistory = await prepareHistory(specForTurn)(
+      sanitizeHistorySkillsForModel(history),
+    );
     if (thinkingLevel !== undefined) {
       console.log(`[decision-model] thinkingLevel=${thinkingLevel}`);
     }
@@ -289,16 +268,6 @@ export {
   zodToGeminiParameters,
 } from "./src/gemini.ts";
 export { ThinkingLevel } from "@google/genai";
-export {
-  clearGeminiContextCacheMap,
-  geminiContextCacheBufferSeconds,
-  geminiContextCacheClientTtlSeconds,
-  geminiContextCacheId,
-  geminiContextCacheTtlSeconds,
-  getOrCreateGeminiContextCache,
-  injectGeminiContextCachingEnabled,
-  invalidateGeminiContextCache,
-} from "./src/geminiContextCache.ts";
 export {
   getOversizedMediaText,
   injectGeminiErrorLogger,

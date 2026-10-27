@@ -2,7 +2,6 @@ import {
   type Content,
   type FunctionCall,
   FunctionCallingConfigMode,
-  type FunctionDeclaration,
   type GenerateContentParameters,
   type GenerateContentResponseUsageMetadata,
   GoogleGenAI,
@@ -40,11 +39,9 @@ import {
   generateId,
   getStreamChunk,
   getStreamThinkingChunk,
-  type HistoryEvent,
   type HistoryEventWithMetadata,
   historyHasPendingDeferredUserWaitingNudge,
   injectIsMockModel,
-  isMockModelInjected,
   isRecord,
   type MediaAttachment,
   type MessageId,
@@ -92,11 +89,6 @@ import {
   syntheticTimeoutMarker,
 } from "./utils.ts";
 import { isCompactedSummaryText } from "./compaction.ts";
-import {
-  getOrCreateGeminiContextCache,
-  invalidateGeminiContextCache,
-  isGeminiContextCachingEnabled,
-} from "./geminiContextCache.ts";
 
 // Verbose [gemini-step]/[gemini-diag] request logging. On by
 // default; tests and noise-sensitive consumers can silence or redirect it.
@@ -419,173 +411,110 @@ const geminiSdkExchange = async (
   const handleStreamThinkingChunk = getStreamThinkingChunk();
   const sdk = new GoogleGenAI({ apiKey: accessGeminiToken() });
 
-  const rawSysInstr = req.config?.systemInstruction;
-  const rawTools = req.config?.tools as {
-    functionDeclarations?: FunctionDeclaration[];
-  }[] | undefined;
-  const rawToolConfig = req.config?.toolConfig;
-  let executionReq = req;
-  let usedCacheName: string | null = null;
-
-  if (
-    isGeminiContextCachingEnabled() &&
-    typeof rawSysInstr === "string" &&
-    !req.config?.cachedContent
-  ) {
-    const cacheName = await getOrCreateGeminiContextCache(
-      sdk,
-      req.model,
-      rawSysInstr,
-      rawTools,
-      rawToolConfig,
-    );
-    if (cacheName) {
-      usedCacheName = cacheName;
-      const {
-        systemInstruction: _removedSys,
-        tools: _removedTools,
-        toolConfig: _removedToolConfig,
-        ...restConfig
-      } = req.config ?? {};
-      executionReq = {
-        ...req,
-        config: {
-          ...restConfig,
-          cachedContent: cacheName,
-        },
-      };
-    }
-  }
-
   let finalUsageMetadata: TokenUsage | undefined;
   let finalFinishReason: string | undefined;
   let promptBlockReason: string | undefined;
   const accumulatedParts: Part[] = [];
 
-  try {
-    if (disableStreaming) {
-      const response = await sdk.models.generateContent(executionReq);
-      finalUsageMetadata = response.usageMetadata;
-      finalFinishReason = response.candidates?.[0]?.finishReason;
-      promptBlockReason = response.promptFeedback?.blockReason;
-      const parts = response.candidates?.[0]?.content?.parts ?? [];
-      usageDiag("buffered", finalUsageMetadata, finalFinishReason, parts);
-      logFunctionCallsMissingThoughtSignature(
-        req.model,
-        finalFinishReason,
-        parts,
-      );
+  if (disableStreaming) {
+    const response = await sdk.models.generateContent(req);
+    finalUsageMetadata = response.usageMetadata;
+    finalFinishReason = response.candidates?.[0]?.finishReason;
+    promptBlockReason = response.promptFeedback?.blockReason;
+    const parts = response.candidates?.[0]?.content?.parts ?? [];
+    usageDiag("buffered", finalUsageMetadata, finalFinishReason, parts);
+    logFunctionCallsMissingThoughtSignature(
+      req.model,
+      finalFinishReason,
+      parts,
+    );
+    for (const part of parts) {
+      if (
+        typeof part.text === "string" && !part.thought
+      ) {
+        await handleStreamChunk(part.text);
+      }
+      if (typeof part.text === "string" && part.thought) {
+        await handleStreamThinkingChunk(part.text);
+      }
+      accumulatedParts.push(part);
+    }
+  } else {
+    logGemini("[gemini-step] stream-await-start");
+    const responseStream = await sdk.models.generateContentStream(
+      req,
+    );
+    logGemini("[gemini-step] stream-await-ok");
+
+    let chunkCount = 0;
+    for await (const chunk of responseStream) {
+      chunkCount++;
+      if (chunkCount === 1) logGemini("[gemini-step] stream-first-chunk");
+      if (chunk.usageMetadata) {
+        finalUsageMetadata = chunk.usageMetadata;
+      }
+      if (chunk.promptFeedback?.blockReason) {
+        promptBlockReason = chunk.promptFeedback.blockReason;
+      }
+      const chunkFinishReason = chunk.candidates?.[0]?.finishReason;
+      if (chunkFinishReason) finalFinishReason = chunkFinishReason;
+      const parts = chunk.candidates?.[0]?.content?.parts ?? [];
       for (const part of parts) {
         if (
-          typeof part.text === "string" && !part.thought
+          typeof part.text === "string" && !part.thought &&
+          !part.thoughtSignature
         ) {
           await handleStreamChunk(part.text);
         }
         if (typeof part.text === "string" && part.thought) {
           await handleStreamThinkingChunk(part.text);
         }
-        accumulatedParts.push(part);
-      }
-    } else {
-      logGemini("[gemini-step] stream-await-start");
-      const responseStream = await sdk.models.generateContentStream(
-        executionReq,
-      );
-      logGemini("[gemini-step] stream-await-ok");
 
-      let chunkCount = 0;
-      for await (const chunk of responseStream) {
-        chunkCount++;
-        if (chunkCount === 1) logGemini("[gemini-step] stream-first-chunk");
-        if (chunk.usageMetadata) {
-          finalUsageMetadata = chunk.usageMetadata;
-        }
-        if (chunk.promptFeedback?.blockReason) {
-          promptBlockReason = chunk.promptFeedback.blockReason;
-        }
-        const chunkFinishReason = chunk.candidates?.[0]?.finishReason;
-        if (chunkFinishReason) finalFinishReason = chunkFinishReason;
-        const parts = chunk.candidates?.[0]?.content?.parts ?? [];
-        for (const part of parts) {
+        if (typeof part.text === "string") {
+          const lastPart = accumulatedParts[accumulatedParts.length - 1];
           if (
-            typeof part.text === "string" && !part.thought &&
-            !part.thoughtSignature
+            lastPart &&
+            typeof lastPart.text === "string" &&
+            lastPart.thought === part.thought &&
+            lastPart.thoughtSignature === part.thoughtSignature
           ) {
-            await handleStreamChunk(part.text);
+            lastPart.text += part.text;
+          } else {
+            accumulatedParts.push({ ...part });
           }
-          if (typeof part.text === "string" && part.thought) {
-            await handleStreamThinkingChunk(part.text);
-          }
-
-          if (typeof part.text === "string") {
-            const lastPart = accumulatedParts[accumulatedParts.length - 1];
-            if (
-              lastPart &&
-              typeof lastPart.text === "string" &&
-              lastPart.thought === part.thought &&
-              lastPart.thoughtSignature === part.thoughtSignature
-            ) {
-              lastPart.text += part.text;
-            } else {
-              accumulatedParts.push({ ...part });
-            }
-          } else if (part.functionCall) {
-            const lastPart = accumulatedParts[accumulatedParts.length - 1];
-            const isSameCall = Boolean(
-              lastPart?.functionCall &&
-                (part.functionCall.id && lastPart.functionCall.id
-                  ? part.functionCall.id === lastPart.functionCall.id
-                  : lastPart.functionCall.name === part.functionCall.name),
-            );
-            if (isSameCall && lastPart) {
-              lastPart.functionCall = part.functionCall;
-              if (part.thoughtSignature) {
-                lastPart.thoughtSignature = part.thoughtSignature;
-              }
-            } else {
-              accumulatedParts.push({ ...part });
+        } else if (part.functionCall) {
+          const lastPart = accumulatedParts[accumulatedParts.length - 1];
+          const isSameCall = Boolean(
+            lastPart?.functionCall &&
+              (part.functionCall.id && lastPart.functionCall.id
+                ? part.functionCall.id === lastPart.functionCall.id
+                : lastPart.functionCall.name === part.functionCall.name),
+          );
+          if (isSameCall && lastPart) {
+            lastPart.functionCall = part.functionCall;
+            if (part.thoughtSignature) {
+              lastPart.thoughtSignature = part.thoughtSignature;
             }
           } else {
-            accumulatedParts.push(part);
+            accumulatedParts.push({ ...part });
           }
+        } else {
+          accumulatedParts.push(part);
         }
       }
-      logGemini(`[gemini-step] stream-done chunks=${chunkCount}`);
-      usageDiag(
-        "stream",
-        finalUsageMetadata,
-        finalFinishReason,
-        accumulatedParts,
-      );
-      logFunctionCallsMissingThoughtSignature(
-        req.model,
-        finalFinishReason,
-        accumulatedParts,
-      );
     }
-  } catch (err: unknown) {
-    if (usedCacheName && typeof rawSysInstr === "string") {
-      const errorMsg = String(err);
-      const lowerMsg = errorMsg.toLowerCase();
-      if (
-        errorMsg.includes("NOT_FOUND") ||
-        errorMsg.includes("404") ||
-        lowerMsg.includes("cachedcontent") ||
-        lowerMsg.includes("cached content")
-      ) {
-        await invalidateGeminiContextCache(
-          req.model,
-          rawSysInstr,
-          rawTools,
-          rawToolConfig,
-        );
-        return await geminiSdkExchange(signal, {
-          req: rawReq,
-          disableStreaming,
-        });
-      }
-    }
-    throw err;
+    logGemini(`[gemini-step] stream-done chunks=${chunkCount}`);
+    usageDiag(
+      "stream",
+      finalUsageMetadata,
+      finalFinishReason,
+      accumulatedParts,
+    );
+    logFunctionCallsMissingThoughtSignature(
+      req.model,
+      finalFinishReason,
+      accumulatedParts,
+    );
   }
 
   return {
@@ -1897,48 +1826,6 @@ export const geminiAgentCaller =
       ? markTruncatedUtterances(result)
       : result;
   };
-
-export const warmGeminiContextCacheForSpec = async (
-  {
-    prompt,
-    tools,
-    skills,
-    allSkills,
-    toolOutputScratchPad,
-  }: AgentSpec,
-  events: HistoryEvent[],
-): Promise<void> => {
-  if (!isGeminiContextCachingEnabled() || isMockModelInjected()) return;
-  let rawToken: string;
-  try {
-    rawToken = accessGeminiToken();
-  } catch {
-    return;
-  }
-  const token = rawToken ? String(rawToken).trim() : "";
-  if (!token || token === "undefined") return;
-  const silenceLicense = historyHasPendingDeferredUserWaitingNudge(events)
-    ? ""
-    : noResponseInstruction;
-  const sysInstr = `${
-    enhancePrompt(prompt, toolOutputScratchPad)
-  }${silenceLicense}`;
-  const fullTools = [
-    ...tools,
-    ...((allSkills ?? skills ?? []).length > 0
-      ? createSkillTools(allSkills ?? skills ?? [])
-      : []),
-  ];
-  const cfg = toolingConfig(fullTools);
-  const sdk = new GoogleGenAI({ apiKey: token });
-  await getOrCreateGeminiContextCache(
-    sdk,
-    geminiModelVersion("flash"),
-    sysInstr,
-    "tools" in cfg ? cfg.tools : undefined,
-    cfg.toolConfig,
-  ).catch(() => {});
-};
 
 const geminiAgentCallerInner = ({
   thinkingLevel,
