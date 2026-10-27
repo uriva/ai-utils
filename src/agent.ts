@@ -3201,10 +3201,18 @@ const emitThinkingLevelEvents = async (
   });
 };
 
+const inFlightPreModelDecisions = new Set<Promise<void>>();
+
+export const waitAllPreModelDecisions = async (): Promise<void> => {
+  while (inFlightPreModelDecisions.size > 0) {
+    await Promise.allSettled([...inFlightPreModelDecisions]);
+  }
+};
+
 const runPreModelDecisions = async (
   spec: AgentSpec,
   skills: Skill[],
-  onPendingUnlearn?: (skills: Skill[]) => void,
+  onPendingUnlearn?: (skills: Skill[]) => Promise<void> | void,
 ): Promise<void> => {
   const shouldDecide = !isMockModelInjected() || isDecisionModelInjected();
   if (!shouldDecide) return;
@@ -3254,7 +3262,7 @@ const runPreModelDecisions = async (
   }
   await emitThinkingLevelEvents(thinkingLevelDecision);
   await emitLearnSkillEvents(skillsAdjustment.toLearn);
-  onPendingUnlearn?.(skillsAdjustment.toUnlearn);
+  await onPendingUnlearn?.(skillsAdjustment.toUnlearn);
   await emitCleanupEvents(cleanupDecisions);
 };
 
@@ -3517,18 +3525,24 @@ export const runAbstractAgent = (
     const triggerBackgroundDecisions = () => {
       if (hasTriggeredPreModelDecisions) return;
       hasTriggeredPreModelDecisions = true;
-      runPreModelDecisions(
+      const decisionPromise = runPreModelDecisions(
         spec,
         skillsArr,
-        (unlearnList) => {
+        async (unlearnList) => {
           if (!turnEnded) {
             pendingToUnlearn = unlearnList;
+          } else {
+            await emitPendingUnlearnEvents(unlearnList);
           }
         },
       )
         .catch((err) =>
           console.warn("[pre-model-decisions] background decision failed:", err)
-        );
+        )
+        .finally(() => {
+          inFlightPreModelDecisions.delete(decisionPromise);
+        });
+      inFlightPreModelDecisions.add(decisionPromise);
     };
 
     while (true) {

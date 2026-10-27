@@ -25,6 +25,7 @@ import {
   injectOutputEvent,
   learnSkillToolName,
   type ToolReturn,
+  waitAllPreModelDecisions,
 } from "./src/agent.ts";
 
 // Deterministic id generation so rmmbr cache keys are stable across runs.
@@ -117,6 +118,7 @@ const flushRmmbr = (f: () => Promise<void>) => async () => {
   try {
     await f();
   } finally {
+    await waitAllPreModelDecisions();
     await waitAllWrites();
   }
 };
@@ -165,7 +167,10 @@ export const agentDeps = (inMemoryHistory: HistoryEvent[]): Injector =>
 // regardless of which path is used; the wrapper reads provider from spec.
 export const runWithProvider =
   (provider: "google" | "moonshot" | "anthropic" | undefined) =>
-  (spec: AgentSpec): Promise<void> => runAgent({ ...spec, provider });
+  async (spec: AgentSpec): Promise<void> => {
+    await runAgent({ ...spec, provider });
+    await waitAllPreModelDecisions();
+  };
 
 // Run the same test with all providers (Google, Moonshot, Anthropic).
 // Set geminiOnly=true for tests that use Gemini-specific features/mock data
