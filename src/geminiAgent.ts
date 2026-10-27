@@ -1714,6 +1714,11 @@ const resolveAttachments = async (
     replacements: Record<string, GeminiHistoryEvent>;
   }
 > => {
+  if (
+    !events.some((e) => "attachments" in e && nonempty(e.attachments ?? []))
+  ) {
+    return { updatedHistory: events, replacements: {} };
+  }
   const replacements: Record<string, GeminiHistoryEvent> = {};
   const updatedHistory = await Promise.all(
     events.map(async (event) => {

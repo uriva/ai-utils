@@ -2479,6 +2479,7 @@ export type ProjectHistoryOptions = {
   timezoneIANA?: string;
   settledGapMs?: number;
   settledTokenThreshold?: number;
+  onlyUseCachedSummaries?: boolean;
   scratchPad?: ToolOutputScratchPad;
   generateTLDR?: (
     toolCall: HistoryEvent & { type: "tool_call" },
@@ -2491,6 +2492,7 @@ export const projectHistoryToModelContext = async ({
   timezoneIANA = "UTC",
   settledGapMs = defaultSegmentGapMs,
   settledTokenThreshold = defaultSettledHistoryTokenThreshold,
+  onlyUseCachedSummaries = false,
   scratchPad,
   generateTLDR,
 }: ProjectHistoryOptions): Promise<HistoryEvent[]> => {
@@ -2508,6 +2510,7 @@ export const projectHistoryToModelContext = async ({
     segments,
     settledTokenThreshold,
     timezoneIANA,
+    onlyUseCachedSummaries,
   );
 
   if (scratchPad) {
@@ -3389,6 +3392,7 @@ const projectModelContext = (
     timezoneIANA: spec.timezoneIANA,
     scratchPad,
     settledTokenThreshold: spec.historyCompactionTokenThreshold,
+    onlyUseCachedSummaries: Boolean(spec.compactHistory),
   });
 
 // Pre-call meta-cognition gate: every `maxIterations` turns (or while a stop
@@ -3590,7 +3594,9 @@ export const runAbstractAgent = (
       const modelResponsePromise = timeit(reportTimeElapsedMs, callModel)(
         normalizedHistory,
       );
-      scheduleHistoryCompaction(spec, normalizedHistory);
+      Promise.resolve()
+        .then(() => Promise.resolve())
+        .then(() => scheduleHistoryCompaction(spec, history));
       const rawModelResponse = await modelResponsePromise;
       if (await shouldAbort()) return;
 

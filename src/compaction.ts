@@ -537,10 +537,31 @@ async (
   };
 };
 
+const getCachedSegmentSummaryEvent = (
+  timezone: string,
+  segment: HistorySegment,
+):
+  | Promise<HistoryEvent & { type: "own_thought"; text: string }>
+  | undefined => {
+  const plainText = eventsToPlainText(segment.events);
+  const cachedPromise = inMemorySummaryCache.get(plainText);
+  if (!cachedPromise) return undefined;
+  return cachedPromise.then((summaryText) => ({
+    id: `summary-${segment.start}-${segment.end}`,
+    type: "own_thought" as const,
+    text: `${
+      formatSegmentRange(segment.start, segment.end, timezone)
+    }\n\n${summaryText}`,
+    timestamp: segment.start,
+    isOwn: true,
+  }));
+};
+
 export const projectSettledSessions = async (
   segments: HistorySegment[],
   settledTokenThreshold: number = defaultSettledHistoryTokenThreshold,
   timezone: string = "UTC",
+  onlyUseCachedSummaries: boolean = false,
 ): Promise<HistoryEvent[]> => {
   if (empty(segments)) return [];
   if (segments.length === 1) return segments[0].events;
@@ -551,7 +572,13 @@ export const projectSettledSessions = async (
   const settledUpperBound = sum(
     settledSegments.map((s) => estimateHistoryTokensUpperBound(s.events)),
   );
-  if (settledUpperBound < settledTokenThreshold) {
+  if (
+    settledUpperBound < settledTokenThreshold ||
+    (onlyUseCachedSummaries &&
+      !settledSegments.some((seg) =>
+        Boolean(getCachedSegmentSummaryEvent(timezone, seg))
+      ))
+  ) {
     return [
       ...settledSegments.flatMap((s) => s.events),
       ...activeSegment.events,
@@ -572,6 +599,15 @@ export const projectSettledSessions = async (
         segTokens >= 500 &&
         segmentNeedsCompaction(seg.events)
       ) {
+        if (onlyUseCachedSummaries) {
+          const cachedSummary = getCachedSegmentSummaryEvent(timezone, seg);
+          if (!cachedSummary) return seg.events;
+          const summary = await cachedSummary;
+          const skillEvents = seg.events.filter(
+            isSkillLifecycleEventIn(seg.events),
+          );
+          return [summary, ...skillEvents];
+        }
         const summary = await summarizeSegmentToHistoryEvent(timezone)(seg);
         const skillEvents = seg.events.filter(
           isSkillLifecycleEventIn(seg.events),
