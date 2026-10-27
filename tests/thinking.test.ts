@@ -12,7 +12,12 @@ import {
   ownThoughtTurn,
   ownUtteranceTurn,
   participantUtteranceTurn,
+  toolUseTurn,
 } from "../src/agent.ts";
+import {
+  type DecisionAnswer,
+  injectDecisionModel,
+} from "../src/decisionModel.ts";
 import {
   geminiGenJsonFromConvo,
   geminiThinkingConfig,
@@ -210,5 +215,147 @@ Deno.test(
     )();
 
     assertEquals(capturedThinkingLevel, ThinkingLevel.LOW);
+  },
+);
+
+Deno.test(
+  "thinkingLevel is conversation state: starts at ThinkingLevel.LOW without blocking on decision model, updates in background to HIGH, and transitions back to LOW",
+  async () => {
+    const delay = (ms: number) =>
+      new Promise((resolve) => setTimeout(resolve, ms));
+    const capturedLevels: (ThinkingLevel | undefined)[] = [];
+    const capturedHistories: HistoryEvent[][] = [];
+    let call1StartMs = 0;
+    let nextDecisionChoice: "low" | "high" = "high";
+    const DECISION_DELAY_MS = 250;
+
+    const mockDecisionCaller = async (
+      _state: unknown,
+      // deno-lint-ignore no-explicit-any
+      questions: Record<string, any>,
+    ): Promise<Record<string, DecisionAnswer>> => {
+      if ("thinking_level" in questions) {
+        await delay(DECISION_DELAY_MS);
+        return {
+          thinking_level: {
+            type: "choice",
+            choice: nextDecisionChoice,
+          },
+        };
+      }
+      return {};
+    };
+
+    let callCount = 0;
+    const fakeCallModel = (events: HistoryEvent[]): Promise<HistoryEvent[]> => {
+      callCount++;
+      capturedHistories.push(events);
+      if (callCount === 1) {
+        call1StartMs = performance.now();
+        return Promise.resolve([
+          toolUseTurn({ name: "WaitTool", args: {} }),
+        ]);
+      }
+      return Promise.resolve([ownUtteranceTurn(`Reply ${callCount}`)]);
+    };
+
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Build a distributed consensus engine.",
+      }),
+    ];
+
+    const runWithDeps = pipe(
+      injectDecisionModel(mockDecisionCaller),
+      injectCallModel(fakeCallModel),
+      injectCallModelWrapper(({ thinkingLevel, inner }) => {
+        capturedLevels.push(thinkingLevel);
+        return inner;
+      }),
+      agentDeps(history),
+    );
+
+    const t0 = performance.now();
+    await runWithDeps(() =>
+      runAgent({
+        maxIterations: 3,
+        prompt: "You are a coding assistant.",
+        tools: [
+          {
+            name: "WaitTool",
+            description: "Waits for background work",
+            parameters: z.object({}),
+            handler: async () => {
+              await delay(DECISION_DELAY_MS + 80);
+              return "done";
+            },
+          },
+        ],
+        timezoneIANA: "UTC",
+      })
+    )();
+
+    const call1LatencyMs = call1StartMs - t0;
+    assert(
+      call1LatencyMs < 100,
+      `Expected iteration 1 not to block on 250ms decision model (< 100ms), but took ${
+        Math.round(call1LatencyMs)
+      }ms`,
+    );
+
+    // Iteration 1 starts at default ThinkingLevel.LOW; Iteration 2 picks up background transition to HIGH
+    assertEquals(capturedLevels, [ThinkingLevel.LOW, ThinkingLevel.HIGH]);
+
+    // Synthetic thinking level state events must not leak into model-facing preparedHistory
+    for (const modelEvents of capturedHistories) {
+      assert(
+        !modelEvents.some((e) => e.id.startsWith("auto-thinking-")),
+        "Synthetic thinking state events must be stripped before calling model",
+      );
+    }
+
+    // Turn 2: user asks a simple greeting -> Turn 2 starts at current state (HIGH), background updates to LOW for Turn 3
+    nextDecisionChoice = "low";
+    history.push(
+      participantUtteranceTurn({
+        name: "user",
+        text: "Thanks, what time is it?",
+      }),
+    );
+
+    await runWithDeps(() =>
+      runAgent({
+        maxIterations: 1,
+        prompt: "You are a coding assistant.",
+        tools: [],
+        timezoneIANA: "UTC",
+      })
+    )();
+    await delay(DECISION_DELAY_MS + 50);
+
+    // Turn 3: now uses the updated ThinkingLevel.LOW state
+    history.push(
+      participantUtteranceTurn({
+        name: "user",
+        text: "Cool, bye!",
+      }),
+    );
+    await runWithDeps(() =>
+      runAgent({
+        maxIterations: 1,
+        prompt: "You are a coding assistant.",
+        tools: [],
+        timezoneIANA: "UTC",
+      })
+    )();
+    await delay(DECISION_DELAY_MS + 50);
+
+    assertEquals(capturedLevels, [
+      ThinkingLevel.LOW,
+      ThinkingLevel.HIGH,
+      ThinkingLevel.HIGH,
+      ThinkingLevel.LOW,
+    ]);
   },
 );

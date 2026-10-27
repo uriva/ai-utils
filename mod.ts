@@ -1,6 +1,8 @@
 import {
   accessCallModel,
   accessCallModelWrapper,
+  accessHistory,
+  activeThinkingLevel,
   type AgentSpec,
   type CallModel,
   cleanActiveMemoryTool,
@@ -25,28 +27,8 @@ import {
 } from "./src/geminiAgent.ts";
 import { validateZodSchema } from "./src/gemini.ts";
 import { inspectMediaUrlTool } from "./src/inspectMediaTool.ts";
-import {
-  accessRouteThinkingLevelTimeoutMs,
-  formatAgentStateForDecisionModel,
-  routeThinkingLevel,
-} from "./src/decisionModel.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
-import { ThinkingLevel } from "@google/genai";
-
-const routeThinkingLevelBounded = (
-  state: Record<string, unknown>,
-): Promise<ThinkingLevel> => {
-  const timeoutMs = accessRouteThinkingLevelTimeoutMs();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return Promise.race([
-    routeThinkingLevel(state),
-    new Promise<ThinkingLevel>((resolve) => {
-      timer = setTimeout(() => resolve(ThinkingLevel.HIGH), timeoutMs);
-    }),
-  ]).finally(() => {
-    if (timer !== undefined) clearTimeout(timer);
-  });
-};
+import type { ThinkingLevel } from "@google/genai";
 
 type AgentSpecForTurn = AgentSpec & {
   thinkingLevel?: ThinkingLevel;
@@ -125,21 +107,27 @@ const addBuiltinTools = (spec: AgentSpec): AgentSpec => {
 
 const runAgentInner = (spec: AgentSpec): Promise<void> => {
   const specWithBuiltins = addBuiltinTools(spec);
+  const usesGemini = specWithBuiltins.provider !== "moonshot" &&
+    specWithBuiltins.provider !== "anthropic";
+  if (usesGemini && isDefaultCallModelWrapper()) {
+    accessHistory()
+      .then((rawHistory) =>
+        warmGeminiContextCacheForSpec(
+          getSpecForTurn(specWithBuiltins, rawHistory),
+          rawHistory,
+        )
+      )
+      .catch(() => {});
+  }
 
   const dynamicCallModel = async (history: HistoryEvent[]) => {
     const specForTurn = getSpecForTurn(specWithBuiltins, history);
     const usesGeminiThinking = specForTurn.provider !== "moonshot" &&
       specForTurn.provider !== "anthropic";
-    const [thinkingLevel, preparedHistory] = await Promise.all([
-      usesGeminiThinking
-        ? routeThinkingLevelBounded(
-          formatAgentStateForDecisionModel(
-            specForTurn.prompt,
-            history,
-            specForTurn.tools,
-          ),
-        )
-        : Promise.resolve(undefined),
+    const thinkingLevel = usesGeminiThinking
+      ? (specForTurn.thinkingLevel ?? activeThinkingLevel(history))
+      : undefined;
+    const [preparedHistory] = await Promise.all([
       prepareHistory(specForTurn)(sanitizeHistorySkillsForModel(history)),
       ...(usesGeminiThinking && isDefaultCallModelWrapper()
         ? [warmGeminiContextCacheForSpec(specForTurn, history)]
@@ -163,6 +151,7 @@ export {
   accessCallModel,
   accessCallModelWrapper,
   accessHistory,
+  activeThinkingLevel,
   type AgentInputs,
   type AgentSpec,
   type CallModel,
@@ -235,6 +224,7 @@ export {
   sanitizeWindowBoundary,
   scheduleHistoryCompaction,
   searchPastHistoryTool,
+  setThinkingLevelToolName,
   type Skill,
   skillAutoLoadMarker,
   skillLearnedSuccessMessage,
@@ -246,6 +236,7 @@ export {
   type SkillUnlearnSkipReason,
   stopThoughtPrefix,
   systemNotificationPrefix,
+  thinkingLevelUpdatedSuccessMessage,
   thinkingTokenExhaustionWarningText,
   type Tool,
   tool,
@@ -337,6 +328,7 @@ export {
   decide,
   decideCleanupWithDecisionModel,
   decideSkillsWithDecisionModel,
+  decideThinkingLevelWithDecisionModel,
   type DecisionAnswer,
   type DecisionModelCaller,
   decisionModelSelectionCriteria,

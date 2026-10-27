@@ -27,6 +27,7 @@ import { collapseDuplicatedText } from "./utils.ts";
 import type { ZodType } from "zod/v4";
 import {
   accessMetadataStore,
+  activeThinkingLevel,
   type AgentSpec,
   createSkillTools,
   doNothingEventWithMetadata,
@@ -1704,7 +1705,8 @@ const canHaveGeminiMetadata = (
   return event.type === "tool_call" &&
     !event.id.startsWith("auto-learn-") &&
     !event.id.startsWith("auto-unlearn-") &&
-    !event.id.startsWith("auto-clean-");
+    !event.id.startsWith("auto-clean-") &&
+    !event.id.startsWith("auto-thinking-");
 };
 
 const enrichGeminiEventsWithMetadata = async (
@@ -1968,7 +1970,7 @@ const geminiAgentCallerInner = ({
     capEventsToTokenBudget(maxHistoryTokens),
     callGeminiWithFixHistory(
       buildReq(
-        thinkingLevel ?? ThinkingLevel.HIGH,
+        thinkingLevel ?? activeThinkingLevel(events),
         `${enhancePrompt(prompt, toolOutputScratchPad)}${silenceLicense}`,
         [
           ...tools,

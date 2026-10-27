@@ -19,7 +19,11 @@ import {
 import { makeCache } from "./cacher.ts";
 import { genJson } from "./genJson.ts";
 import { formatInternalSentTimestamp } from "./internalMessageMetadata.ts";
-import { cleanActiveMemoryToolName, isContentBlockedError } from "./utils.ts";
+import {
+  cleanActiveMemoryToolName,
+  isContentBlockedError,
+  setThinkingLevelToolName,
+} from "./utils.ts";
 
 export type HistorySegment = {
   events: HistoryEvent[];
@@ -277,7 +281,9 @@ export const defaultSettledHistoryTokenThreshold = 6_000;
 
 const isSkillLifecycleCall = (e: HistoryEvent): boolean =>
   e.type === "tool_call" &&
-  (e.name === "learn_skill" || e.name === "unlearn_skill");
+  (e.name === "learn_skill" ||
+    e.name === "unlearn_skill" ||
+    e.name === setThinkingLevelToolName);
 
 const isSkillLifecycleEventIn =
   (allEvents: HistoryEvent[]) => (e: HistoryEvent): boolean =>
@@ -646,6 +652,10 @@ const isDirectCleanCandidate = (
   event: HistoryEvent,
 ): boolean =>
   event.type !== "participant_utterance" &&
+  !(event.type === "tool_call" && event.name === setThinkingLevelToolName) &&
+  !(event.type === "tool_result" &&
+    typeof event.toolCallId === "string" &&
+    event.toolCallId.startsWith("auto-thinking-")) &&
   event.timestamp >= directive.start &&
   event.timestamp <= directive.end &&
   (directive.toolCallTimestamp === undefined ||

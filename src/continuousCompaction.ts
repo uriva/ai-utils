@@ -6,7 +6,10 @@ import {
   unlearnSkillToolName,
 } from "./agent.ts";
 import { groupToolCallPairs } from "./compaction.ts";
-import { cleanActiveMemoryToolName } from "./utils.ts";
+import {
+  cleanActiveMemoryToolName,
+  setThinkingLevelToolName,
+} from "./utils.ts";
 
 export const getSpillThreshold = (
   timestamp: number,
@@ -151,7 +154,8 @@ const isNonLifecycleToolPair = (pair: HistoryEvent[]): boolean => {
   return (
     command !== learnSkillToolName &&
     command !== unlearnSkillToolName &&
-    command !== cleanActiveMemoryToolName
+    command !== cleanActiveMemoryToolName &&
+    command !== setThinkingLevelToolName
   );
 };
 

@@ -22,6 +22,7 @@ import {
   decisionThinkingLevelInstructions,
   type ModelOpts,
   type ModelTier,
+  setThinkingLevelToolName,
   validateAgainstSchema,
 } from "./utils.ts";
 
@@ -564,13 +565,20 @@ export const eventContent = (event: HistoryEvent): string | undefined => {
   return undefined;
 };
 
+const isThinkingStateEvent = (e: HistoryEvent): boolean =>
+  (e.type === "tool_call" && e.name === setThinkingLevelToolName) ||
+  (e.type === "tool_result" &&
+    typeof e.toolCallId === "string" &&
+    e.toolCallId.startsWith("auto-thinking-"));
+
 export const formatAgentStateForDecisionModel = (
   prompt: string,
   history: HistoryEvent[],
   tools?: { name: string }[],
 ): Record<string, unknown> => {
-  const lastEvent = history[history.length - 1];
-  const lastUserMsg = [...history]
+  const visibleHistory = history.filter((e) => !isThinkingStateEvent(e));
+  const lastEvent = visibleHistory[visibleHistory.length - 1];
+  const lastUserMsg = [...visibleHistory]
     .reverse()
     .find((e) => e.type === "participant_utterance");
   const lastEventText = lastEvent ? eventContent(lastEvent) : undefined;
@@ -581,7 +589,7 @@ export const formatAgentStateForDecisionModel = (
       ? lastUserMsg.text.slice(0, 1000).toWellFormed()
       : "Empty user request");
   const triggerType = lastEvent ? lastEvent.type : "conversation_start";
-  const recentEvents = history.slice(-4).map((e) => ({
+  const recentEvents = visibleHistory.slice(-4).map((e) => ({
     type: e.type,
     text: eventContent(e)?.slice(0, 300).toWellFormed(),
   }));
@@ -678,6 +686,89 @@ export const routeThinkingLevel = async (
   }
 };
 
+export const decideThinkingLevelWithDecisionModel = async (
+  prompt: string,
+  history: HistoryEvent[],
+  tools?: { name: string }[],
+): Promise<ThinkingLevel | undefined> => {
+  if (!isDecisionModelAvailable()) {
+    return undefined;
+  }
+  const lastUser = lastParticipantUtterance(history);
+  if (!lastUser || typeof lastUser.text !== "string" || !lastUser.text.trim()) {
+    return undefined;
+  }
+  const state = formatAgentStateForDecisionModel(prompt, history, tools);
+  const override = decisionModelOverrideInjection.access();
+  if (override) {
+    try {
+      const answers = await override(state, {
+        thinking_level: {
+          type: "choice",
+          criteria: decisionThinkingLevelCriteria,
+          instructions: decisionThinkingLevelInstructions,
+        },
+      });
+      const ans = answers.thinking_level ?? answers.requires_flash;
+      if (!ans || ans.type !== "choice") return undefined;
+      return ans.choice === "low" || ans.choice === "lite"
+        ? ThinkingLevel.LOW
+        : ans.choice === "high" || ans.choice === "flash"
+        ? ThinkingLevel.HIGH
+        : undefined;
+    } catch (err) {
+      console.warn(
+        "[decision-model-thinking] thinking level decision check failed, failing open:",
+        err,
+      );
+      return undefined;
+    }
+  }
+  const provider = resolveDecisionProvider();
+  if (provider === "jev") {
+    try {
+      return await routeThinkingLevelWithJev(state);
+    } catch (err) {
+      if (hasNonEmptyToken(accessRespanToken())) {
+        console.warn(
+          "[decision-model] Jev routeThinkingLevel failed, falling back to Respan:",
+          err,
+        );
+        try {
+          return await routeThinkingLevelWithRespan(state);
+        } catch (fallbackErr) {
+          console.warn(
+            "[decision-model] Respan fallback routeThinkingLevel failed:",
+            fallbackErr,
+          );
+          return undefined;
+        }
+      }
+      return undefined;
+    }
+  }
+  try {
+    return await routeThinkingLevelWithRespan(state);
+  } catch (err) {
+    if (hasNonEmptyToken(accessJevToken())) {
+      console.warn(
+        "[decision-model] Respan routeThinkingLevel failed, falling back to Jev:",
+        err,
+      );
+      try {
+        return await routeThinkingLevelWithJev(state);
+      } catch (fallbackErr) {
+        console.warn(
+          "[decision-model] Jev fallback routeThinkingLevel failed:",
+          fallbackErr,
+        );
+        return undefined;
+      }
+    }
+    return undefined;
+  }
+};
+
 export const routeTask = async (
   state: string | Record<string, unknown> | unknown[],
 ): Promise<ModelTier> => {
@@ -701,6 +792,7 @@ export type PastToolEpisode = {
 const isLifecycleToolCallName = (name: string): boolean =>
   name === "learn_skill" ||
   name === "unlearn_skill" ||
+  name === setThinkingLevelToolName ||
   name === cleanActiveMemoryToolName;
 
 const isCrossTurnToolEvent = (

@@ -30,8 +30,10 @@ import {
   cleanActiveMemoryToolName,
   isEmojiFlood,
   isRepetitionFlood,
+  setThinkingLevelToolName,
   stripAnsi,
 } from "./utils.ts";
+import { ThinkingLevel } from "@google/genai";
 import { accessGeminiToken } from "./gemini.ts";
 import { genJson } from "./genJson.ts";
 import { zodToCompactTypingString, zodToTypingString } from "./toolTyping.ts";
@@ -50,9 +52,11 @@ import {
 import {
   decideCleanupWithDecisionModel,
   decideSkillsWithDecisionModel,
+  decideThinkingLevelWithDecisionModel,
   isDecisionModelInjected,
   type PastToolEpisode,
 } from "./decisionModel.ts";
+export { setThinkingLevelToolName };
 export const stopThoughtPrefix =
   "I'm working on this for some time and not making progress.";
 export const stopThoughtDefault =
@@ -2652,6 +2656,31 @@ const refusedUnlearnCallIds = (history: HistoryEvent[]): Set<string> =>
 const sortedByTimestamp = (history: HistoryEvent[]): HistoryEvent[] =>
   [...history].sort((a, b) => a.timestamp - b.timestamp);
 
+const isThinkingLevelToolCall = (
+  e: HistoryEvent,
+): e is Extract<HistoryEvent, { type: "tool_call" }> =>
+  e.type === "tool_call" && e.name === setThinkingLevelToolName;
+
+const thinkingLevelFromToolCall = (
+  e: HistoryEvent,
+): ThinkingLevel | undefined => {
+  if (!isThinkingLevelToolCall(e) || !isRecord(e.parameters)) return undefined;
+  const raw = e.parameters.thinkingLevel;
+  if (raw === ThinkingLevel.HIGH || raw === "HIGH" || raw === "high") {
+    return ThinkingLevel.HIGH;
+  }
+  if (raw === ThinkingLevel.LOW || raw === "LOW" || raw === "low") {
+    return ThinkingLevel.LOW;
+  }
+  return undefined;
+};
+
+export const activeThinkingLevel = (history: HistoryEvent[]): ThinkingLevel =>
+  sortedByTimestamp(history).reduce<ThinkingLevel>(
+    (level, e) => thinkingLevelFromToolCall(e) ?? level,
+    ThinkingLevel.LOW,
+  );
+
 const activeSkillNames = (history: HistoryEvent[]): Set<string> => {
   const cleaned = applyCleanActiveMemoryDirectives(history);
   const refusedUnlearns = refusedUnlearnCallIds(cleaned);
@@ -3137,6 +3166,41 @@ const emitCleanupEvents = async (
   }
 };
 
+export const thinkingLevelUpdatedSuccessMessage = (
+  level: ThinkingLevel,
+): string => `Thinking level set to ${level}.`;
+
+const emitThinkingLevelEvents = async (
+  targetLevel: ThinkingLevel | undefined,
+): Promise<void> => {
+  if (!targetLevel) return;
+  const history = await getHistory();
+  if (activeThinkingLevel(history) === targetLevel) return;
+  const lastPriorTimestamp = history
+    .filter(isThinkingLevelToolCall)
+    .reduce((max, e) => Math.max(max, e.timestamp), 0);
+  const timestamp = Math.max(Date.now(), lastPriorTimestamp + 1);
+  const callId = `auto-thinking-${generateId()}`;
+  await outputEvent({
+    id: callId,
+    timestamp,
+    type: "tool_call",
+    isOwn: true,
+    name: setThinkingLevelToolName,
+    parameters: {
+      thinkingLevel: targetLevel,
+    },
+  });
+  await outputEvent({
+    id: `${callId}-result`,
+    timestamp,
+    toolCallId: callId,
+    type: "tool_result",
+    isOwn: true,
+    result: thinkingLevelUpdatedSuccessMessage(targetLevel),
+  });
+};
+
 const runPreModelDecisions = async (
   spec: AgentSpec,
   skills: Skill[],
@@ -3145,9 +3209,13 @@ const runPreModelDecisions = async (
   const shouldDecide = !isMockModelInjected() || isDecisionModelInjected();
   if (!shouldDecide) return;
 
+  const usesGeminiThinking = spec.provider !== "moonshot" &&
+    spec.provider !== "anthropic";
+  const shouldAdjustThinking = usesGeminiThinking &&
+    (isDecisionModelInjected() || isDefaultCallModelWrapper());
   const shouldAdjustSkills = nonempty(skills);
   const shouldCleanup = spec.enableAutoMemoryCleanup !== false;
-  if (!shouldAdjustSkills && !shouldCleanup) return;
+  if (!shouldAdjustThinking && !shouldAdjustSkills && !shouldCleanup) return;
 
   const history = await getHistory();
   const canCleanup = shouldCleanup &&
@@ -3155,22 +3223,36 @@ const runPreModelDecisions = async (
     sum(history.map((e) => Math.ceil(eventToPlainTextLocal(e).length / 4))) >=
       5000;
 
-  if (!shouldAdjustSkills && !canCleanup) return;
+  if (!shouldAdjustThinking && !shouldAdjustSkills && !canCleanup) return;
 
-  const [skillsAdjustment, cleanupDecisions] = await Promise.all([
-    shouldAdjustSkills
-      ? decideSkillsWithDecisionModel(
-        spec.prompt,
-        history,
-        skills,
-        activeSkillNames(history),
-      )
-      : Promise.resolve({ toLearn: [], toUnlearn: [] }),
-    canCleanup
-      ? decideCleanupWithDecisionModel(spec.prompt, history)
-      : Promise.resolve([]),
-  ]);
+  const [thinkingLevelDecision, skillsAdjustment, cleanupDecisions] =
+    await Promise.all([
+      shouldAdjustThinking
+        ? decideThinkingLevelWithDecisionModel(
+          spec.prompt,
+          history,
+          spec.tools,
+        )
+        : Promise.resolve(undefined),
+      shouldAdjustSkills
+        ? decideSkillsWithDecisionModel(
+          spec.prompt,
+          history,
+          skills,
+          activeSkillNames(history),
+        )
+        : Promise.resolve({ toLearn: [], toUnlearn: [] }),
+      canCleanup
+        ? decideCleanupWithDecisionModel(spec.prompt, history)
+        : Promise.resolve([]),
+    ]);
 
+  if (thinkingLevelDecision !== undefined) {
+    console.log(
+      `[decision-model] background thinkingLevel=${thinkingLevelDecision}`,
+    );
+  }
+  await emitThinkingLevelEvents(thinkingLevelDecision);
   await emitLearnSkillEvents(skillsAdjustment.toLearn);
   onPendingUnlearn?.(skillsAdjustment.toUnlearn);
   await emitCleanupEvents(cleanupDecisions);
@@ -3206,6 +3288,7 @@ export type AgentInputs = {
   skills?: Skill[];
   allSkills?: Skill[];
   prompt: string;
+  thinkingLevel?: ThinkingLevel;
 };
 
 export type AgentSpec = AgentInputs & {
@@ -3934,14 +4017,24 @@ const sanitizeSkillResult =
 export const sanitizeHistorySkillsForModel = (
   events: HistoryEvent[],
 ): HistoryEvent[] => {
-  const callIds = new Set<string>();
-  const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
-  for (const e of sorted) {
-    if (e.type === "tool_call" && e.name === "learn_skill") {
-      callIds.add(e.id);
-    }
-  }
-  return events.map(sanitizeSkillResult(callIds, activeSkillNames(events)));
+  const sorted = sortedByTimestamp(events);
+  const callIds = new Set(
+    sorted
+      .filter((e) => e.type === "tool_call" && e.name === learnSkillToolName)
+      .map((e) => e.id),
+  );
+  const thinkingCallIds = new Set(
+    sorted
+      .filter(isThinkingLevelToolCall)
+      .map((e) => e.id),
+  );
+  return events
+    .filter((e) =>
+      !isThinkingLevelToolCall(e) &&
+      !(e.type === "tool_result" && e.toolCallId &&
+        thinkingCallIds.has(e.toolCallId))
+    )
+    .map(sanitizeSkillResult(callIds, activeSkillNames(events)));
 };
 
 // The spec-for-turn depends only on the spec identity and the history array
@@ -4024,5 +4117,6 @@ const computeSpecForTurn = <T extends AgentInputs>(
     skills: sortedActiveSkills,
     allSkills: allPossibleSkills,
     prompt: spec.prompt + unactiveSkillsPrompt + activeSkillsPrompt,
+    thinkingLevel: spec.thinkingLevel ?? activeThinkingLevel(history),
   };
 };
