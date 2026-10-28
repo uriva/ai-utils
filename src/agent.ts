@@ -3482,6 +3482,16 @@ const disambiguateNewToolCalls = (
   });
 };
 
+const emitOutputEvents = (events: HistoryEvent[]) => {
+  const utterances = events.filter((e) => e.type === "own_utterance");
+  if (utterances.length <= 1) return each(outputEvent)(events);
+  const nonUtterances = events.filter((e) => e.type !== "own_utterance");
+  return Promise.all([
+    each(outputEvent)(nonUtterances),
+    sequentialMap(outputEvent)(utterances),
+  ]).then(() => {});
+};
+
 export const runAbstractAgent = (
   spec: AgentSpec,
   callModel: (history: HistoryEvent[]) => Promise<HistoryEvent[]>,
@@ -3670,7 +3680,7 @@ export const runAbstractAgent = (
 
       // Process what needs to be emitted
       if (emitWithUniqueIds.length > 0) {
-        await sequentialMap(outputEvent)(emitWithUniqueIds);
+        await emitOutputEvents(emitWithUniqueIds);
 
         const hadDeferred = await handleFunctionCalls(
           allTools,

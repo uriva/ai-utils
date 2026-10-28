@@ -7,6 +7,7 @@ import {
   injectCallModel,
   injectOutputEvent,
   maxUtteranceChars,
+  ownThoughtTurn,
   ownUtteranceTurn,
   participantUtteranceTurn,
 } from "../src/agent.ts";
@@ -97,5 +98,45 @@ Deno.test(
 
     await run();
     assertEquals(deliveredTexts, ["Day 1 to Day 4.", "Day 5 conclusion."]);
+  },
+);
+
+Deno.test(
+  "runAgent starts own_utterance in parallel with own_thought without waiting for thought persistence",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "hello" }),
+    ];
+    const startOrder: string[] = [];
+    const finishOrder: string[] = [];
+
+    const run = pipe(
+      injectAccessHistory(() => Promise.resolve(history)),
+      injectOutputEvent(async (event: HistoryEvent) => {
+        startOrder.push(event.type);
+        if (event.type === "own_thought") {
+          await sleep(40);
+        }
+        history.push(event);
+        finishOrder.push(event.type);
+      }),
+      injectCallModel(() =>
+        Promise.resolve([
+          ownThoughtTurn("thinking about response"),
+          ownUtteranceTurn("Fast reply"),
+        ])
+      ),
+    )(() =>
+      runAgent({
+        maxIterations: 1,
+        tools: [],
+        prompt: "unused in fake",
+        timezoneIANA: "UTC",
+      })
+    );
+
+    await run();
+    assertEquals(startOrder, ["own_thought", "own_utterance"]);
+    assertEquals(finishOrder, ["own_utterance", "own_thought"]);
   },
 );
