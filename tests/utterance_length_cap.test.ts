@@ -1,8 +1,11 @@
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
+import { pipe, sleep } from "gamla";
 import { runAgent } from "../mod.ts";
 import {
   type HistoryEvent,
+  injectAccessHistory,
   injectCallModel,
+  injectOutputEvent,
   maxUtteranceChars,
   ownUtteranceTurn,
   participantUtteranceTurn,
@@ -51,5 +54,48 @@ Deno.test(
         `chunk length ${u.text.length} exceeds cap ${maxUtteranceChars}`,
       );
     });
+  },
+);
+
+Deno.test(
+  "runAgent awaits each split utterance chunk delivery sequentially before emitting the next chunk",
+  async () => {
+    const chunk1 = `Day 1 to Day 4.\n${
+      Array.from({ length: 230 }, (_, j) => `first-part-${j}`).join(" ")
+    }`;
+    const chunk2 = `Day 5 conclusion.\n${
+      Array.from({ length: 150 }, (_, j) => `second-part-${j}`).join(" ")
+    }`;
+    const huge = `${chunk1}\n\n${chunk2}`;
+    assert(huge.length > maxUtteranceChars);
+
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "5 day plan" }),
+    ];
+    const deliveredTexts: string[] = [];
+
+    const run = pipe(
+      injectAccessHistory(() => Promise.resolve(history)),
+      injectOutputEvent(async (event: HistoryEvent) => {
+        if (event.type === "own_utterance" && event.text.startsWith("Day 1")) {
+          await sleep(40);
+        }
+        history.push(event);
+        if (event.type === "own_utterance") {
+          deliveredTexts.push(event.text.split("\n")[0]);
+        }
+      }),
+      injectCallModel(() => Promise.resolve([ownUtteranceTurn(huge)])),
+    )(() =>
+      runAgent({
+        maxIterations: 1,
+        tools: [],
+        prompt: "unused in fake",
+        timezoneIANA: "UTC",
+      })
+    );
+
+    await run();
+    assertEquals(deliveredTexts, ["Day 1 to Day 4.", "Day 5 conclusion."]);
   },
 );

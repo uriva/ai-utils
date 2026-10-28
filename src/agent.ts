@@ -9,6 +9,7 @@ import {
   last,
   nonempty,
   pipe,
+  sequentialMap,
   sum,
   timeit,
 } from "gamla";
@@ -3669,7 +3670,7 @@ export const runAbstractAgent = (
 
       // Process what needs to be emitted
       if (emitWithUniqueIds.length > 0) {
-        await each(outputEvent)(emitWithUniqueIds);
+        await sequentialMap(outputEvent)(emitWithUniqueIds);
 
         const hadDeferred = await handleFunctionCalls(
           allTools,
