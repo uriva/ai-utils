@@ -2,12 +2,15 @@ import { assertEquals, assertNotEquals } from "@std/assert";
 import type { Injector } from "@uri/inject";
 import {
   injectCacher,
+  overrideTime,
   projectHistoryToModelContext,
   runAgent,
   sanitizeWindowBoundary,
+  tool,
   type ToolOutputScratchPad,
 } from "../mod.ts";
-import { agentDeps, someTool } from "../test_helpers.ts";
+import { z } from "zod/v4";
+import { agentDeps, runForAllProviders, someTool } from "../test_helpers.ts";
 import {
   type HistoryEvent,
   injectCallModel,
@@ -792,6 +795,360 @@ Deno.test(
         fetchRes.result.includes("Market listing details line"),
       true,
       "Expected 5.6k tool result from 2 minutes ago to remain uncompacted when only skill lifecycle and utterance events followed it",
+    );
+  },
+);
+
+Deno.test(
+  "dynamic history projection - multi-step tool calls within the same active turn do not prematurely compact prior file reads",
+  async () => {
+    const scratchStore = new Map<string, string>();
+    const scratchPad: ToolOutputScratchPad = {
+      get: (id: string) => Promise.resolve(scratchStore.get(id)),
+      set: (id: string, content: string) => {
+        scratchStore.set(id, content);
+        return Promise.resolve();
+      },
+      threshold: 20_000,
+    };
+
+    const now = Date.now();
+    const primaryManifestContent = [
+      "# -*- coding: utf-8 -*-",
+      "outbound = [",
+      ...Array.from(
+        { length: 40 },
+        (_, i) => `    "Passenger Outbound ${i + 1}",`,
+      ),
+      '    "Alice Carter",',
+      "]",
+      "return_trip = [",
+      ...Array.from(
+        { length: 40 },
+        (_, i) => `    "Passenger Return ${i + 1}",`,
+      ),
+      '    "Alice Carter",',
+      "]",
+    ].join("\n");
+
+    const secondaryManifestContent = [
+      "# -*- coding: utf-8 -*-",
+      "stations = {",
+      ...Array.from(
+        { length: 50 },
+        (_, i) => `    "Passenger ${i + 1}": "Central Station",`,
+      ),
+      "}",
+    ].join("\n");
+
+    const rawHistory: HistoryEvent[] = [
+      {
+        id: "p-user",
+        type: "participant_utterance",
+        isOwn: false,
+        name: "user",
+        text:
+          "Keep Alice Carter on outbound only, and put Diana Ross on return_trip instead of Alice Carter.",
+        timestamp: now - 25_000,
+      },
+      {
+        id: "call-read-primary",
+        type: "tool_call",
+        name: "read_file",
+        parameters: { path: "/workspace/manifest_primary.py" },
+        isOwn: true,
+        timestamp: now - 20_000,
+      },
+      {
+        id: "res-read-primary",
+        type: "tool_result",
+        toolCallId: "call-read-primary",
+        result: primaryManifestContent,
+        isOwn: true,
+        timestamp: now - 19_500,
+      },
+      {
+        id: "call-read-secondary",
+        type: "tool_call",
+        name: "read_file",
+        parameters: { path: "/workspace/manifest_secondary.py" },
+        isOwn: true,
+        timestamp: now - 15_000,
+      },
+      {
+        id: "res-read-secondary",
+        type: "tool_result",
+        toolCallId: "call-read-secondary",
+        result: secondaryManifestContent,
+        isOwn: true,
+        timestamp: now - 14_500,
+      },
+      {
+        id: "call-grep-station",
+        type: "tool_call",
+        name: "grep_file",
+        parameters: { pattern: "Diana Ross", path: "/workspace" },
+        isOwn: true,
+        timestamp: now - 10_000,
+      },
+      {
+        id: "res-grep-station",
+        type: "tool_result",
+        toolCallId: "call-grep-station",
+        result: "No matches found",
+        isOwn: true,
+        timestamp: now - 9_500,
+      },
+      {
+        id: "call-check-counts",
+        type: "tool_call",
+        name: "check_counts",
+        parameters: { file: "/workspace/manifest_primary.py" },
+        isOwn: true,
+        timestamp: now - 5_000,
+      },
+      {
+        id: "res-check-counts",
+        type: "tool_result",
+        toolCallId: "call-check-counts",
+        result: "outbound=41, return_trip=41",
+        isOwn: true,
+        timestamp: now - 4_500,
+      },
+    ];
+
+    const projected = await projectHistoryToModelContext({
+      rawHistory,
+      scratchPad,
+    });
+    const primaryRes = projected.find((e) => e.id === "res-read-primary");
+    assertEquals(
+      primaryRes?.type === "tool_result" &&
+        !primaryRes.result.includes("Because time has passed") &&
+        primaryRes.result.includes('"Alice Carter"'),
+      true,
+      "Expected active-turn file read (20s old, 2.2k chars) to remain uncompacted across subsequent tool steps in the same turn",
+    );
+
+    const historyAfterThreeReplies: HistoryEvent[] = [
+      ...rawHistory,
+      {
+        id: "reply-1",
+        type: "own_utterance",
+        isOwn: true,
+        text: "Updated the primary manifest.",
+        timestamp: now - 4_000,
+      },
+      {
+        id: "p-followup-1",
+        type: "participant_utterance",
+        isOwn: false,
+        name: "user",
+        text: "Thanks!",
+        timestamp: now - 3_500,
+      },
+      {
+        id: "reply-2",
+        type: "own_utterance",
+        isOwn: true,
+        text: "You are welcome!",
+        timestamp: now - 3_000,
+      },
+      {
+        id: "p-followup-2",
+        type: "participant_utterance",
+        isOwn: false,
+        name: "user",
+        text: "All good.",
+        timestamp: now - 2_500,
+      },
+      {
+        id: "reply-3",
+        type: "own_utterance",
+        isOwn: true,
+        text: "Have a great trip!",
+        timestamp: now - 2_000,
+      },
+    ];
+
+    const projectedAfterReplies = await projectHistoryToModelContext({
+      rawHistory: historyAfterThreeReplies,
+      scratchPad,
+    });
+    const compactedPrimaryRes = projectedAfterReplies.find(
+      (e) => e.id === "res-read-primary",
+    );
+    assertEquals(
+      compactedPrimaryRes?.type === "tool_result" &&
+        compactedPrimaryRes.result.includes("Because time has passed"),
+      true,
+      "Expected file read to be compacted once 3 completed conversational turns have elapsed",
+    );
+  },
+);
+
+runForAllProviders(
+  "agent edits already-read file directly without re-reading after 3 intermediate tool calls in the same turn",
+  async (runAgentWithProvider) => {
+    const primaryFileContent = [
+      "# -*- coding: utf-8 -*-",
+      "# Primary roster script",
+      "outbound_roster = [",
+      ...Array.from(
+        { length: 35 },
+        (_, i) =>
+          `    "Outbound Member ${
+            String(i + 1).padStart(2, "0")
+          } - Standard Boarding",`,
+      ),
+      '    "Alice Carter - Gate 42B",',
+      "]",
+      "",
+      "return_roster = [",
+      ...Array.from(
+        { length: 35 },
+        (_, i) =>
+          `    "Return Member ${
+            String(i + 1).padStart(2, "0")
+          } - Standard Boarding",`,
+      ),
+      '    "Martin Vance - Gate 19A",',
+      '    "Alice Carter - Gate 42B",',
+      '    "Elena Rostova - Gate 07C",',
+      "]",
+    ].join("\n");
+
+    const secondaryFileContent = [
+      "# -*- coding: utf-8 -*-",
+      "# Replacement member lookup",
+      "replacement_candidates = {",
+      ...Array.from(
+        { length: 40 },
+        (_, i) =>
+          `    "Candidate ${String(i + 1).padStart(2, "0")}": "Gate 00",`,
+      ),
+      '    "Diana Ross": "Gate 88D",',
+      "}",
+    ].join("\n");
+
+    const readCalls: string[] = [];
+    const scratchReadCalls: string[] = [];
+    const editCalls: {
+      path: string;
+      old_string: string;
+      new_string: string;
+    }[] = [];
+
+    const readFileTool = tool({
+      name: "read_file",
+      description: "Read the contents of a file at the given path.",
+      parameters: z.object({
+        path: z.string().describe("File path to read."),
+      }),
+      handler: ({ path }) => {
+        readCalls.push(path);
+        return Promise.resolve(
+          path.includes("primary") ? primaryFileContent : secondaryFileContent,
+        );
+      },
+    });
+
+    const editFileTool = tool({
+      name: "edit_file",
+      description:
+        "Replace an exact string in a file with a new string. Requires exact lines from the file.",
+      parameters: z.object({
+        path: z.string().describe("File path to edit."),
+        old_string: z.string().describe("Exact existing text to replace."),
+        new_string: z.string().describe("Replacement text."),
+      }),
+      handler: ({ path, old_string, new_string }) => {
+        editCalls.push({ path, old_string, new_string });
+        return Promise.resolve(`Successfully updated ${path}.`);
+      },
+    });
+
+    const checkStatusTool = tool({
+      name: "check_status",
+      description: "Check roster validation status for a leg.",
+      parameters: z.object({
+        scope: z.string().describe("Either 'outbound' or 'return'."),
+      }),
+      handler: ({ scope }) => Promise.resolve(`Status for ${scope}: valid`),
+    });
+
+    const scratchStore = new Map<string, string>();
+    const scratchPad: ToolOutputScratchPad = {
+      get: (id: string) => {
+        scratchReadCalls.push(id);
+        return Promise.resolve(scratchStore.get(id));
+      },
+      set: (id: string, content: string) => {
+        scratchStore.set(id, content);
+        return Promise.resolve();
+      },
+      threshold: 20_000,
+    };
+
+    const fixedNow = 1_775_000_000_000;
+    const history: HistoryEvent[] = [
+      {
+        id: "u-1",
+        type: "participant_utterance",
+        isOwn: false,
+        name: "user",
+        text: [
+          "Execute these steps strictly one tool call per turn (never call multiple tools in the same turn):",
+          "Turn 1: Call read_file on /app/roster_primary.py.",
+          "Turn 2: Call read_file on /app/roster_secondary.py to look up Diana Ross's gate code.",
+          "Turn 3: Call check_status with scope 'outbound'.",
+          "Turn 4: Call check_status with scope 'return'.",
+          "Turn 5: Call edit_file on /app/roster_primary.py to replace the exact return_roster entry for Alice Carter (keeping Martin Vance and Elena Rostova around it as context in old_string) with Diana Ross and her gate code from roster_secondary.py, then reply briefly.",
+        ].join("\n"),
+        timestamp: fixedNow,
+      },
+    ];
+
+    await overrideTime(() => fixedNow)(
+      agentDeps(history)(async () => {
+        await runAgentWithProvider({
+          maxIterations: 8,
+          tools: [readFileTool, editFileTool, checkStatusTool],
+          prompt:
+            "You are a precise coding assistant. Follow the user's step-by-step sequence strictly one tool call per turn.",
+          timezoneIANA: "UTC",
+          toolOutputScratchPad: scratchPad,
+        });
+      }),
+    )();
+
+    const primaryReadCount =
+      readCalls.filter((p) => p.includes("primary")).length;
+    assertEquals(
+      primaryReadCount,
+      1,
+      `Expected /app/roster_primary.py to be read only once in the turn, got ${primaryReadCount} reads (${
+        JSON.stringify(readCalls)
+      })`,
+    );
+    assertEquals(
+      scratchReadCalls.length,
+      0,
+      `Expected 0 read_scratch_file calls for active-turn file reads, got ${
+        JSON.stringify(scratchReadCalls)
+      }`,
+    );
+    assertEquals(
+      editCalls.length >= 1,
+      true,
+      "Expected agent to call edit_file on /app/roster_primary.py",
+    );
+    assertEquals(
+      editCalls[0].new_string.includes("Diana Ross - Gate 88D"),
+      true,
+      `Expected edit_file to use exact gate code from secondary file and exact context from primary file, got: ${
+        JSON.stringify(editCalls[0])
+      }`,
     );
   },
 );

@@ -1,4 +1,5 @@
 import {
+  generateTimestamp,
   type HistoryEvent,
   learnSkillToolName,
   readScratchFileToolName,
@@ -11,22 +12,29 @@ import {
   setThinkingLevelToolName,
 } from "./utils.ts";
 
+const minThreshold = 1500;
+const activeTurnStepThreshold = 4500;
+const maxThreshold = 15000;
+const decayConstant = 0.09; // Threshold reaches ~5,000 characters at 15 minutes
+
 export const getSpillThreshold = (
   timestamp: number,
   turnDistance = 0,
+  completedTurns = turnDistance,
 ): number => {
-  if (turnDistance >= 3) {
-    return 1500;
+  if (completedTurns >= 3) {
+    return minThreshold;
   }
-  const ageMs = Date.now() - timestamp;
+  const ageMs = generateTimestamp() - timestamp;
   const ageMins = ageMs / (60 * 1000);
 
-  const minThreshold = 1500;
-  const maxThreshold = 15000;
-  const decayConstant = 0.09; // Threshold reaches ~5,000 characters at 15 minutes
-
   const decayFactor = Math.exp(-decayConstant * ageMins);
-  return Math.round(minThreshold + (maxThreshold - minThreshold) * decayFactor);
+  const timeThreshold = Math.round(
+    minThreshold + (maxThreshold - minThreshold) * decayFactor,
+  );
+  return turnDistance >= 3
+    ? Math.min(timeThreshold, activeTurnStepThreshold)
+    : timeThreshold;
 };
 
 const isCompactedToolResult = (text: string | undefined): boolean =>
@@ -141,7 +149,22 @@ const isUnreadFreshToolResult = (
   toolResult: HistoryEvent & { type: "tool_result" },
 ): boolean =>
   !hasModelActedSinceResult(events, toolResult) &&
-  Date.now() - toolResult.timestamp < unreadFreshWindowMs;
+  generateTimestamp() - toolResult.timestamp < unreadFreshWindowMs;
+
+const isCompletedTurnEvent = (e: HistoryEvent): boolean =>
+  e.type === "own_utterance" || e.type === "own_edit_message";
+
+const countCompletedTurnsAfterResult = (
+  events: HistoryEvent[],
+  toolResult: HistoryEvent & { type: "tool_result" },
+): number => {
+  const idx = events.findIndex((e) => e.id === toolResult.id);
+  return idx === -1 ? 0 : events
+    .slice(idx + 1)
+    .filter(
+      (e) => e.timestamp >= toolResult.timestamp && isCompletedTurnEvent(e),
+    ).length;
+};
 
 const isNonLifecycleToolPair = (pair: HistoryEvent[]): boolean => {
   const toolCall = pair.find((
@@ -171,7 +194,7 @@ export const compactToolResultsInMemory = async (
 
   for (let i = 0; i < pairs.length; i++) {
     const pair = pairs[i];
-    const turnDistance = pairs.length - 1 - i;
+    const toolStepDistance = pairs.length - 1 - i;
     const toolCall = pair.find((
       e,
     ): e is Extract<HistoryEvent, { type: "tool_call" }> =>
@@ -189,7 +212,14 @@ export const compactToolResultsInMemory = async (
       toolResult.result &&
       !isUnreadFreshToolResult(events, toolResult)
     ) {
-      const threshold = getSpillThreshold(toolResult.timestamp, turnDistance);
+      const completedTurns = isSpillNotice(toolResult.result)
+        ? toolStepDistance
+        : countCompletedTurnsAfterResult(events, toolResult);
+      const threshold = getSpillThreshold(
+        toolResult.timestamp,
+        toolStepDistance,
+        completedTurns,
+      );
       const { command } = toolCallCommandAndParams(toolCall);
 
       // If it exceeds decaying threshold and has not been folded yet
