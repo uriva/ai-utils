@@ -25,6 +25,9 @@ export const getSpillThreshold = (
   }
   const ageMs = generateTimestamp() - timestamp;
   const ageMins = ageMs / (60 * 1000);
+  if (ageMins < 5) {
+    return maxThreshold;
+  }
 
   const decayFactor = Math.exp(-decayConstant * ageMins);
   return Math.round(minThreshold + (maxThreshold - minThreshold) * decayFactor);
