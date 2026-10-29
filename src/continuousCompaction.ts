@@ -13,28 +13,21 @@ import {
 } from "./utils.ts";
 
 const minThreshold = 1500;
-const activeTurnStepThreshold = 4500;
 const maxThreshold = 15000;
 const decayConstant = 0.09; // Threshold reaches ~5,000 characters at 15 minutes
 
 export const getSpillThreshold = (
   timestamp: number,
   turnDistance = 0,
-  completedTurns = turnDistance,
 ): number => {
-  if (completedTurns >= 3) {
+  if (turnDistance >= 3) {
     return minThreshold;
   }
   const ageMs = generateTimestamp() - timestamp;
   const ageMins = ageMs / (60 * 1000);
 
   const decayFactor = Math.exp(-decayConstant * ageMins);
-  const timeThreshold = Math.round(
-    minThreshold + (maxThreshold - minThreshold) * decayFactor,
-  );
-  return turnDistance >= 3
-    ? Math.min(timeThreshold, activeTurnStepThreshold)
-    : timeThreshold;
+  return Math.round(minThreshold + (maxThreshold - minThreshold) * decayFactor);
 };
 
 const isCompactedToolResult = (text: string | undefined): boolean =>
@@ -212,13 +205,12 @@ export const compactToolResultsInMemory = async (
       toolResult.result &&
       !isUnreadFreshToolResult(events, toolResult)
     ) {
-      const completedTurns = isSpillNotice(toolResult.result)
+      const turnDistance = isSpillNotice(toolResult.result)
         ? toolStepDistance
         : countCompletedTurnsAfterResult(events, toolResult);
       const threshold = getSpillThreshold(
         toolResult.timestamp,
-        toolStepDistance,
-        completedTurns,
+        turnDistance,
       );
       const { command } = toolCallCommandAndParams(toolCall);
 

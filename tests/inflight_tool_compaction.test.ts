@@ -40,7 +40,7 @@ Deno.test(
     const largeFileContent = (moduleName: string) =>
       `=== MODULE ${moduleName} SOURCE CODE ===\n` +
       `function process${moduleName}() {\n  // implementation details\n}\n`
-        .repeat(100); // ~5,000 chars
+        .repeat(300); // ~16,000 chars (exceeds 15k spill threshold)
 
     const inspectTool: Tool<z.ZodObject<{ module: z.ZodString }>> = {
       name: "inspect_module",
