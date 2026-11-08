@@ -35,7 +35,12 @@ import {
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
 import { isRetryableError, normalizeError } from "./utils.ts";
-import { injectKimiToken, kimiClient, kimiModelVersion } from "./kimiJson.ts";
+import {
+  accessKimiChatCompletion,
+  injectKimiToken,
+  kimiClient,
+  kimiModelVersion,
+} from "./kimiJson.ts";
 
 export { injectKimiToken };
 
@@ -421,10 +426,8 @@ const rawCallKimi = async ({
   const handleStreamChunk = getStreamChunk();
   const handleStreamThinkingChunk = getStreamThinkingChunk();
 
-  const client = kimiClient();
-
   if (disableStreaming) {
-    const response = await client.chat.completions.create({
+    const response = await accessKimiChatCompletion({
       ...req,
       stream: false,
     });
@@ -464,7 +467,7 @@ const rawCallKimi = async ({
   }
 
   // Streaming mode
-  const stream = await client.chat.completions.create({
+  const stream = await kimiClient().chat.completions.create({
     ...req,
     stream: true,
   });

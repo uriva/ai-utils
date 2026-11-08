@@ -32,6 +32,15 @@ const kimiChatCompletionInjection: Injection<typeof createKimiCompletion> =
   context(createKimiCompletion);
 
 export const injectKimiChatCompletion = kimiChatCompletionInjection.inject;
+export const accessKimiChatCompletion = kimiChatCompletionInjection.access;
+
+export const hasKimiToken = (): boolean => {
+  try {
+    return Boolean(kimiApiKeyInjection.access());
+  } catch {
+    return false;
+  }
+};
 
 export const emptyKimiCompletionMessage = "Kimi returned an empty completion";
 

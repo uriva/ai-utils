@@ -12,6 +12,7 @@ import {
   injectScratchPad,
   injectStreamChunk,
   injectStreamThinkingChunk,
+  isSafetyBlockUtterance,
   runAbstractAgent,
   sanitizeHistorySkillsForModel,
   searchPastHistoryTool,
@@ -22,6 +23,7 @@ import { geminiAgentCaller, prepareGeminiHistory } from "./src/geminiAgent.ts";
 import { validateZodSchema } from "./src/gemini.ts";
 import { inspectMediaUrlTool } from "./src/inspectMediaTool.ts";
 import { kimiAgentCaller } from "./src/kimiAgent.ts";
+import { hasKimiToken } from "./src/kimiJson.ts";
 import type { ThinkingLevel } from "@google/genai";
 
 type AgentSpecForTurn = AgentSpec & {
@@ -31,11 +33,32 @@ type AgentSpecForTurn = AgentSpec & {
 // deno-lint-ignore no-explicit-any
 const widen = (caller: (events: any) => Promise<any>): CallModel => caller;
 
+const eventsHaveAttachments = (events: HistoryEvent[]): boolean =>
+  events.some(
+    (e) =>
+      "attachments" in e &&
+      Array.isArray(e.attachments) &&
+      e.attachments.length > 0,
+  );
+
 const providerCaller = (spec: AgentSpecForTurn): CallModel => {
   if (spec.provider === "moonshot") return widen(kimiAgentCaller(spec));
   if (spec.provider === "anthropic") return widen(anthropicAgentCaller(spec));
-  // Default to Gemini for audio transport or when provider is "google" or undefined
-  return widen(geminiAgentCaller(spec));
+  const geminiCall = widen(geminiAgentCaller(spec));
+  return async (events) => {
+    const result = await geminiCall(events);
+    if (
+      result.length === 1 &&
+      isSafetyBlockUtterance(result[0]) &&
+      hasKimiToken() &&
+      !eventsHaveAttachments(events)
+    ) {
+      return await widen(
+        kimiAgentCaller({ ...spec, disableStreaming: true }),
+      )(events).catch(() => result);
+    }
+    return result;
+  };
 };
 
 // Provider-specific pre-filter that runs OUTSIDE the cached `callModel`

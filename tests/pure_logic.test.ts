@@ -22,8 +22,11 @@ import {
   resolveToolDescription,
   runAbstractAgent,
   runCommandToolName,
+  sanitizeHistorySkillsForModel,
   sanitizeModelOutput,
   type Skill,
+  skillLearnedSuccessMessage,
+  skillLoadedResultText,
   systemNotificationPrefix,
   toolResultTurn,
   toolUseTurn,
@@ -37,6 +40,7 @@ import {
   isSafetyBlockReason,
   promptBlockReasonPrefix,
   rejectMalformedFunctionCall,
+  safetyWarningText,
   stripEmbeddedThoughtPatterns,
 } from "../src/geminiAgent.ts";
 import { formatInternalThought } from "../src/jsonThought.ts";
@@ -1925,6 +1929,78 @@ Deno.test(
       history.length,
       1,
       "Superseded run must not emit stale events to history",
+    );
+  },
+);
+
+Deno.test(
+  "sanitizeHistorySkillsForModel preserves failed learn_skill error results instead of overwriting with skillLoadedResultText",
+  () => {
+    const failedCall = toolUseTurn({
+      id: "learn-fail-1",
+      name: learnSkillToolName,
+      args: { skillName: "missing-skill" },
+    });
+    const failedResult = toolResultTurn({
+      toolCallId: failedCall.id,
+      result: 'Skill "missing-skill" not found. Available skills: web',
+    });
+    const okCall = toolUseTurn({
+      id: "learn-ok-1",
+      name: learnSkillToolName,
+      args: { skillName: "web" },
+    });
+    const okResult = toolResultTurn({
+      toolCallId: okCall.id,
+      result: skillLearnedSuccessMessage("web"),
+    });
+    const sanitized = sanitizeHistorySkillsForModel([
+      participantUtteranceTurn({ name: "user", text: "use missing-skill" }),
+      failedCall,
+      failedResult,
+      okCall,
+      okResult,
+    ]);
+    const sanitizedFailed = sanitized.find(
+      (e): e is Extract<HistoryEvent, { type: "tool_result" }> =>
+        e.type === "tool_result" && e.toolCallId === failedCall.id,
+    );
+    const sanitizedOk = sanitized.find(
+      (e): e is Extract<HistoryEvent, { type: "tool_result" }> =>
+        e.type === "tool_result" && e.toolCallId === okCall.id,
+    );
+    assertEquals(
+      sanitizedFailed?.result,
+      'Skill "missing-skill" not found. Available skills: web',
+    );
+    assertEquals(sanitizedOk?.result, skillLoadedResultText);
+  },
+);
+
+Deno.test(
+  "normalizeHistoryForModel filters out stale safety block utterances from prior turns while keeping current turn safety block",
+  () => {
+    const history: HistoryEvent[] = [
+      {
+        ...participantUtteranceTurn({ name: "user", text: "first turn" }),
+        timestamp: 1000,
+      },
+      {
+        ...ownUtteranceTurn(safetyWarningText),
+        timestamp: 2000,
+      },
+      {
+        ...participantUtteranceTurn({ name: "user", text: "second turn" }),
+        timestamp: 3000,
+      },
+    ];
+    const normalized = normalizeHistoryForModel(history);
+    assertEquals(
+      normalized.some(
+        (e) => e.type === "own_utterance" && e.text === safetyWarningText,
+      ),
+      false,
+      "Stale safety block utterance from prior turn must be stripped from normalized history",
     );
   },
 );

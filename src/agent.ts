@@ -2306,6 +2306,9 @@ export const normalizeHistoryForModel = (
     ) {
       return e.timestamp >= lastParticipantTimestamp;
     }
+    if (isSafetyBlockUtterance(e)) {
+      return e.timestamp >= lastParticipantTimestamp;
+    }
     return true;
   });
 
@@ -2644,6 +2647,13 @@ const skillNameFromToolCall = (e: HistoryEvent): string | undefined => {
   )?.toLowerCase();
 };
 
+export const skillNotFoundMarkerText = "not found. Available skills:";
+export const skillBudgetExceededMarkerText = "SYSTEM BUDGET EXCEEDED:";
+
+const isFailedLearnSkillResult = (result: string): boolean =>
+  result.includes(skillNotFoundMarkerText) ||
+  result.startsWith(skillBudgetExceededMarkerText);
+
 // A refused unlearn_skill must not deactivate the skill in history replay, or
 // the model would see it gone from its prompt while the runtime kept it.
 const refusedUnlearnCallIds = (history: HistoryEvent[]): Set<string> =>
@@ -2652,6 +2662,16 @@ const refusedUnlearnCallIds = (history: HistoryEvent[]): Set<string> =>
       .filter((e): e is ToolResult =>
         e.type === "tool_result" &&
         e.result.includes(skillUnlearnSkippedMarkerText)
+      )
+      .map((e) => e.toolCallId)
+      .filter((id): id is string => id !== undefined),
+  );
+
+const refusedLearnCallIds = (history: HistoryEvent[]): Set<string> =>
+  new Set(
+    history
+      .filter((e): e is ToolResult =>
+        e.type === "tool_result" && isFailedLearnSkillResult(e.result)
       )
       .map((e) => e.toolCallId)
       .filter((id): id is string => id !== undefined),
@@ -2688,12 +2708,16 @@ export const activeThinkingLevel = (history: HistoryEvent[]): ThinkingLevel =>
 const activeSkillNames = (history: HistoryEvent[]): Set<string> => {
   const cleaned = applyCleanActiveMemoryDirectives(history);
   const refusedUnlearns = refusedUnlearnCallIds(cleaned);
+  const refusedLearns = refusedLearnCallIds(cleaned);
   const names = new Set<string>();
   for (const e of sortedByTimestamp(cleaned)) {
     const skillName = skillNameFromToolCall(e);
     if (!skillName) continue;
-    if (!isUnlearnToolCall(e)) names.add(skillName);
-    else if (!refusedUnlearns.has(e.id)) names.delete(skillName);
+    if (!isUnlearnToolCall(e)) {
+      if (!(isLearnToolCall(e) && refusedLearns.has(e.id))) {
+        names.add(skillName);
+      }
+    } else if (!refusedUnlearns.has(e.id)) names.delete(skillName);
   }
   return names;
 };
@@ -2701,11 +2725,12 @@ const activeSkillNames = (history: HistoryEvent[]): Set<string> => {
 const learnedSkillNames = (history: HistoryEvent[]): Set<string> => {
   const cleaned = applyCleanActiveMemoryDirectives(history);
   const refusedUnlearns = refusedUnlearnCallIds(cleaned);
+  const refusedLearns = refusedLearnCallIds(cleaned);
   const names = new Set<string>();
   for (const e of sortedByTimestamp(cleaned)) {
     const skillName = skillNameFromToolCall(e);
     if (!skillName) continue;
-    if (isLearnToolCall(e)) names.add(skillName);
+    if (isLearnToolCall(e) && !refusedLearns.has(e.id)) names.add(skillName);
     else if (isUnlearnToolCall(e) && !refusedUnlearns.has(e.id)) {
       names.delete(skillName);
     }
@@ -2810,7 +2835,9 @@ export const createSkillTools = (
   topLevelTools?: RegularTool<any>[] | (() => RegularTool<any>[]),
   // deno-lint-ignore no-explicit-any
 ): RegularTool<any>[] => {
-  const skillMap = Object.fromEntries(skills.map((s) => [s.name, s]));
+  const skillMap = Object.fromEntries(
+    skills.flatMap((s) => [[s.name, s], [s.name.toLowerCase(), s]]),
+  );
   const referenceAsTool =
     (skillName: string) => (ref: { name: string; content: string }) => ({
       name: referenceToolName(ref.name),
@@ -2844,9 +2871,9 @@ export const createSkillTools = (
     handler: async (
       { skillName, spinnerText: _spinnerText },
     ) => {
-      const skill = skillMap[skillName];
+      const skill = skillMap[skillName] ?? skillMap[skillName.toLowerCase()];
       if (!skill) {
-        return `Skill "${skillName}" not found. Available skills: ${skillNames}`;
+        return `Skill "${skillName}" ${skillNotFoundMarkerText} ${skillNames}`;
       }
 
       const spec = getAgentSpec();
@@ -4036,7 +4063,11 @@ const sanitizeSkillResult =
   (callIds: Set<string>, activeNames: Set<string>) =>
   (e: HistoryEvent): HistoryEvent => {
     if (e.type !== "tool_result") return e;
-    if (e.toolCallId && callIds.has(e.toolCallId)) {
+    if (
+      e.toolCallId &&
+      callIds.has(e.toolCallId) &&
+      !isFailedLearnSkillResult(e.result)
+    ) {
       return { ...e, result: skillLoadedResultText };
     }
     const gatedSkill = gateResultSkillName(e.result);

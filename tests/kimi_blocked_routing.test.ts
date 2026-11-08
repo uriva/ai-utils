@@ -3,13 +3,19 @@ import type { GenerateContentResponse } from "@google/genai";
 import type { Injector } from "@uri/inject";
 import {
   genJson,
+  type HistoryEvent,
+  injectAccessHistory,
   injectCacher,
   injectGeminiToken,
   injectKimiToken,
+  injectOutputEvent,
   invalidGenJsonMessage,
+  participantUtteranceTurn,
+  runAgent,
   z,
 } from "../mod.ts";
 import { injectGeminiGenerateContent } from "../src/gemini.ts";
+import { injectGeminiSdkExchange } from "../src/geminiAgent.ts";
 import { injectKimiChatCompletion, kimiModelVersion } from "../src/kimiJson.ts";
 
 // When Gemini blocks a request outright (e.g. PROHIBITED_CONTENT on the prompt),
@@ -174,4 +180,58 @@ Deno.test("a schema-violating Kimi fallback result surfaces a validation error",
       ),
     ),
   )();
+});
+
+Deno.test("a Gemini safety-blocked runAgent turn routes to Kimi instead of emitting English safetyWarningText", async () => {
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({
+      name: "user",
+      text: "benign conversational turn that triggers false positive block",
+    }),
+  ];
+  let geminiCalls = 0;
+  let kimiCalls = 0;
+  await injectGeminiToken("unused-gemini-faked")(
+    injectKimiToken("unused-kimi-faked")(
+      injectGeminiSdkExchange(() => {
+        geminiCalls++;
+        return Promise.resolve({
+          parts: [],
+          finishReason: undefined,
+          usageMetadata: undefined,
+          promptBlockReason: "PROHIBITED_CONTENT",
+        });
+      })(
+        injectKimiChatCompletion(() => {
+          kimiCalls++;
+          return Promise.resolve(
+            // deno-lint-ignore no-explicit-any
+            kimiCompletion("Hola, estoy aquí para ayudarte.") as any,
+          );
+        })(
+          injectAccessHistory(() => Promise.resolve(history))(
+            injectOutputEvent((e) => {
+              history.push(e);
+              return Promise.resolve();
+            })(() =>
+              runAgent({
+                prompt: "You are a helpful Spanish coach.",
+                tools: [],
+                timezoneIANA: "UTC",
+                maxIterations: 2,
+              })
+            ),
+          ),
+        ),
+      ),
+    ),
+  )();
+  assertEquals(geminiCalls, 1);
+  assertEquals(kimiCalls, 1);
+  const utterances = history.filter((e) => e.type === "own_utterance");
+  assertEquals(utterances.length, 1);
+  assertEquals(
+    utterances[0].type === "own_utterance" && utterances[0].text,
+    "Hola, estoy aquí para ayudarte.",
+  );
 });
