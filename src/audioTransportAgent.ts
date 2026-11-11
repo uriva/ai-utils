@@ -654,7 +654,11 @@ const createSessionConfig = (
   state.flushPendingUtterance = sessionHandler.flushPending;
   const allTools = collectAllAudioTools(spec.tools, spec.skills);
   const skillsPrompt = formatAudioSkillsPrompt(spec.skills);
-  const sanitizedPrompt = sanitizeAudioSystemPrompt(spec.prompt);
+  const sanitizedPrompt = sanitizeAudioSystemPrompt(
+    spec.conversationContext
+      ? `${spec.prompt}\n\n${spec.conversationContext}`
+      : spec.prompt,
+  );
   return {
     apiKey: accessGeminiToken(),
     prompt:

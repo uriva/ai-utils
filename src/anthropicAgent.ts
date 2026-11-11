@@ -501,15 +501,26 @@ const buildReq = (
   skills: AgentSpec["skills"],
   timezoneIANA: string,
   maxOutputTokens: number | undefined,
+  conversationContext?: string,
 ): BuildReqFn =>
 async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
   const eventById = (id: MessageId) => events.find((e) => e.id === id);
 
   const filteredEvents = events.filter((e) => e.type !== "do_nothing");
 
-  const rawMessages: Anthropic.Messages.MessageParam[] = (await Promise.all(
-    filteredEvents.map(historyEventToMessage(eventById, timezoneIANA)),
-  )).flat();
+  const contextMessages: Anthropic.Messages.MessageParam[] = conversationContext
+    ? [{
+      role: "user" as const,
+      content: formatSystemNotification(conversationContext),
+    }]
+    : [];
+
+  const rawMessages: Anthropic.Messages.MessageParam[] = [
+    ...contextMessages,
+    ...(await Promise.all(
+      filteredEvents.map(historyEventToMessage(eventById, timezoneIANA)),
+    )).flat(),
+  ];
 
   const merged = mergeConsecutiveSameRole(rawMessages);
 
@@ -826,6 +837,7 @@ const anthropicOutputPartToHistoryEvents =
 
 export const anthropicAgentCaller = ({
   prompt,
+  conversationContext,
   tools,
   skills,
   allSkills,
@@ -847,6 +859,7 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicHistoryEvent[]> => {
       allSkills ?? skills,
       timezoneIANA,
       maxOutputTokens,
+      conversationContext,
     ),
     disableStreaming,
   )(events);

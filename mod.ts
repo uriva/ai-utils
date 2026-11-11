@@ -41,7 +41,17 @@ const eventsHaveAttachments = (events: HistoryEvent[]): boolean =>
       e.attachments.length > 0,
   );
 
-const providerCaller = (spec: AgentSpecForTurn): CallModel => {
+const providerCaller = (rawSpec: AgentSpecForTurn): CallModel => {
+  const spec: AgentSpecForTurn = rawSpec.staticPrompt !== undefined
+    ? {
+      ...rawSpec,
+      prompt: rawSpec.staticPrompt,
+      conversationContext: [
+        rawSpec.conversationContext,
+        rawSpec.activeSkillsPrompt,
+      ].filter(Boolean).join("\n\n") || undefined,
+    }
+    : rawSpec;
   if (spec.provider === "moonshot") return widen(kimiAgentCaller(spec));
   if (spec.provider === "anthropic") return widen(anthropicAgentCaller(spec));
   const geminiCall = widen(geminiAgentCaller(spec));
@@ -91,7 +101,9 @@ const resolvePreparedCallModel = (spec: AgentSpecForTurn): CallModel => {
   };
   return accessCallModelWrapper({
     provider: spec.provider,
-    systemPrompt: spec.prompt,
+    systemPrompt: spec.conversationContext
+      ? `${spec.prompt}\n\n${spec.conversationContext}`
+      : spec.prompt,
     thinkingLevel: spec.thinkingLevel,
     inner: base,
   });
@@ -295,6 +307,7 @@ export {
   getOversizedMediaText,
   injectGeminiErrorLogger,
   injectGeminiModelCallTimeoutMs,
+  injectGeminiSdkExchange,
   injectPromptBlockedLogger,
   injectTokenUsage,
   safetyWarningText,

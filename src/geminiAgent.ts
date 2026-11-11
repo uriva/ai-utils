@@ -10,7 +10,8 @@ import {
   type Part,
   ThinkingLevel,
 } from "@google/genai";
-import { context, type Injection } from "@uri/inject";
+import { decodeBase64 } from "@std/encoding/base64";
+import { context, type Injection, type Injector } from "@uri/inject";
 import {
   conditionalRetryExponential,
   empty,
@@ -529,7 +530,9 @@ const geminiSdkExchangeInjection: Injection<typeof geminiSdkExchange> = context(
   geminiSdkExchange,
 );
 
-export const injectGeminiSdkExchange = (exchange: typeof geminiSdkExchange) =>
+export const injectGeminiSdkExchange = (
+  exchange: typeof geminiSdkExchange,
+): Injector =>
   pipe(
     geminiSdkExchangeInjection.inject(exchange),
     injectIsMockModel(() => true),
@@ -951,12 +954,44 @@ const textSafetyCategories = [
   HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY,
 ];
 
+const prefixCacheSessionNotice = "Conversation session initialized.";
+
+const prependConversationContext = (
+  conversationContext: string | undefined,
+  includeCacheAnchor: boolean,
+) =>
+(contents: Content[]): Content[] => [
+  ...(includeCacheAnchor
+    ? [
+      {
+        role: "user" as const,
+        parts: [{
+          text: formatSystemNotification(prefixCacheSessionNotice),
+        }],
+      },
+      {
+        role: "model" as const,
+        parts: [{ text: noResponseTag }],
+      },
+    ]
+    : []),
+  ...(conversationContext
+    ? [{
+      role: "user" as const,
+      parts: [{ text: formatSystemNotification(conversationContext) }],
+    }]
+    : []),
+  ...contents,
+];
+
 export const buildReq = (
   thinkingLevel: ThinkingLevel,
   prompt: string,
   tools: Tool<ZodType>[],
   timezoneIANA: string,
   maxOutputTokens: number | undefined,
+  conversationContext?: string,
+  includeCacheAnchor = false,
 ) =>
 (events: GeminiHistoryEvent[]): GenerateContentParameters => ({
   model: geminiModelVersion("flash"),
@@ -978,6 +1013,7 @@ export const buildReq = (
         combineContent,
       ),
     ),
+    prependConversationContext(conversationContext, includeCacheAnchor),
     mergeConsecutiveRoles,
     fixStart,
     fixEnd,
@@ -1542,6 +1578,44 @@ export const stripAllExpiredFiles = async (
   return callGemini(eventsToRequest(currentEvents), disableStreaming);
 };
 
+const isInvalidThoughtSignatureError = (err: Error): boolean =>
+  err.message.includes("thought_signature") ||
+  err.message.includes("thoughtSignature");
+
+const isValidBase64 = (value: string): boolean => {
+  try {
+    return decodeBase64(value.trim()).length > 0;
+  } catch {
+    return false;
+  }
+};
+
+const stripMalformedThoughtSignaturesFromEvents = (
+  events: GeminiHistoryEvent[],
+): GeminiHistoryEvent[] => {
+  const hasMalformed = events.some((e) =>
+    "modelMetadata" in e &&
+    Boolean(e.modelMetadata?.thoughtSignature) &&
+    !isValidBase64(e.modelMetadata?.thoughtSignature ?? "")
+  );
+  return filterInvalidToolCalls(
+    events.map((e) => {
+      if (!("modelMetadata" in e) || !e.modelMetadata?.thoughtSignature) {
+        return e;
+      }
+      const stripThis = hasMalformed
+        ? !isValidBase64(e.modelMetadata.thoughtSignature)
+        : true;
+      return stripThis
+        ? {
+          ...e,
+          modelMetadata: { ...e.modelMetadata, thoughtSignature: undefined },
+        }
+        : e;
+    }),
+  );
+};
+
 export const callGeminiWithFixHistory = (
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters =
     buildReq(ThinkingLevel.HIGH, "", [], "UTC", undefined),
@@ -1554,6 +1628,12 @@ async (events: GeminiHistoryEvent[]): Promise<GeminiOutput> => {
       return await callGemini(req, disableStreaming);
     } catch (error) {
       const err = normalizeError(error);
+      if (isInvalidThoughtSignatureError(err)) {
+        return await callGemini(
+          eventsToRequest(stripMalformedThoughtSignaturesFromEvents(events)),
+          disableStreaming,
+        );
+      }
       if (isTokenLimitExceeded(err)) {
         return recoverFromTokenLimitExceeded(
           err,
@@ -1835,6 +1915,7 @@ export const geminiAgentCaller =
 const geminiAgentCallerInner = ({
   thinkingLevel,
   prompt,
+  conversationContext,
   tools,
   skills,
   allSkills,
@@ -1872,6 +1953,10 @@ const geminiAgentCallerInner = ({
         ],
         timezoneIANA,
         maxOutputTokens,
+        conversationContext,
+        Boolean(silenceLicense) &&
+          (Boolean(conversationContext) ||
+            nonempty(allSkills ?? skills ?? [])),
       ),
       disableStreaming,
     ),

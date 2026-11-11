@@ -334,6 +334,7 @@ const buildReq = (
   skills: AgentSpec["skills"],
   timezoneIANA: string,
   maxOutputTokens: number | undefined,
+  conversationContext?: string,
 ): BuildReqFn =>
 async (events: KimiHistoryEvent[]): Promise<KimiRequestParams> => {
   const eventById = (id: MessageId) => events.find((e) => e.id === id);
@@ -341,8 +342,13 @@ async (events: KimiHistoryEvent[]): Promise<KimiRequestParams> => {
   // Filter out do_nothing events as they create empty assistant messages
   const filteredEvents = events.filter((e) => e.type !== "do_nothing");
 
+  const contextMessages: ChatCompletionMessageParam[] = conversationContext
+    ? [{ role: "user", content: formatSystemNotification(conversationContext) }]
+    : [];
+
   const messages: ChatCompletionMessageParam[] = [
     { role: "system", content: prompt },
+    ...contextMessages,
     ...(await Promise.all(
       filteredEvents.map(historyEventToMessage(eventById, timezoneIANA)),
     )).flat(),
@@ -646,6 +652,7 @@ const kimiOutputPartToHistoryEvents =
 
 export const kimiAgentCaller = ({
   prompt,
+  conversationContext,
   tools,
   skills,
   allSkills,
@@ -667,6 +674,7 @@ async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
       allSkills ?? skills,
       timezoneIANA,
       maxOutputTokens,
+      conversationContext,
     ),
     disableStreaming,
   )(events);

@@ -84,7 +84,13 @@ const mediaAttachmentSchema: z.ZodType<MediaAttachment> = z.union([
   }),
 ]);
 
-export type ToolReturn = { result: string; attachments?: MediaAttachment[] };
+export type ToolReturn = {
+  result: string;
+  attachments?: MediaAttachment[];
+  terminal?: boolean;
+  answersUser?: boolean;
+  acknowledgesUser?: boolean;
+};
 
 export const maxToolOutputChars = 20_000;
 
@@ -510,6 +516,9 @@ const toolReturnSchema: z.ZodType<string | ToolReturn> = z.union([
   z.object({
     result: z.string(),
     attachments: z.array(mediaAttachmentSchema).optional(),
+    terminal: z.boolean().optional(),
+    answersUser: z.boolean().optional(),
+    acknowledgesUser: z.boolean().optional(),
   }),
 ]);
 
@@ -638,6 +647,8 @@ export type ToolResult = {
   toolCallId?: string;
   result: string;
   attachments?: MediaAttachment[];
+  answersUser?: boolean;
+  acknowledgesUser?: boolean;
 } & SharedFields;
 
 export type OwnThought<ModelMetadata> = {
@@ -1193,6 +1204,9 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
     toolCallId: string | undefined;
     result: string;
     attachments?: MediaAttachment[];
+    terminal?: boolean;
+    answersUser?: boolean;
+    acknowledgesUser?: boolean;
   }
   | undefined
 > => {
@@ -1357,6 +1371,11 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
   const attachments = typeof validated === "string"
     ? undefined
     : validated.attachments;
+  const terminalFlags = typeof validated === "string" ? {} : {
+    ...(validated.terminal ? { terminal: true } : {}),
+    ...(validated.answersUser ? { answersUser: true } : {}),
+    ...(validated.acknowledgesUser ? { acknowledgesUser: true } : {}),
+  };
   const threshold = scratchPad?.threshold ?? defaultScratchPadThreshold;
   const shouldSpill = scratchPad !== undefined &&
     name !== readScratchFileToolName &&
@@ -1376,12 +1395,14 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
           previewLines,
         ),
       attachments,
+      ...terminalFlags,
     };
   }
   return {
     toolCallId,
     result: prefix + truncateToolOutput(rawText),
     attachments,
+    ...terminalFlags,
   };
 };
 
@@ -1478,10 +1499,12 @@ const sharedFields = () => ({
 });
 
 export const toolResultTurn = (
-  { result, attachments, toolCallId }: {
+  { result, attachments, toolCallId, answersUser, acknowledgesUser }: {
     result: string;
     attachments?: MediaAttachment[];
     toolCallId?: string;
+    answersUser?: boolean;
+    acknowledgesUser?: boolean;
   },
 ): HistoryEvent => ({
   ...sharedFields(),
@@ -1490,6 +1513,8 @@ export const toolResultTurn = (
   result,
   attachments,
   toolCallId,
+  ...(answersUser ? { answersUser } : {}),
+  ...(acknowledgesUser ? { acknowledgesUser } : {}),
 });
 
 export const participantEditMessageTurn = (
@@ -2205,6 +2230,16 @@ const toolResultsByCallId = (
 const pendingToolResultText =
   "[Tool result pending - still processing in the background]";
 
+const isDirectUserReply = (e: HistoryEvent): boolean =>
+  e.type === "own_utterance" ||
+  e.type === "own_edit_message" ||
+  (e.type === "tool_result" && Boolean(e.answersUser));
+
+const isUserAcknowledgment = (e: HistoryEvent): boolean =>
+  isDirectUserReply(e) ||
+  e.type === "own_reaction" ||
+  (e.type === "tool_result" && Boolean(e.acknowledgesUser));
+
 export const hasUnansweredUserMessage = (history: HistoryEvent[]): boolean => {
   const lastUserIndex = history.findLastIndex(
     (e) =>
@@ -2212,9 +2247,17 @@ export const hasUnansweredUserMessage = (history: HistoryEvent[]): boolean => {
       e.type === "participant_edit_message",
   );
   if (lastUserIndex === -1) return false;
-  return !history.slice(lastUserIndex + 1).some(
-    (e) => e.type === "own_utterance" || e.type === "own_edit_message",
+  return !history.slice(lastUserIndex + 1).some(isDirectUserReply);
+};
+
+const hasUnacknowledgedUserMessage = (history: HistoryEvent[]): boolean => {
+  const lastUserIndex = history.findLastIndex(
+    (e) =>
+      e.type === "participant_utterance" ||
+      e.type === "participant_edit_message",
   );
+  if (lastUserIndex === -1) return false;
+  return !history.slice(lastUserIndex + 1).some(isUserAcknowledgment);
 };
 
 const laterUnansweredUserMessage = (
@@ -2222,10 +2265,7 @@ const laterUnansweredUserMessage = (
   toolCallIndex: number,
 ): boolean => {
   const sliceAfterCall = history.slice(toolCallIndex + 1);
-  const hadInterveningReply = sliceAfterCall.some(
-    (e) => e.type === "own_utterance" || e.type === "own_edit_message",
-  );
-  if (hadInterveningReply) return false;
+  if (sliceAfterCall.some(isDirectUserReply)) return false;
   return hasUnansweredUserMessage(sliceAfterCall);
 };
 
@@ -2545,6 +2585,54 @@ export const historyHasPendingDeferredUserWaitingNudge = (
     e.text === pendingDeferredUserWaitingNotification
   );
 
+const executeFunctionCalls = (
+  // deno-lint-ignore no-explicit-any
+  tools: Tool<any>[],
+  onToolResult?: (event: HistoryEvent) => void,
+  skills: Skill[] = [],
+  scratchPad?: ToolOutputScratchPad,
+) =>
+async (
+  output: HistoryEvent[],
+): Promise<{ hadDeferred: boolean; allToolsTerminal: boolean }> => {
+  // deno-lint-ignore no-explicit-any
+  const toolCalls = filter((p: HistoryEvent): p is ToolUse<any> =>
+    p.type === "tool_call"
+  )(output);
+  const outcomes = await Promise.all(
+    toolCalls.map(async (t: ToolUse<Record<string, unknown>>) => {
+      if (t.name === doNothingToolName) {
+        const reason = typeof t.parameters?.reason === "string"
+          ? t.parameters.reason
+          : undefined;
+        await outputEvent(doNothingEvent(reason));
+        return { deferred: true, terminal: false };
+      }
+      const fc: FunctionCall = { name: t.name, args: t.parameters, id: t.id };
+      const startedAt = Date.now();
+      const callResult = await callToResult(tools, skills, scratchPad)(fc);
+      const durationMs = Date.now() - startedAt;
+      toolCallLog.access(
+        `[tool-call] name=${t.name} durationMs=${durationMs} deferred=${
+          callResult === undefined
+        }`,
+      );
+      if (callResult === undefined) {
+        return { deferred: true, terminal: false };
+      }
+      const result = toolResultTurn(callResult);
+      onToolResult?.(result);
+      await outputEvent(result);
+      return { deferred: false, terminal: Boolean(callResult.terminal) };
+    }),
+  );
+  return {
+    hadDeferred: outcomes.some(({ deferred }) => deferred),
+    allToolsTerminal: nonempty(toolCalls) &&
+      outcomes.every(({ terminal }) => terminal),
+  };
+};
+
 export const handleFunctionCalls = (
   // deno-lint-ignore no-explicit-any
   tools: Tool<any>[],
@@ -2552,40 +2640,10 @@ export const handleFunctionCalls = (
   skills: Skill[] = [],
   scratchPad?: ToolOutputScratchPad,
 ) =>
-async (output: HistoryEvent[]): Promise<boolean> => {
-  // deno-lint-ignore no-explicit-any
-  const toolCalls = filter((p: HistoryEvent): p is ToolUse<any> =>
-    p.type === "tool_call"
-  )(output);
-  let hadDeferred = false;
-  await each(async (t: ToolUse<Record<string, unknown>>) => {
-    if (t.name === doNothingToolName) {
-      hadDeferred = true;
-      const reason = typeof t.parameters?.reason === "string"
-        ? t.parameters.reason
-        : undefined;
-      await outputEvent(doNothingEvent(reason));
-      return;
-    }
-    const fc: FunctionCall = { name: t.name, args: t.parameters, id: t.id };
-    const startedAt = Date.now();
-    const callResult = await callToResult(tools, skills, scratchPad)(fc);
-    const durationMs = Date.now() - startedAt;
-    toolCallLog.access(
-      `[tool-call] name=${t.name} durationMs=${durationMs} deferred=${
-        callResult === undefined
-      }`,
-    );
-    if (callResult === undefined) {
-      hadDeferred = true;
-      return;
-    }
-    const result = toolResultTurn(callResult);
-    onToolResult?.(result);
-    await outputEvent(result);
-  })(toolCalls);
-  return hadDeferred;
-};
+(output: HistoryEvent[]): Promise<boolean> =>
+  executeFunctionCalls(tools, onToolResult, skills, scratchPad)(output).then(
+    ({ hadDeferred }) => hadDeferred,
+  );
 
 export const runCommandToolName = "run_command";
 export const learnSkillToolName = "learn_skill";
@@ -3327,6 +3385,9 @@ export type AgentInputs = {
   skills?: Skill[];
   allSkills?: Skill[];
   prompt: string;
+  staticPrompt?: string;
+  activeSkillsPrompt?: string;
+  conversationContext?: string;
   thinkingLevel?: ThinkingLevel;
 };
 
@@ -3686,7 +3747,7 @@ export const runAbstractAgent = (
 
       if (
         emitWithDescriptions.some((e) => e.type === "do_nothing") &&
-        hasUnansweredUserMessage(normalizedHistory) &&
+        hasUnacknowledgedUserMessage(normalizedHistory) &&
         retryCounts.doNothing < maxDoNothingRetries
       ) {
         retryCounts.doNothing++;
@@ -3709,7 +3770,7 @@ export const runAbstractAgent = (
       if (emitWithUniqueIds.length > 0) {
         await emitOutputEvents(emitWithUniqueIds);
 
-        const hadDeferred = await handleFunctionCalls(
+        const { hadDeferred, allToolsTerminal } = await executeFunctionCalls(
           allTools,
           undefined,
           skillsArr,
@@ -3722,10 +3783,12 @@ export const runAbstractAgent = (
         retryCounts.doNothing = 0;
 
         const updatedHistory = await getHistory();
+        const hasToolCalls = emitWithUniqueIds.some((ev: HistoryEvent) =>
+          ev.type === "tool_call"
+        );
         if (
-          !(emitWithUniqueIds.some((ev: HistoryEvent) =>
-            ev.type === "tool_call"
-          )) &&
+          (!hasToolCalls ||
+            (allToolsTerminal && !hasUnansweredUserMessage(updatedHistory))) &&
           nonempty(updatedHistory) &&
           last(updatedHistory).isOwn &&
           !emitWithUniqueIds.every((ev: HistoryEvent) =>
@@ -3943,10 +4006,11 @@ const estimateSkillTokenUpperBound = (
   tools.reduce((total, tool) => total + estimateToolTokenUpperBound(tool), 0);
 
 export const estimateAgentInputTokensUpperBound = (
-  { prompt, tools, skills = [] }: AgentSpec,
+  { prompt, conversationContext, tools, skills = [] }: AgentSpec,
   history: HistoryEvent[],
 ): number =>
   prompt.length +
+  (conversationContext?.length ?? 0) +
   estimateHistoryTokensUpperBound(history) +
   tools.reduce((total, tool) => total + estimateToolTokenUpperBound(tool), 0) +
   skills.reduce(
@@ -3955,10 +4019,12 @@ export const estimateAgentInputTokensUpperBound = (
   );
 
 export const estimateAgentInputTokens = async (
-  { prompt, tools, skills = [] }: AgentSpec,
+  { prompt, conversationContext, tools, skills = [] }: AgentSpec,
   history: HistoryEvent[],
 ): Promise<number> => {
-  const promptTokensPromise = accessTextTokenCounter(prompt);
+  const promptTokensPromise = accessTextTokenCounter(
+    conversationContext ? `${prompt}\n\n${conversationContext}` : prompt,
+  );
   const historyTokensPromise = accessTokenCounter(history);
 
   const [promptTokens, historyTokens] = await Promise.all([
@@ -4134,20 +4200,17 @@ const computeSpecForTurn = <T extends AgentInputs>(
   const activeSkills = allPossibleSkills.filter((s) =>
     activeNames.has(s.name.toLowerCase())
   );
-  const unactiveSkills = allPossibleSkills.filter((s) =>
-    !activeNames.has(s.name.toLowerCase())
-  );
 
   const sortedActiveSkills = [...activeSkills].sort((a, b) =>
     a.name.localeCompare(b.name)
   );
-  const sortedUnactiveSkills = [...unactiveSkills].sort((a, b) =>
+  const sortedAllSkills = [...allPossibleSkills].sort((a, b) =>
     a.name.localeCompare(b.name)
   );
 
-  const unactiveSkillsPrompt = sortedUnactiveSkills.length > 0
+  const skillsCatalogPrompt = nonempty(sortedAllSkills)
     ? `\n\nAvailable skills (execute directly with run_command, or load with learn_skill):\n${
-      formatInactiveSkillsPrompt(sortedUnactiveSkills)
+      formatInactiveSkillsPrompt(sortedAllSkills)
     }`
     : "";
 
@@ -4174,11 +4237,17 @@ const computeSpecForTurn = <T extends AgentInputs>(
   };
   const activeSkillsPrompt = formatActiveSkillsPrompt(sortedActiveSkills);
 
+  const staticPrompt = spec.prompt + skillsCatalogPrompt;
+
   return {
     ...spec,
     skills: sortedActiveSkills,
     allSkills: allPossibleSkills,
-    prompt: spec.prompt + unactiveSkillsPrompt + activeSkillsPrompt,
+    staticPrompt,
+    ...(activeSkillsPrompt.trim()
+      ? { activeSkillsPrompt: activeSkillsPrompt.trim() }
+      : {}),
+    prompt: staticPrompt + activeSkillsPrompt,
     thinkingLevel: spec.thinkingLevel ?? activeThinkingLevel(history),
   };
 };
