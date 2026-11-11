@@ -74,3 +74,40 @@ export const zodToTypingString = (zodObj: ZodType): string =>
 // where the goal is a schema-valid first touch, not full documentation.
 export const zodToCompactTypingString = (zodObj: ZodType): string =>
   jsonSchemaObjectToTyping(false, z.toJSONSchema(zodObj));
+
+const collectSchemaParamDescriptions = (
+  prefix: string,
+  // deno-lint-ignore no-explicit-any
+  node: any,
+): string[] => {
+  if (!node || typeof node !== "object") return [];
+  const own = prefix && typeof node.description === "string" && node.description
+    ? [`${prefix}: ${node.description}`]
+    : [];
+  if (node.type === "object" && node.properties) {
+    return [
+      ...own,
+      ...Object.entries(node.properties).flatMap(([key, prop]) =>
+        collectSchemaParamDescriptions(prefix ? `${prefix}.${key}` : key, prop)
+      ),
+    ];
+  }
+  if (node.type === "array" && node.items) {
+    return [
+      ...own,
+      ...collectSchemaParamDescriptions(`${prefix}[]`, node.items),
+    ];
+  }
+  if (Array.isArray(node.anyOf)) {
+    return [
+      ...own,
+      ...node.anyOf.flatMap((child: unknown) =>
+        collectSchemaParamDescriptions(prefix, child)
+      ),
+    ];
+  }
+  return own;
+};
+
+export const zodParamDescriptions = (zodObj: ZodType): string[] =>
+  collectSchemaParamDescriptions("", z.toJSONSchema(zodObj));

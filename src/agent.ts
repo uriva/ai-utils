@@ -37,7 +37,11 @@ import {
 import { ThinkingLevel } from "@google/genai";
 import { accessGeminiToken } from "./gemini.ts";
 import { genJson } from "./genJson.ts";
-import { zodToCompactTypingString, zodToTypingString } from "./toolTyping.ts";
+import {
+  zodParamDescriptions,
+  zodToCompactTypingString,
+  zodToTypingString,
+} from "./toolTyping.ts";
 import { coerceArgs } from "./argCoercion.ts";
 import {
   hasInternalSentTimestampSuffix,
@@ -4190,6 +4194,38 @@ export const getSpecForTurn = <T extends AgentInputs>(
   return computed;
 };
 
+const formatActiveSkillRefs = (skill: Skill): string =>
+  skill.references && nonempty(skill.references)
+    ? `\n  Reference documents (call directly by qualified name, e.g. ${skill.name}/${
+      referenceToolName(skill.references[0].name)
+    }):\n${
+      skill.references.map((r) =>
+        `    - ${skill.name}/${referenceToolName(r.name)}`
+      ).join("\n")
+    }`
+    : "";
+
+const formatActiveSkillParamNotes = (skill: Skill): string => {
+  const lines = skill.tools.flatMap((t) => {
+    const notes = zodParamDescriptions(t.parameters);
+    return nonempty(notes)
+      ? [`- ${stripSkillPrefix(skill.name, t.name)}: ${notes.join("; ")}`]
+      : [];
+  });
+  return nonempty(lines) ? `\n${lines.join("\n")}` : "";
+};
+
+const formatActiveSkillsPrompt = (skills: Skill[]): string =>
+  empty(skills)
+    ? ""
+    : `\n\n${
+      skills.map((skill) =>
+        `### Active Skill: ${skill.name}\n${skill.instructions}${
+          formatActiveSkillParamNotes(skill)
+        }${formatActiveSkillRefs(skill)}`
+      ).join("\n\n")
+    }`;
+
 const computeSpecForTurn = <T extends AgentInputs>(
   spec: T,
   history: HistoryEvent[],
@@ -4214,27 +4250,6 @@ const computeSpecForTurn = <T extends AgentInputs>(
     }`
     : "";
 
-  const formatActiveSkillsPrompt = (skills: Skill[]): string => {
-    if (skills.length === 0) return "";
-    const list = skills.map((skill) => {
-      const refsPart = skill.references && skill.references.length > 0
-        ? `\n  Reference documents (call directly by qualified name, e.g. ${skill.name}/${
-          referenceToolName(skill.references[0].name)
-        }):\n${
-          skill.references.map((r) =>
-            `    - ${skill.name}/${referenceToolName(r.name)}`
-          ).join("\n")
-        }`
-        : "";
-      const toolsPart = skill.tools.length > 0
-        ? `\n  Tools:\n${
-          skill.tools.map((t) => skillToolPromptLine(skill.name, t)).join("\n")
-        }`
-        : "";
-      return `### Active Skill: ${skill.name}\nInstructions:\n${skill.instructions}${toolsPart}${refsPart}`;
-    });
-    return `\n\nActive skills instructions:\n${list.join("\n\n")}`;
-  };
   const activeSkillsPrompt = formatActiveSkillsPrompt(sortedActiveSkills);
 
   const staticPrompt = spec.prompt + skillsCatalogPrompt;

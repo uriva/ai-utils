@@ -18,9 +18,9 @@ import { pipe } from "gamla";
 
 type CapturedReq = { req: GenerateContentParameters };
 
-const runCapturingSystemInstruction = async (
+const runCapturingRequest = async (
   specOverrides: Partial<AgentSpec>,
-): Promise<string> => {
+): Promise<GenerateContentParameters> => {
   const captured: CapturedReq[] = [];
   const history: HistoryEvent[] = [
     participantUtteranceTurn({ name: "user", text: "hello" }),
@@ -51,46 +51,64 @@ const runCapturingSystemInstruction = async (
     ...specOverrides,
   });
   assertEquals(captured.length, 1, "expected exactly one model call");
-  const systemInstruction = captured[0].req.config?.systemInstruction;
+  return captured[0].req;
+};
+
+const systemInstructionOf = (req: GenerateContentParameters): string => {
+  const systemInstruction = req.config?.systemInstruction;
   assertEquals(
     typeof systemInstruction,
     "string",
     "system instruction must be a string",
   );
-  return systemInstruction as string;
+  return typeof systemInstruction === "string" ? systemInstruction : "";
 };
 
 const countOccurrences = (haystack: string, needle: string): number =>
   haystack.split(needle).length - 1;
 
 Deno.test("active skill tools are described once in the system prompt", async () => {
-  const systemInstruction = await runCapturingSystemInstruction({});
+  const req = await runCapturingRequest({});
+  const systemInstruction = systemInstructionOf(req);
+  const fullRequestPromptText = `${systemInstruction}\n${
+    JSON.stringify(req.contents)
+  }`;
   assertEquals(
     countOccurrences(systemInstruction, "Always ask for location"),
-    1,
-    "active skill instructions must appear exactly once",
+    0,
+    "active skill instructions must stay out of static systemInstruction to preserve prefix cache",
   );
   assertEquals(
-    countOccurrences(systemInstruction, "Get weather forecast for a location"),
+    countOccurrences(fullRequestPromptText, "Always ask for location"),
+    1,
+    "active skill instructions must appear exactly once across the request",
+  );
+  assertEquals(
+    countOccurrences(
+      fullRequestPromptText,
+      "Get weather forecast for a location",
+    ),
     1,
     "active skill tool descriptions must appear exactly once (they are also sent as function declarations)",
   );
 });
 
 Deno.test("scratch pad instructions only enter the system prompt when a scratch pad is configured", async () => {
-  const withoutScratchPad = await runCapturingSystemInstruction({});
+  const withoutScratchPad = systemInstructionOf(await runCapturingRequest({}));
   assertEquals(
     withoutScratchPad.includes("SCRATCH PAD RULE"),
     false,
     "scratch pad instructions must be absent when no scratch pad is configured",
   );
 
-  const withScratchPad = await runCapturingSystemInstruction({
-    toolOutputScratchPad: {
-      set: () => Promise.resolve(),
-      get: () => Promise.resolve(undefined),
-    },
-  });
+  const withScratchPad = systemInstructionOf(
+    await runCapturingRequest({
+      toolOutputScratchPad: {
+        set: () => Promise.resolve(),
+        get: () => Promise.resolve(undefined),
+      },
+    }),
+  );
   assertEquals(
     withScratchPad.includes("SCRATCH PAD RULE"),
     true,

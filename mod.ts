@@ -262,6 +262,7 @@ export {
   topLevelToolCorrection,
   truncateToolOutput,
   unlearnSkillToolName,
+  waitAllPreModelDecisions,
 } from "./src/agent.ts";
 export { injectAnthropicToken } from "./src/anthropicAgent.ts";
 export { injectCacher } from "./src/cacher.ts";
