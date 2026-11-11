@@ -374,6 +374,24 @@ export {
 } from "./src/genJson.ts";
 export { injectKimiToken, kimiGenJsonFromConvo } from "./src/kimiJson.ts";
 export {
+  accessGeminiDecisionToken,
+  accessGeminiDecisionUrl,
+  callGeminiDecisionModel,
+  decideCleanupWithGemini,
+  decideSkillsWithGemini,
+  defaultGeminiDecisionModel,
+  formatAgentStateForGemini,
+  geminiDecisionApiErrorPrefix,
+  geminiDecisionApiUrl,
+  geminiDecisionCacheId,
+  geminiThinkingLevelCacheId,
+  injectGeminiDecisionToken,
+  injectGeminiDecisionUrl,
+  noGeminiDecisionTokenMessage,
+  routeTaskWithGemini,
+  routeThinkingLevelWithGemini,
+} from "./src/geminiDecision.ts";
+export {
   accessRespanToken,
   accessRespanUrl,
   callRespanDecisionModel,

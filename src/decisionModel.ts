@@ -5,6 +5,11 @@ import { ThinkingLevel } from "@google/genai";
 import type { HistoryEvent, ParticipantUtterance, Skill } from "./agent.ts";
 import { hasInterveningConversationTurn } from "./compaction.ts";
 import {
+  accessGeminiDecisionToken,
+  callGeminiDecisionModel,
+  routeThinkingLevelWithGemini,
+} from "./geminiDecision.ts";
+import {
   accessJevToken,
   callJevDecisionModel,
   routeThinkingLevelWithJev,
@@ -100,12 +105,12 @@ export type DecisionModelCaller = (
   questions: Record<string, DecisionQuestion>,
 ) => Promise<Record<string, DecisionAnswer>>;
 
-export type DecisionProvider = "respan" | "jev";
+export type DecisionProvider = "gemini" | "jev" | "respan";
 
 const decisionProviderInjection: Injection<() => DecisionProvider | undefined> =
   context((): DecisionProvider | undefined => {
     const env = Deno.env.get("DECISION_PROVIDER");
-    if (env === "jev" || env === "respan") return env;
+    if (env === "gemini" || env === "jev" || env === "respan") return env;
     return undefined;
   });
 
@@ -118,13 +123,60 @@ const hasNonEmptyToken = (raw: string | undefined): boolean => {
   return Boolean(s && s !== "undefined");
 };
 
+const hasProviderToken = (provider: DecisionProvider): boolean =>
+  provider === "gemini"
+    ? hasNonEmptyToken(accessGeminiDecisionToken())
+    : provider === "jev"
+    ? hasNonEmptyToken(accessJevToken())
+    : hasNonEmptyToken(accessRespanToken());
+
+const allDecisionProviders: readonly DecisionProvider[] = [
+  "gemini",
+  "jev",
+  "respan",
+];
+
 export const resolveDecisionProvider = (): DecisionProvider => {
   const configured = accessDecisionProvider();
   if (configured) return configured;
-  if (hasNonEmptyToken(accessRespanToken())) return "respan";
-  if (hasNonEmptyToken(accessJevToken())) return "jev";
-  return "respan";
+  return allDecisionProviders.find(hasProviderToken) ?? "gemini";
 };
+
+const candidateProviders = (): DecisionProvider[] => {
+  const primary = resolveDecisionProvider();
+  return [
+    primary,
+    ...allDecisionProviders.filter((p) => p !== primary && hasProviderToken(p)),
+  ];
+};
+
+const runWithProviderFallbacks = async <T>(
+  providers: DecisionProvider[],
+  runOne: (provider: DecisionProvider) => Promise<T>,
+): Promise<T> => {
+  const [head = "gemini", ...tail] = providers;
+  try {
+    return await runOne(head);
+  } catch (err) {
+    if (empty(tail)) throw err;
+    console.warn(
+      `[decision-model] ${head} failed, falling back to ${tail[0]}:`,
+      err,
+    );
+    return await runWithProviderFallbacks(tail, runOne);
+  }
+};
+
+const callProviderDecisionModel = (
+  state: unknown,
+  questions: Record<string, DecisionQuestion>,
+) =>
+(provider: DecisionProvider): Promise<Record<string, DecisionAnswer>> =>
+  provider === "gemini"
+    ? callGeminiDecisionModel(state, questions)
+    : provider === "jev"
+    ? callJevDecisionModel(state, questions)
+    : callRespanDecisionModel(state, questions);
 
 const decisionModelOverrideInjection: Injection<
   () => DecisionModelCaller | null
@@ -137,14 +189,11 @@ export const injectDecisionModel = (
 export const isDecisionModelInjected = (): boolean =>
   Boolean(decisionModelOverrideInjection.access());
 
-export const isDecisionModelAvailable = (): boolean => {
-  if (decisionModelOverrideInjection.access()) return true;
-  const provider = resolveDecisionProvider();
-  if (provider === "jev") return hasNonEmptyToken(accessJevToken());
-  return hasNonEmptyToken(accessRespanToken());
-};
+export const isDecisionModelAvailable = (): boolean =>
+  Boolean(decisionModelOverrideInjection.access()) ||
+  candidateProviders().some(hasProviderToken);
 
-export const callDecisionModel = async (
+export const callDecisionModel = (
   state: unknown,
   questions: Record<string, DecisionQuestion>,
 ): Promise<Record<string, DecisionAnswer>> => {
@@ -152,33 +201,10 @@ export const callDecisionModel = async (
   if (override) {
     return override(state, questions);
   }
-  const provider = resolveDecisionProvider();
-  if (provider === "jev") {
-    try {
-      return await callJevDecisionModel(state, questions);
-    } catch (err) {
-      if (hasNonEmptyToken(accessRespanToken())) {
-        console.warn(
-          "[decision-model] Jev failed, falling back to Respan:",
-          err,
-        );
-        return await callRespanDecisionModel(state, questions);
-      }
-      throw err;
-    }
-  }
-  try {
-    return await callRespanDecisionModel(state, questions);
-  } catch (err) {
-    if (hasNonEmptyToken(accessJevToken())) {
-      console.warn(
-        "[decision-model] Respan failed, falling back to Jev:",
-        err,
-      );
-      return await callJevDecisionModel(state, questions);
-    }
-    throw err;
-  }
+  return runWithProviderFallbacks(
+    candidateProviders(),
+    callProviderDecisionModel(state, questions),
+  );
 };
 
 const isRecord = (val: unknown): val is Record<string, unknown> =>
@@ -602,6 +628,7 @@ export const formatAgentStateForDecisionModel = (
   };
 };
 
+export const formatAgentStateForGemini = formatAgentStateForDecisionModel;
 export const formatAgentStateForRespan = formatAgentStateForDecisionModel;
 export const formatAgentStateForJev = formatAgentStateForDecisionModel;
 
@@ -613,6 +640,16 @@ export const injectRouteThinkingLevelTimeoutMs =
   routeThinkingLevelTimeoutMsInjection.inject;
 export const accessRouteThinkingLevelTimeoutMs =
   routeThinkingLevelTimeoutMsInjection.access;
+
+const routeProviderThinkingLevel = (
+  state: string | Record<string, unknown> | unknown[],
+) =>
+(provider: DecisionProvider): Promise<ThinkingLevel> =>
+  provider === "gemini"
+    ? routeThinkingLevelWithGemini(state)
+    : provider === "jev"
+    ? routeThinkingLevelWithJev(state)
+    : routeThinkingLevelWithRespan(state);
 
 export const routeThinkingLevel = async (
   state: string | Record<string, unknown> | unknown[],
@@ -635,53 +672,19 @@ export const routeThinkingLevel = async (
     }
     return ThinkingLevel.HIGH;
   }
-  if (
-    !hasNonEmptyToken(accessRespanToken()) &&
-    !hasNonEmptyToken(accessJevToken())
-  ) {
+  if (!allDecisionProviders.some(hasProviderToken)) {
     return ThinkingLevel.HIGH;
   }
-  const provider = resolveDecisionProvider();
-  if (provider === "jev") {
-    try {
-      return await routeThinkingLevelWithJev(state);
-    } catch (err) {
-      if (hasNonEmptyToken(accessRespanToken())) {
-        console.warn(
-          "[decision-model] Jev routeThinkingLevel failed, falling back to Respan:",
-          err,
-        );
-        try {
-          return await routeThinkingLevelWithRespan(state);
-        } catch (fallbackErr) {
-          console.warn(
-            "[decision-model] Respan fallback routeThinkingLevel failed:",
-            fallbackErr,
-          );
-          return ThinkingLevel.HIGH;
-        }
-      }
-      return ThinkingLevel.HIGH;
-    }
-  }
   try {
-    return await routeThinkingLevelWithRespan(state);
+    return await runWithProviderFallbacks(
+      candidateProviders(),
+      routeProviderThinkingLevel(state),
+    );
   } catch (err) {
-    if (hasNonEmptyToken(accessJevToken())) {
-      console.warn(
-        "[decision-model] Respan routeThinkingLevel failed, falling back to Jev:",
-        err,
-      );
-      try {
-        return await routeThinkingLevelWithJev(state);
-      } catch (fallbackErr) {
-        console.warn(
-          "[decision-model] Jev fallback routeThinkingLevel failed:",
-          fallbackErr,
-        );
-        return ThinkingLevel.HIGH;
-      }
-    }
+    console.warn(
+      "[decision-model] all routeThinkingLevel providers failed:",
+      err,
+    );
     return ThinkingLevel.HIGH;
   }
 };
@@ -724,47 +727,16 @@ export const decideThinkingLevelWithDecisionModel = async (
       return undefined;
     }
   }
-  const provider = resolveDecisionProvider();
-  if (provider === "jev") {
-    try {
-      return await routeThinkingLevelWithJev(state);
-    } catch (err) {
-      if (hasNonEmptyToken(accessRespanToken())) {
-        console.warn(
-          "[decision-model] Jev routeThinkingLevel failed, falling back to Respan:",
-          err,
-        );
-        try {
-          return await routeThinkingLevelWithRespan(state);
-        } catch (fallbackErr) {
-          console.warn(
-            "[decision-model] Respan fallback routeThinkingLevel failed:",
-            fallbackErr,
-          );
-          return undefined;
-        }
-      }
-      return undefined;
-    }
-  }
   try {
-    return await routeThinkingLevelWithRespan(state);
+    return await runWithProviderFallbacks(
+      candidateProviders(),
+      routeProviderThinkingLevel(state),
+    );
   } catch (err) {
-    if (hasNonEmptyToken(accessJevToken())) {
-      console.warn(
-        "[decision-model] Respan routeThinkingLevel failed, falling back to Jev:",
-        err,
-      );
-      try {
-        return await routeThinkingLevelWithJev(state);
-      } catch (fallbackErr) {
-        console.warn(
-          "[decision-model] Jev fallback routeThinkingLevel failed:",
-          fallbackErr,
-        );
-        return undefined;
-      }
-    }
+    console.warn(
+      "[decision-model] all routeThinkingLevel providers failed:",
+      err,
+    );
     return undefined;
   }
 };
@@ -1014,6 +986,7 @@ export const decideSkillsWithDecisionModel = async (
   }
 };
 
+export const decideSkillsWithGemini = decideSkillsWithDecisionModel;
 export const decideSkillsWithRespan = decideSkillsWithDecisionModel;
 export const decideSkillsWithJev = decideSkillsWithDecisionModel;
 
@@ -1083,5 +1056,6 @@ export const decideCleanupWithDecisionModel = async (
   }
 };
 
+export const decideCleanupWithGemini = decideCleanupWithDecisionModel;
 export const decideCleanupWithRespan = decideCleanupWithDecisionModel;
 export const decideCleanupWithJev = decideCleanupWithDecisionModel;

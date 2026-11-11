@@ -1,11 +1,14 @@
 import { assertEquals } from "@std/assert";
+import { pipe } from "gamla";
 import {
   type DecisionProvider,
   formatAgentStateForJev,
   geminiFlashVersion,
   geminiModelVersion,
   geminiProVersion,
+  injectCacher,
   injectDecisionProvider,
+  injectGeminiDecisionToken,
   injectJevToken,
   injectRespanToken,
   participantUtteranceTurn,
@@ -18,8 +21,7 @@ import { buildReq } from "../src/geminiAgent.ts";
 import type { HistoryEvent } from "../src/agent.ts";
 
 const decisionProviders: DecisionProvider[] = [
-  ...(Deno.env.get("RESPAN_API_KEY") ? ["respan" as const] : []),
-  ...(Deno.env.get("JEV_API_KEY") ? ["jev" as const] : []),
+  ...(Deno.env.get("GEMINI_API_KEY") ? ["gemini" as const] : []),
 ];
 
 Deno.test("geminiModelVersions eliminates 3.7-flash and aligns pro with 3.8-flash", () => {
@@ -34,22 +36,24 @@ Deno.test("geminiModelVersion resolves lite, pro, and flash", () => {
 });
 
 Deno.test("routeTask falls back to flash when no token is present", async () => {
-  await injectRespanToken("")(async () => {
-    await injectJevToken("")(async () => {
-      const tier = await routeTask("Hello, what is your name?");
-      assertEquals(tier, "flash");
-    });
-  });
+  await pipe(
+    injectGeminiDecisionToken(""),
+    injectRespanToken(""),
+    injectJevToken(""),
+  )(async () => {
+    const tier = await routeTask("Hello, what is your name?");
+    assertEquals(tier, "flash");
+  })();
 });
 
-for (const provider of decisionProviders) {
+decisionProviders.forEach((provider) => {
   Deno.test(`routeThinkingLevel routes simple greeting to LOW [${provider}]`, async () => {
     await injectDecisionProvider(provider)(async () => {
       const level = await routeThinkingLevel(
         "Hi, what time does the venue open?",
       );
       assertEquals(level, ThinkingLevel.LOW);
-    });
+    })();
   });
 
   Deno.test(`routeThinkingLevel routes complex coding to HIGH [${provider}]`, async () => {
@@ -58,14 +62,14 @@ for (const provider of decisionProviders) {
         "Implement a distributed Byzantine fault tolerant consensus algorithm in Rust with formal TLA+ specification and unit tests.",
       );
       assertEquals(level, ThinkingLevel.HIGH);
-    });
+    })();
   });
 
   Deno.test(`routeTask routes simple greeting to lite [${provider}]`, async () => {
     await injectDecisionProvider(provider)(async () => {
       const tier = await routeTask("Hi, what time does the venue open?");
       assertEquals(tier, "lite");
-    });
+    })();
   });
 
   Deno.test(`routeTask routes complex coding/architecture to flash [${provider}]`, async () => {
@@ -74,7 +78,7 @@ for (const provider of decisionProviders) {
         "Implement a distributed Byzantine fault tolerant consensus algorithm in Rust with formal TLA+ specification and unit tests.",
       );
       assertEquals(tier, "flash");
-    });
+    })();
   });
 
   Deno.test(`routeTask routes tool action request to flash [${provider}]`, async () => {
@@ -91,7 +95,7 @@ for (const provider of decisionProviders) {
       );
       const tier = await routeTask(state);
       assertEquals(tier, "flash");
-    });
+    })();
   });
 
   Deno.test(`routeTask routes search and recommendation queries to lite [${provider}]`, async () => {
@@ -109,7 +113,7 @@ for (const provider of decisionProviders) {
       );
       const tier = await routeTask(state);
       assertEquals(tier, "lite");
-    });
+    })();
   });
 
   Deno.test(`routeTask routes presenting search/query results to lite [${provider}]`, async () => {
@@ -142,7 +146,7 @@ for (const provider of decisionProviders) {
       );
       const tier = await routeTask(state);
       assertEquals(tier, "lite");
-    });
+    })();
   });
 
   Deno.test(`routeTask routes preference update and unsubscribe/opt-out turns to lite [${provider}]`, async () => {
@@ -160,7 +164,7 @@ for (const provider of decisionProviders) {
       );
       const tier = await routeTask(state);
       assertEquals(tier, "lite");
-    });
+    })();
   });
 
   Deno.test(`routeTask routes post-tool-result turn with constraints to flash [${provider}]`, async () => {
@@ -192,9 +196,9 @@ for (const provider of decisionProviders) {
       );
       const tier = await routeTask(state);
       assertEquals(tier, "flash");
-    });
+    })();
   });
-}
+});
 
 Deno.test("formatAgentStateForJev extracts user request and tool names", () => {
   const state = formatAgentStateForJev(
@@ -286,31 +290,29 @@ Deno.test("buildReq always uses flash model and applies ThinkingLevel constants 
   );
 });
 
-Deno.test("routeTask falls back from Respan to Jev when Respan fails", async () => {
-  if (!Deno.env.get("JEV_API_KEY")) return;
-  await injectRespanToken("invalid-respan-token")(async () => {
-    await injectDecisionProvider("respan")(async () => {
-      const tier = await routeTask("Hi, what time does the venue open?");
-      assertEquals(tier, "lite");
-    });
-  });
+const passthroughCacher = () => ((f: unknown) => f) as never;
+
+Deno.test("routeTask falls back from Jev to Gemini when Jev fails", async () => {
+  if (!Deno.env.get("GEMINI_API_KEY")) return;
+  await pipe(
+    injectCacher(passthroughCacher),
+    injectJevToken("invalid-jev-token"),
+    injectRespanToken(""),
+    injectDecisionProvider("jev"),
+  )(async () => {
+    const tier = await routeTask("Hi, what time does the venue open?");
+    assertEquals(tier, "lite");
+  })();
 });
 
-Deno.test("routeTask falls back from Jev to Respan when Jev fails", async () => {
-  if (!Deno.env.get("RESPAN_API_KEY")) return;
-  await injectJevToken("invalid-jev-token")(async () => {
-    await injectDecisionProvider("jev")(async () => {
-      const tier = await routeTask("Hi, what time does the venue open?");
-      assertEquals(tier, "lite");
-    });
-  });
-});
-
-Deno.test("routeTask falls back to flash when both providers fail", async () => {
-  await injectRespanToken("invalid-token")(async () => {
-    await injectJevToken("invalid-token")(async () => {
-      const tier = await routeTask("Hi, what time does the venue open?");
-      assertEquals(tier, "flash");
-    });
-  });
+Deno.test("routeTask falls back to flash when all providers fail", async () => {
+  await pipe(
+    injectCacher(passthroughCacher),
+    injectGeminiDecisionToken("invalid-token"),
+    injectRespanToken(""),
+    injectJevToken("invalid-token"),
+  )(async () => {
+    const tier = await routeTask("Hi, what time does the venue open?");
+    assertEquals(tier, "flash");
+  })();
 });

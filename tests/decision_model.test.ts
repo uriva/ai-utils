@@ -1,21 +1,26 @@
 import { assertEquals } from "@std/assert";
+import { pipe } from "gamla";
 import {
   callDecisionModel,
   decide,
   decideWithReasoningOnPositive,
   type DecisionProvider,
+  defaultGeminiDecisionModel,
   formatAgentStateForDecisionModel,
+  geminiThinkingLevelCacheId,
   genDecision,
   genJson,
   injectCacher,
   injectDecisionProvider,
+  injectGeminiDecisionToken,
+  injectGeminiDecisionUrl,
   injectGeminiToken,
   injectJevToken,
   injectRespanToken,
-  injectRespanUrl,
+  resolveDecisionProvider,
+  routeThinkingLevelWithGemini,
   z,
 } from "../mod.ts";
-import { routeThinkingLevelWithRespan } from "../src/respan.ts";
 import { injectSecrets } from "../test_helpers.ts";
 
 const sampleInquiry =
@@ -28,11 +33,20 @@ const mixedPrompt =
   "Analyze the issue, categorize it, determine urgency, and summarize in one sentence.";
 
 const decisionProviders: DecisionProvider[] = [
-  ...(Deno.env.get("RESPAN_API_KEY") ? ["respan" as const] : []),
-  ...(Deno.env.get("JEV_API_KEY") ? ["jev" as const] : []),
+  ...(Deno.env.get("GEMINI_API_KEY") ? ["gemini" as const] : []),
 ];
 
-for (const provider of decisionProviders) {
+Deno.test("resolveDecisionProvider defaults to gemini when Gemini token is available", () => {
+  injectGeminiToken("test-gemini-key")(() => {
+    injectRespanToken("test-respan-key")(() => {
+      injectJevToken("test-jev-key")(() => {
+        assertEquals(resolveDecisionProvider(), "gemini");
+      })();
+    })();
+  })();
+});
+
+decisionProviders.forEach((provider) => {
   Deno.test(
     `callDecisionModel answers choice and noul questions [${provider}]`,
     injectSecrets(async () => {
@@ -59,7 +73,7 @@ for (const provider of decisionProviders) {
           answers.department.type === "choice" && answers.department.choice,
           "auth",
         );
-      });
+      })();
     }),
   );
 
@@ -81,7 +95,7 @@ for (const provider of decisionProviders) {
 
         assertEquals(result.isUrgent, true);
         assertEquals(result.department, "auth");
-      });
+      })();
     }),
   );
 
@@ -99,7 +113,7 @@ for (const provider of decisionProviders) {
         const result = await check(sampleInquiry);
 
         assertEquals(result.isLoginIssue, true);
-      });
+      })();
     }),
   );
 
@@ -114,7 +128,7 @@ for (const provider of decisionProviders) {
         const result = await isLoginIssue(sampleInquiry);
 
         assertEquals(result, true);
-      });
+      })();
     }),
   );
 
@@ -140,7 +154,7 @@ for (const provider of decisionProviders) {
 
         assertEquals(result.isAccountLocked, true);
         assertEquals(result.department, "auth");
-      });
+      })();
     }),
   );
 
@@ -171,7 +185,7 @@ for (const provider of decisionProviders) {
         assertEquals(result.department, "auth");
         assertEquals(typeof result.summary, "string");
         assertEquals(result.summary.length > 5, true);
-      });
+      })();
     }),
   );
 
@@ -194,17 +208,15 @@ for (const provider of decisionProviders) {
           UrgencyReportSchema,
         );
 
-        // Positive case: urgent login issue
         const positiveResult = await check(sampleInquiry);
         assertEquals(positiveResult.isUrgent, true);
         assertEquals(typeof positiveResult.explanation, "string");
         assertEquals(positiveResult.explanation.length > 0, true);
 
-        // Negative case: non-urgent casual question
         const negativeResult = await check("What are your business hours?");
         assertEquals(negativeResult.isUrgent, false);
         assertEquals(negativeResult.explanation, "");
-      });
+      })();
     }),
   );
 
@@ -231,105 +243,143 @@ for (const provider of decisionProviders) {
 
         assertEquals(result.disclosedFailure, true);
         assertEquals(result.claimedSuccess, false);
-      });
+      })();
     }),
   );
-}
+});
 
 Deno.test(
   "genJson falls back to LLM when decision token is empty",
   injectSecrets(async () => {
-    await injectRespanToken("")(async () => {
-      await injectJevToken("")(async () => {
-        await injectGeminiToken(Deno.env.get("GEMINI_API_KEY")!)(async () => {
-          const FallbackSchema = z.object({
-            isUrgent: z.boolean().describe(
-              "Is the user experiencing an urgent block?",
-            ),
-            department: z.enum(["auth", "billing", "sales"]).describe(
-              "Responsible department",
-            ),
-          });
-
-          const classify = genJson(
-            { provider: "google", tier: "flash" },
-            classificationPrompt,
-            FallbackSchema,
-          );
-          const result = await classify(sampleInquiry);
-
-          assertEquals(typeof result.isUrgent, "boolean");
-          assertEquals(result.department, "auth");
-        });
+    await pipe(
+      injectGeminiDecisionToken(""),
+      injectRespanToken(""),
+      injectJevToken(""),
+      injectGeminiToken(Deno.env.get("GEMINI_API_KEY") ?? ""),
+    )(async () => {
+      const FallbackSchema = z.object({
+        isUrgent: z.boolean().describe(
+          "Is the user experiencing an urgent block?",
+        ),
+        department: z.enum(["auth", "billing", "sales"]).describe(
+          "Responsible department",
+        ),
       });
-    });
+
+      const classify = genJson(
+        { provider: "google", tier: "flash" },
+        classificationPrompt,
+        FallbackSchema,
+      );
+      const result = await classify(sampleInquiry);
+
+      assertEquals(typeof result.isUrgent, "boolean");
+      assertEquals(result.department, "auth");
+    })();
   }),
 );
 
 Deno.test(
-  "Respan uses span-02 by default and falls back to span-01-free and span-01-pro on 429/402 quota exhaustion",
+  "Gemini Decisions adapter translates noul criteria, sanitizes question keys, and short-circuits single-literal choices",
   async () => {
-    const requestedModels: string[] = [];
+    const capturedRequests: {
+      apiKey: string | null;
+      body: Record<string, unknown>;
+    }[] = [];
+
     const server = Deno.serve({ port: 0 }, async (req) => {
       const body = await req.json();
-      requestedModels.push(body.model);
-      if (body.model === "span-02") {
-        return new Response("Credits depleted", { status: 402 });
-      }
-      if (body.model === "span-01-free") {
-        return new Response("Daily free quota exceeded", { status: 429 });
-      }
+      capturedRequests.push({
+        apiKey: req.headers.get("x-goog-api-key"),
+        body,
+      });
+      const questions = body.questions ?? {};
+      const wireKeys = Object.keys(questions);
+      const mappedCalendarKey = wireKeys.find((k) => k !== "urgency") ?? "q_1";
       return new Response(
         JSON.stringify({
-          model: "span-01-pro",
-          results: [
-            {
-              id: "urgency",
-              p_present: 0.95,
-              p_absent: 0.05,
-              p_not_observable: 0.0,
+          answers: {
+            urgency: {
+              type: "noul",
+              noul: 0.94,
+              confidence: 0.94,
             },
-          ],
+            [mappedCalendarKey]: {
+              type: "noul",
+              noul: 0.88,
+              confidence: 0.88,
+            },
+          },
         }),
         { headers: { "Content-Type": "application/json" } },
       );
     });
 
-    const addr = server.addr;
-    const url = `http://localhost:${addr.port}`;
+    const url = `http://localhost:${server.addr.port}`;
 
-    await injectRespanUrl(url)(async () => {
-      await injectRespanToken("fake-token")(async () => {
-        await injectDecisionProvider("respan")(async () => {
-          const answers = await callDecisionModel(
-            `unique-state-${Date.now()}`,
-            {
-              urgency: {
-                type: "noul",
-                instructions: "Is this urgent?",
-              },
+    await pipe(
+      injectGeminiDecisionUrl(url),
+      injectGeminiDecisionToken("fake-gemini-key"),
+      injectDecisionProvider("gemini"),
+    )(async () => {
+      const answers = await callDecisionModel(
+        { message: `unique-state-${Date.now()}` },
+        {
+          urgency: {
+            type: "noul",
+            instructions: "Is this urgent?",
+            criteria: {
+              true: "Immediate outage",
+              false: "General question",
             },
-          );
-          assertEquals(answers.urgency.type, "noul");
-          assertEquals(
-            answers.urgency.type === "noul" && answers.urgency.noul > 0.9,
-            true,
-          );
-          assertEquals(requestedModels, [
-            "span-02",
-            "span-01-free",
-            "span-01-pro",
-          ]);
-        });
+          },
+          "Google Calendar.v2": {
+            type: "noul",
+            instructions: "Does this need Google Calendar?",
+          },
+          soleLiteral: {
+            type: "choice",
+            instructions: "Fixed version",
+            criteria: { v1: "v1" },
+          },
+        },
+      );
+
+      assertEquals(answers.urgency.type, "noul");
+      assertEquals(
+        answers.urgency.type === "noul" && answers.urgency.noul,
+        0.94,
+      );
+      assertEquals(
+        answers["Google Calendar.v2"]?.type === "noul" &&
+          answers["Google Calendar.v2"].noul,
+        0.88,
+      );
+      assertEquals(
+        answers.soleLiteral?.type === "choice" && answers.soleLiteral.choice,
+        "v1",
+      );
+      assertEquals(capturedRequests.length, 1);
+      assertEquals(capturedRequests[0].apiKey, "fake-gemini-key");
+      assertEquals(capturedRequests[0].body.model, defaultGeminiDecisionModel);
+      const sentQuestions = capturedRequests[0].body.questions as Record<
+        string,
+        Record<string, unknown>
+      >;
+      assertEquals("soleLiteral" in sentQuestions, false);
+      assertEquals("Google Calendar.v2" in sentQuestions, false);
+      assertEquals(sentQuestions.urgency.criteria, {
+        true_description: "Immediate outage",
+        false_description: "General question",
       });
-    });
+    })();
 
     await server.shutdown();
   },
 );
 
 Deno.test(
-  "formatAgentStateForDecisionModel and routeThinkingLevelWithRespan handle emojis split at UTF-16 slice boundaries without lone surrogates",
+  "formatAgentStateForDecisionModel and routeThinkingLevelWithGemini handle emojis split at UTF-16 slice boundaries without lone surrogates",
   injectSecrets(async () => {
     const promptWithBoundaryEmoji = `${"a".repeat(499)}🔥 trailing prompt text`;
     const turnWith300BoundaryEmoji = `${"b".repeat(299)}🔥 trailing turn text`;
@@ -367,13 +417,13 @@ Deno.test(
       "Serialized decision state must not contain lone UTF-16 surrogates",
     );
 
-    const level = await routeThinkingLevelWithRespan(state);
+    const level = await routeThinkingLevelWithGemini(state);
     assertEquals(level === "LOW" || level === "HIGH", true);
   }),
 );
 
 Deno.test(
-  "routeThinkingLevelWithRespan routes caching through injected makeCache rather than bypassing injectCacher",
+  "routeThinkingLevelWithGemini routes caching through injected makeCache rather than bypassing injectCacher",
   async () => {
     const seenCacheIds: string[] = [];
     const customCacher = (cacheId: string) =>
@@ -387,12 +437,11 @@ Deno.test(
       await req.json();
       return new Response(
         JSON.stringify({
-          model: "span-02",
           answers: {
             thinking_level: {
               type: "choice",
               choice: "low",
-              confidence: 0.98,
+              confidence: 0.99,
               probabilities: { low: 0.99, high: 0.01 },
             },
           },
@@ -402,24 +451,24 @@ Deno.test(
     });
 
     const url = `http://localhost:${server.addr.port}`;
-    await injectCacher(customCacher)(
-      injectRespanUrl(url)(
-        injectRespanToken("fake-token")(async () => {
-          const level = await routeThinkingLevelWithRespan(
-            `unique-route-state-${Date.now()}-${Math.random()}`,
-          );
-          assertEquals(level, "LOW");
-          assertEquals(seenCacheIds.includes("respan-thinking-level-v1"), true);
-        }),
-      ),
-    )();
+    await pipe(
+      injectCacher(customCacher),
+      injectGeminiDecisionUrl(url),
+      injectGeminiDecisionToken("fake-token"),
+    )(async () => {
+      const level = await routeThinkingLevelWithGemini(
+        `unique-route-state-${Date.now()}-${Math.random()}`,
+      );
+      assertEquals(level, "LOW");
+      assertEquals(seenCacheIds.includes(geminiThinkingLevelCacheId), true);
+    })();
 
     await server.shutdown();
   },
 );
 
 Deno.test(
-  "decide evaluates boolean schema with 'Whether ... is classified as ...' description and empty Jev token in pipe",
+  "decide evaluates boolean schema with 'Whether ... is classified as ...' description with Gemini Decision 1",
   injectSecrets(async () => {
     const moderatorPrompt = [
       "You are a group moderator agent.",
@@ -454,16 +503,16 @@ Deno.test(
 
     const checkSpam = decide(moderatorPrompt, ModerationSchema);
 
-    await injectDecisionProvider("respan")(
-      injectRespanToken(Deno.env.get("RESPAN_API_KEY")!)(
-        injectJevToken("")(async () => {
-          const spamRes = await checkSpam(spamMsg);
-          assertEquals(spamRes.isSpam, true);
+    await pipe(
+      injectDecisionProvider("gemini"),
+      injectJevToken(""),
+      injectRespanToken(""),
+    )(async () => {
+      const spamRes = await checkSpam(spamMsg);
+      assertEquals(spamRes.isSpam, true);
 
-          const cleanRes = await checkSpam(cleanMsg);
-          assertEquals(cleanRes.isSpam, false);
-        }),
-      ),
-    )();
+      const cleanRes = await checkSpam(cleanMsg);
+      assertEquals(cleanRes.isSpam, false);
+    })();
   }),
 );

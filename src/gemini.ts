@@ -190,13 +190,20 @@ export const validateZodSchema = (
   validateSchema(jsonSchema, path);
 };
 
-const tokenInjection: Injection<() => string> = context((): string => {
-  throw new Error("no gemini token injected");
-});
+const optionalTokenInjection: Injection<() => string | undefined> = context(
+  (): string | undefined => undefined,
+);
 
-export const accessGeminiToken = tokenInjection.access;
+export const accessOptionalGeminiToken = optionalTokenInjection.access;
+
+export const accessGeminiToken = (): string => {
+  const token = optionalTokenInjection.access();
+  if (token === undefined) throw new Error("no gemini token injected");
+  return token;
+};
+
 export const injectGeminiToken = (token: string): Injector =>
-  tokenInjection.inject(() => token);
+  optionalTokenInjection.inject(() => token);
 
 const openAiToGeminiMessage = pipe(
   map(({ role, content }: ChatCompletionMessageParam): Content => ({
@@ -276,7 +283,7 @@ const parseGenJsonResponse = (response: GenerateContentResponse) => {
 const generateContentInjection: Injection<
   (req: GenerateContentParameters) => Promise<GenerateContentResponse>
 > = context((req: GenerateContentParameters) =>
-  new GoogleGenAI({ apiKey: tokenInjection.access() }).models.generateContent(
+  new GoogleGenAI({ apiKey: accessGeminiToken() }).models.generateContent(
     req,
   )
 );
@@ -426,7 +433,7 @@ export const geminiGenText = async (
       3,
       () =>
         new GoogleGenAI({
-          apiKey: tokenInjection.access(),
+          apiKey: accessGeminiToken(),
         }).models.generateContent(req(model)),
     )();
 
@@ -451,7 +458,7 @@ const rawUploadBlobToGemini = async (
 ): Promise<UploadResult> => {
   const uploadUrl =
     `https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=media&key=${
-      encodeURIComponent(tokenInjection.access())
+      encodeURIComponent(accessGeminiToken())
     }`;
   const res = await fetch(uploadUrl, {
     method: "POST",
