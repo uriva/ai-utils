@@ -65,8 +65,28 @@ const removeAdditionalProperties = <T>(obj: Record<string, any>) => {
     delete newObj.patternProperties;
 
     if (newObj.const !== undefined) {
-      newObj.enum = [newObj.const];
+      if (typeof newObj.const === "string") {
+        newObj.enum = [newObj.const];
+      } else {
+        const constraintHint = `Must equal ${JSON.stringify(newObj.const)}.`;
+        newObj.description = newObj.description
+          ? `${newObj.description} (${constraintHint})`
+          : constraintHint;
+      }
       delete newObj.const;
+    }
+
+    if (
+      Array.isArray(newObj.enum) &&
+      !newObj.enum.every((v: unknown) => typeof v === "string")
+    ) {
+      const allowedHint = `Allowed values: ${
+        newObj.enum.map((v: unknown) => JSON.stringify(v)).join(", ")
+      }.`;
+      newObj.description = newObj.description
+        ? `${newObj.description} (${allowedHint})`
+        : allowedHint;
+      delete newObj.enum;
     }
 
     for (const key in newObj) {
@@ -119,6 +139,14 @@ export const validateSchema = (schema: any, path: string = "root"): void => {
   if ("const" in schema) {
     throw new Error(
       `Unsupported schema construct 'const' at ${path}. const is not supported (use enum instead).`,
+    );
+  }
+  if (
+    Array.isArray(schema.enum) &&
+    !schema.enum.every((v: unknown) => typeof v === "string")
+  ) {
+    throw new Error(
+      `Unsupported non-string 'enum' value at ${path}. Gemini function declarations only support string enum values.`,
     );
   }
 
