@@ -255,7 +255,25 @@ Deno.test("formatAgentStateForJev preserves tool_result content and tool_call in
   );
 });
 
-Deno.test("buildReq always uses flash model and applies ThinkingLevel constants without numbers", () => {
+Deno.test("buildReq always uses flash model, omits thinkingLevel when undefined, and applies ThinkingLevel constants without numbers", () => {
+  const defaultReq = buildReq(
+    undefined,
+    "You are a helpful assistant.",
+    [],
+    "UTC",
+    undefined,
+  )([]);
+  assertEquals(defaultReq.model, "gemini-4-hydrogen");
+  assertEquals(
+    "thinkingLevel" in (defaultReq.config?.thinkingConfig ?? {}),
+    false,
+  );
+  assertEquals(defaultReq.config?.thinkingConfig?.includeThoughts, true);
+  assertEquals(
+    "thinkingBudget" in (defaultReq.config?.thinkingConfig ?? {}),
+    false,
+  );
+
   const lowReq = buildReq(
     ThinkingLevel.LOW,
     "You are a helpful assistant.",

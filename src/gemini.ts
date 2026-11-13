@@ -283,11 +283,11 @@ export const alternateGeminiModelVersion = (model: string) => {
 };
 
 export const geminiThinkingConfig = (
-  thinkingLevel: ThinkingLevel = ThinkingLevel.HIGH,
+  thinkingLevel?: ThinkingLevel,
   includeThoughts = true,
 ): ThinkingConfig => ({
   includeThoughts,
-  thinkingLevel,
+  ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
 });
 
 // Parse (and validation-failure) errors must happen INSIDE the cached
@@ -383,7 +383,7 @@ export const geminiGenJsonFromConvo: <T extends ZodType>(
         thinkingConfig: geminiThinkingConfig(
           resolvedTier === "lite" || disableThinking
             ? ThinkingLevel.LOW
-            : ThinkingLevel.HIGH,
+            : undefined,
           !disableThinking && resolvedTier !== "lite",
         ),
         ...(maxOutputTokens ? { maxOutputTokens } : {}),
@@ -445,7 +445,7 @@ export const geminiGenText = async (
       thinkingConfig: geminiThinkingConfig(
         resolvedTier === "lite" || disableThinking
           ? ThinkingLevel.LOW
-          : ThinkingLevel.HIGH,
+          : undefined,
         !disableThinking && resolvedTier !== "lite",
       ),
       ...(maxOutputTokens ? { maxOutputTokens } : {}),

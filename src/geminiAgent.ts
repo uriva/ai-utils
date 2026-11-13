@@ -985,7 +985,7 @@ const prependConversationContext = (
 ];
 
 export const buildReq = (
-  thinkingLevel: ThinkingLevel,
+  thinkingLevel: ThinkingLevel | undefined,
   prompt: string,
   tools: Tool<ZodType>[],
   timezoneIANA: string,

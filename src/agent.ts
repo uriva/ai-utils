@@ -2761,10 +2761,12 @@ const thinkingLevelFromToolCall = (
   return undefined;
 };
 
-export const activeThinkingLevel = (history: HistoryEvent[]): ThinkingLevel =>
-  sortedByTimestamp(history).reduce<ThinkingLevel>(
+export const activeThinkingLevel = (
+  history: HistoryEvent[],
+): ThinkingLevel | undefined =>
+  sortedByTimestamp(history).reduce<ThinkingLevel | undefined>(
     (level, e) => thinkingLevelFromToolCall(e) ?? level,
-    ThinkingLevel.LOW,
+    undefined,
   );
 
 const activeSkillNames = (history: HistoryEvent[]): Set<string> => {

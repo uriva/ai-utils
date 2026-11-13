@@ -106,8 +106,13 @@ Deno.test(
 );
 
 Deno.test(
-  "geminiThinkingConfig uses ThinkingLevel constants and never thinkingBudget numbers",
+  "geminiThinkingConfig omits thinkingLevel by default and uses ThinkingLevel constants without numbers when specified",
   () => {
+    const defaultConfig = geminiThinkingConfig();
+    assert(defaultConfig.includeThoughts === true);
+    assert(!("thinkingLevel" in defaultConfig));
+    assert(!("thinkingBudget" in defaultConfig));
+
     const highConfig = geminiThinkingConfig(ThinkingLevel.HIGH);
     assert(highConfig.includeThoughts === true);
     assertEquals(highConfig.thinkingLevel, ThinkingLevel.HIGH);
@@ -122,6 +127,44 @@ Deno.test(
     assertEquals(disabledConfig.includeThoughts, false);
     assertEquals(disabledConfig.thinkingLevel, ThinkingLevel.LOW);
     assert(!("thinkingBudget" in disabledConfig));
+  },
+);
+
+Deno.test(
+  "geminiGenJsonFromConvo omits thinkingLevel by default on flash and pro tiers",
+  async () => {
+    const capturedReqs: GenerateContentParameters[] = [];
+    const fakeGenerateContent = (req: GenerateContentParameters) => {
+      capturedReqs.push(req);
+      return Promise.resolve({
+        candidates: [{ finishReason: "STOP" }],
+        text: '{"ok": true}',
+      } as unknown as GenerateContentResponse);
+    };
+
+    await pipe(
+      injectGeminiGenerateContent(fakeGenerateContent),
+    )(async () => {
+      await geminiGenJsonFromConvo(
+        { tier: "flash" },
+        [{ role: "user", content: "hello flash" }],
+        z.object({ ok: z.boolean() }),
+      );
+      await geminiGenJsonFromConvo(
+        { tier: "pro" },
+        [{ role: "user", content: "hello pro" }],
+        z.object({ ok: z.boolean() }),
+      );
+    })();
+
+    assertEquals(capturedReqs.length, 2);
+    for (const req of capturedReqs) {
+      assertEquals(req.config?.thinkingConfig?.includeThoughts, true);
+      assertEquals(
+        "thinkingLevel" in (req.config?.thinkingConfig ?? {}),
+        false,
+      );
+    }
   },
 );
 
@@ -188,9 +231,9 @@ Deno.test(
 );
 
 Deno.test(
-  "dynamicCallModel routes standard queries to ThinkingLevel.LOW via decision model without caller config",
+  "dynamicCallModel omits thinkingLevel on initial turn to use model default without caller config",
   async () => {
-    let capturedThinkingLevel: ThinkingLevel | undefined;
+    let capturedThinkingLevel: ThinkingLevel | undefined = ThinkingLevel.HIGH;
     const history: HistoryEvent[] = [
       participantUtteranceTurn({
         name: "user",
@@ -214,12 +257,12 @@ Deno.test(
       )()
     )();
 
-    assertEquals(capturedThinkingLevel, ThinkingLevel.LOW);
+    assertEquals(capturedThinkingLevel, undefined);
   },
 );
 
 Deno.test(
-  "thinkingLevel is conversation state: starts at ThinkingLevel.LOW without blocking on decision model, updates in background to HIGH, and transitions back to LOW",
+  "thinkingLevel is conversation state: starts unset (model default) without blocking on decision model, updates in background to HIGH, and transitions to LOW",
   async () => {
     const delay = (ms: number) =>
       new Promise((resolve) => setTimeout(resolve, ms));
@@ -304,8 +347,8 @@ Deno.test(
       }ms`,
     );
 
-    // Iteration 1 starts at default ThinkingLevel.LOW; Iteration 2 picks up background transition to HIGH
-    assertEquals(capturedLevels, [ThinkingLevel.LOW, ThinkingLevel.HIGH]);
+    // Iteration 1 starts unset (model default); Iteration 2 picks up background transition to HIGH
+    assertEquals(capturedLevels, [undefined, ThinkingLevel.HIGH]);
 
     // Synthetic thinking level state events must not leak into model-facing preparedHistory
     for (const modelEvents of capturedHistories) {
@@ -352,7 +395,7 @@ Deno.test(
     await delay(DECISION_DELAY_MS + 50);
 
     assertEquals(capturedLevels, [
-      ThinkingLevel.LOW,
+      undefined,
       ThinkingLevel.HIGH,
       ThinkingLevel.HIGH,
       ThinkingLevel.LOW,
