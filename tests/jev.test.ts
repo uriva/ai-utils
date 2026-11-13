@@ -24,15 +24,15 @@ const decisionProviders: DecisionProvider[] = [
   ...(Deno.env.get("GEMINI_API_KEY") ? ["gemini" as const] : []),
 ];
 
-Deno.test("geminiModelVersions eliminates 3.7-flash and aligns pro with 3.8-flash", () => {
-  assertEquals(geminiProVersion, "gemini-3.8-flash");
-  assertEquals(geminiFlashVersion, "gemini-3.8-flash");
+Deno.test("geminiModelVersions sets pro to gemini-4-carbon and flash to gemini-4-hydrogen", () => {
+  assertEquals(geminiProVersion, "gemini-4-carbon");
+  assertEquals(geminiFlashVersion, "gemini-4-hydrogen");
 });
 
 Deno.test("geminiModelVersion resolves lite, pro, and flash", () => {
   assertEquals(geminiModelVersion("lite"), "gemini-3.5-flash-lite");
-  assertEquals(geminiModelVersion("pro"), "gemini-3.8-flash");
-  assertEquals(geminiModelVersion("flash"), "gemini-3.8-flash");
+  assertEquals(geminiModelVersion("pro"), "gemini-4-carbon");
+  assertEquals(geminiModelVersion("flash"), "gemini-4-hydrogen");
 });
 
 Deno.test("routeTask falls back to flash when no token is present", async () => {
@@ -263,7 +263,7 @@ Deno.test("buildReq always uses flash model and applies ThinkingLevel constants 
     "UTC",
     undefined,
   )([]);
-  assertEquals(lowReq.model, "gemini-3.8-flash");
+  assertEquals(lowReq.model, "gemini-4-hydrogen");
   assertEquals(lowReq.config?.thinkingConfig?.thinkingLevel, ThinkingLevel.LOW);
   assertEquals(lowReq.config?.thinkingConfig?.includeThoughts, true);
   assertEquals(
@@ -278,7 +278,7 @@ Deno.test("buildReq always uses flash model and applies ThinkingLevel constants 
     "UTC",
     undefined,
   )([]);
-  assertEquals(highReq.model, "gemini-3.8-flash");
+  assertEquals(highReq.model, "gemini-4-hydrogen");
   assertEquals(
     highReq.config?.thinkingConfig?.thinkingLevel,
     ThinkingLevel.HIGH,

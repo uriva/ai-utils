@@ -251,8 +251,8 @@ type GeminiModelVersions = {
 };
 
 const defaultGeminiModelVersions: GeminiModelVersions = {
-  pro: "gemini-3.8-flash",
-  flash: "gemini-3.8-flash",
+  pro: "gemini-4-carbon",
+  flash: "gemini-4-hydrogen",
   lite: "gemini-3.5-flash-lite",
   fallback: "gemini-3.5-flash-lite",
 };
