@@ -886,15 +886,6 @@ export const extractCandidateToolEpisodes = (
   });
 };
 
-export const autoUnlearnMinActiveSkillsChars = 32_000;
-
-const skillLoadedCharFootprint = (skill: Skill) =>
-  skill.instructions.length +
-  (skill.references ?? []).reduce((sum, ref) => sum + ref.content.length, 0);
-
-const activeSkillsFootprintChars = (skills: Skill[]) =>
-  skills.reduce((sum, skill) => sum + skillLoadedCharFootprint(skill), 0);
-
 const isDeferredToolWakeupHistory = (history: HistoryEvent[]): boolean => {
   const lifecycleCallIds = new Set(
     history
@@ -937,10 +928,9 @@ export const decideSkillsWithDecisionModel = async (
   const activeSkills = candidateSkills.filter(
     (s) => currentlyActiveSkills.has(s.name.toLowerCase()),
   );
-  const evaluateActiveUnlearn = activeSkillsFootprintChars(activeSkills) >=
-      autoUnlearnMinActiveSkillsChars &&
-    !isDeferredToolWakeupHistory(history);
-  const unlearnCandidates = evaluateActiveUnlearn ? activeSkills : [];
+  const unlearnCandidates = isDeferredToolWakeupHistory(history)
+    ? []
+    : activeSkills;
   if (empty(inactiveSkills) && empty(unlearnCandidates)) {
     return { toLearn: [], toUnlearn: [] };
   }

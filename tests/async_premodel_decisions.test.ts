@@ -787,9 +787,9 @@ Deno.test(
 );
 
 Deno.test(
-  "auto-learn and auto-unlearn omit hardcoded English spinnerText and avoid unlearning compact skills or deferred wake-ups",
+  "auto-learn and auto-unlearn omit hardcoded English spinnerText and avoid unlearning during active tool workflows or deferred wake-ups",
   async () => {
-    const compactHistory: HistoryEvent[] = [
+    const workflowHistory: HistoryEvent[] = [
       participantUtteranceTurn({ name: "user", text: "Export data." }),
       {
         ...toolUseTurn({
@@ -822,15 +822,28 @@ Deno.test(
         ),
       );
 
+    const counters = { step: 0 };
     await pipe(
       injectDecisionModel(lowScoreDecisionCaller),
-      injectCallModel(() => Promise.resolve([ownUtteranceTurn("Done.")])),
-      inMemoryDeps(compactHistory),
+      injectCallModel(() => {
+        counters.step++;
+        return counters.step === 1
+          ? Promise.resolve([toolUseTurn({ name: "crop_clip", args: {} })])
+          : Promise.resolve([ownUtteranceTurn("Cropped.")]);
+      }),
+      inMemoryDeps(workflowHistory),
     )(() =>
       runAgent({
         provider: "anthropic",
-        maxIterations: 3,
-        tools: [],
+        maxIterations: 4,
+        tools: [
+          {
+            name: "crop_clip",
+            description: "Crop clip",
+            parameters: z.object({}),
+            handler: () => Promise.resolve("ok"),
+          },
+        ],
         skills: [sampleSkill],
         prompt: "You are an assistant.",
         timezoneIANA: "UTC",
@@ -838,13 +851,13 @@ Deno.test(
     )();
     await delay(30);
 
-    const compactUnlearns = compactHistory.filter(
+    const workflowUnlearns = workflowHistory.filter(
       (e) => e.type === "tool_call" && e.id.startsWith("auto-unlearn-"),
     );
     assertEquals(
-      compactUnlearns.length,
+      workflowUnlearns.length,
       0,
-      "Compact active skills must stay active to preserve prefix cache and avoid mid-workflow churn",
+      "Active tool workflow turns must not unlearn sibling skills mid-session",
     );
 
     const largeSkill: Skill = {

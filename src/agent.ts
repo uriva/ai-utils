@@ -3215,11 +3215,25 @@ const emitSingleUnlearnSkillEvent = async (skill: Skill): Promise<void> => {
   });
 };
 
+const isInternalLifecycleToolName = (name: string): boolean =>
+  name === learnSkillToolName ||
+  name === unlearnSkillToolName ||
+  name === setThinkingLevelToolName ||
+  name === cleanActiveMemoryToolName;
+
+const currentRequestExecutedWorkflowTools = (
+  history: HistoryEvent[],
+): boolean =>
+  currentRequestEvents(history).some(
+    (e) => e.type === "tool_call" && !isInternalLifecycleToolName(e.name),
+  );
+
 const emitPendingUnlearnEvents = async (
   toUnlearn: Skill[],
 ): Promise<void> => {
   if (empty(toUnlearn)) return;
   const history = await getHistory();
+  if (currentRequestExecutedWorkflowTools(history)) return;
   const currentActive = activeSkillNames(history);
   const freshToUnlearn = toUnlearn.filter(
     (skill) =>
