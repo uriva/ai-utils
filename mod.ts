@@ -261,6 +261,7 @@ export {
   toolUseTurnWithMetadata,
   topLevelToolCorrection,
   truncateToolOutput,
+  turnTimeBudgetWrapUpThought,
   unlearnSkillToolName,
   waitAllPreModelDecisions,
 } from "./src/agent.ts";

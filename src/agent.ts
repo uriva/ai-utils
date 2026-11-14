@@ -66,6 +66,8 @@ export const stopThoughtPrefix =
   "I'm working on this for some time and not making progress.";
 export const stopThoughtDefault =
   `${stopThoughtPrefix} I should instead stop and ask the user for feedback.`;
+export const turnTimeBudgetWrapUpThought =
+  `${stopThoughtPrefix} I have reached the execution time budget for this turn, so I should stop further exploratory tool calls immediately and conclude now with my best current findings or result.`;
 export const forcedStopUtterance =
   "I'm sorry, I have been working on this for some time but am unable to make progress. I will stop here and ask for your feedback on how to proceed.";
 
@@ -3419,6 +3421,7 @@ export type AgentSpec = AgentInputs & {
   onStreamChunk?: (chunk: string) => Promise<void> | void;
   onStreamThinkingChunk?: (chunk: string) => Promise<void> | void;
   maxIterations: number;
+  maxTurnDurationMs?: number;
   disableStreaming?: boolean;
   provider?: "google" | "moonshot" | "anthropic";
   compactHistory?: (history: HistoryEvent[]) => Promise<void>;
@@ -3507,6 +3510,50 @@ const projectModelContext = (
     onlyUseCachedSummaries: Boolean(spec.compactHistory),
   });
 
+type ProgressGateState = {
+  stopAdviceCount: number;
+  timeBudgetWarned: boolean;
+  turnStartedAt: number;
+};
+
+const checkTurnTimeBudget = (
+  maxTurnDurationMs: number | undefined,
+  c: number,
+  state: ProgressGateState,
+):
+  | {
+    kind: "run";
+    stopAdviceCount: number;
+    timeBudgetWarned: boolean;
+    injectedThought: HistoryEvent;
+  }
+  | { kind: "force-stop" }
+  | null => {
+  if (
+    c <= 1 ||
+    !maxTurnDurationMs ||
+    maxTurnDurationMs <= 0 ||
+    Date.now() - state.turnStartedAt < maxTurnDurationMs
+  ) {
+    return null;
+  }
+  if (state.timeBudgetWarned) {
+    console.log(
+      `[agent-time-budget] turn exceeded maxTurnDurationMs (${maxTurnDurationMs}ms) after wrap-up warning; forcing stop. c=${c}`,
+    );
+    return { kind: "force-stop" };
+  }
+  console.log(
+    `[agent-time-budget] turn reached maxTurnDurationMs (${maxTurnDurationMs}ms); injecting wrap-up thought. c=${c}`,
+  );
+  return {
+    kind: "run",
+    stopAdviceCount: state.stopAdviceCount,
+    timeBudgetWarned: true,
+    injectedThought: ownThoughtTurn(turnTimeBudgetWrapUpThought),
+  };
+};
+
 // Pre-call meta-cognition gate: every `maxIterations` turns (or while a stop
 // has been advised) the bigger model audits whether the run still makes
 // progress. The first stop verdict softens into an injected thought so the
@@ -3514,27 +3561,38 @@ const projectModelContext = (
 // user-facing utterance that ends the run.
 const maybeRunProgressCheck = async (
   spec: AgentSpec,
-  state: {
-    c: number;
-    stopAdviceCount: number;
-    normalizedHistory: HistoryEvent[];
-  },
+  c: number,
+  state: ProgressGateState,
+  normalizedHistory: HistoryEvent[],
 ): Promise<
-  | { kind: "run"; stopAdviceCount: number; injectedThought?: HistoryEvent }
+  | {
+    kind: "run";
+    stopAdviceCount: number;
+    timeBudgetWarned: boolean;
+    injectedThought?: HistoryEvent;
+  }
   | { kind: "force-stop" }
 > => {
-  const { c, stopAdviceCount, normalizedHistory } = state;
-  const due = hasUnansweredUserMessage(normalizedHistory) &&
+  const timeBudgetResult = checkTurnTimeBudget(
+    spec.maxTurnDurationMs,
+    c,
+    state,
+  );
+  if (timeBudgetResult) return timeBudgetResult;
+  const { stopAdviceCount, timeBudgetWarned } = state;
+  const canAudit = nonempty(normalizedHistory) &&
+    (c > 1 || hasUnansweredUserMessage(normalizedHistory));
+  const due = canAudit &&
     ((c > 0 && spec.maxIterations > 0 && c % spec.maxIterations === 0) ||
       stopAdviceCount > 0);
-  if (!due) return { kind: "run", stopAdviceCount };
+  if (!due) return { kind: "run", stopAdviceCount, timeBudgetWarned };
   console.log(
     `[agent-progress-check] c=${c} stopAdviceCount=${stopAdviceCount} - running progress check with the bigger model`,
   );
   const checkResult = await checkProgress(spec, normalizedHistory);
   if (checkResult.shouldContinue) {
     console.log(`[agent-progress-check] judged to be good to continue. c=${c}`);
-    return { kind: "run", stopAdviceCount: 0 };
+    return { kind: "run", stopAdviceCount: 0, timeBudgetWarned };
   }
   const escalated = stopAdviceCount + 1 >= 2;
   if (escalated) {
@@ -3552,6 +3610,7 @@ const maybeRunProgressCheck = async (
   return {
     kind: "run",
     stopAdviceCount: stopAdviceCount + 1,
+    timeBudgetWarned,
     injectedThought: ownThoughtTurn(stopThought),
   };
 };
@@ -3638,7 +3697,11 @@ export const runAbstractAgent = (
     const skillsArr = skills ?? [];
     let c = 0;
     let ephemeralHistory: HistoryEvent[] = [];
-    let stopAdviceCount = 0;
+    const progressState: ProgressGateState = {
+      stopAdviceCount: 0,
+      timeBudgetWarned: false,
+      turnStartedAt: Date.now(),
+    };
     const retryCounts = {
       emojiFlood: 0,
       repetitionFlood: 0,
@@ -3687,18 +3750,20 @@ export const runAbstractAgent = (
         scratchPad,
       );
 
-      const progress = await maybeRunProgressCheck(spec, {
+      const progress = await maybeRunProgressCheck(
+        spec,
         c,
-        stopAdviceCount,
+        progressState,
         normalizedHistory,
-      });
+      );
       if (progress.kind === "force-stop") {
         if (hasUnansweredUserMessage(normalizedHistory)) {
           await outputEvent(ownUtteranceTurn(forcedStopUtterance));
         }
         return;
       }
-      stopAdviceCount = progress.stopAdviceCount;
+      progressState.stopAdviceCount = progress.stopAdviceCount;
+      progressState.timeBudgetWarned = progress.timeBudgetWarned;
       if (progress.injectedThought) {
         await outputEvent(progress.injectedThought);
         ephemeralHistory = [...ephemeralHistory, progress.injectedThought];
