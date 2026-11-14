@@ -785,3 +785,215 @@ Deno.test(
     assertEquals(decisionCompleted, true);
   },
 );
+
+Deno.test(
+  "auto-learn and auto-unlearn omit hardcoded English spinnerText and avoid unlearning compact skills or deferred wake-ups",
+  async () => {
+    const compactHistory: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "Export data." }),
+      {
+        ...toolUseTurn({
+          name: "learn_skill",
+          args: { skillName: "data_exporter" },
+        }),
+        id: "learn-1",
+      },
+      toolResultTurn({
+        toolCallId: "learn-1",
+        result: 'Skill "data_exporter" learned successfully.',
+      }),
+      ownUtteranceTurn("Exported."),
+      participantUtteranceTurn({ name: "user", text: "Make it vertical." }),
+    ];
+
+    const lowScoreDecisionCaller = (
+      _state: unknown,
+      // deno-lint-ignore no-explicit-any
+      questions: Record<string, any>,
+    ) =>
+      Promise.resolve(
+        Object.fromEntries(
+          Object.keys(questions).map((key) => [
+            key,
+            key === "requires_flash"
+              ? { type: "choice" as const, choice: "lite" }
+              : { type: "noul" as const, noul: 0.05 },
+          ]),
+        ),
+      );
+
+    await pipe(
+      injectDecisionModel(lowScoreDecisionCaller),
+      injectCallModel(() => Promise.resolve([ownUtteranceTurn("Done.")])),
+      inMemoryDeps(compactHistory),
+    )(() =>
+      runAgent({
+        provider: "anthropic",
+        maxIterations: 3,
+        tools: [],
+        skills: [sampleSkill],
+        prompt: "You are an assistant.",
+        timezoneIANA: "UTC",
+      })
+    )();
+    await delay(30);
+
+    const compactUnlearns = compactHistory.filter(
+      (e) => e.type === "tool_call" && e.id.startsWith("auto-unlearn-"),
+    );
+    assertEquals(
+      compactUnlearns.length,
+      0,
+      "Compact active skills must stay active to preserve prefix cache and avoid mid-workflow churn",
+    );
+
+    const largeSkill: Skill = {
+      name: "heavy_manual",
+      description: "Large reference manual",
+      instructions: "Manual section. ".repeat(2500),
+      tools: [],
+    };
+    const deferredWakeupHistory: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "Process job." }),
+      {
+        ...toolUseTurn({
+          name: "learn_skill",
+          args: { skillName: "heavy_manual" },
+        }),
+        id: "learn-heavy",
+      },
+      toolResultTurn({
+        toolCallId: "learn-heavy",
+        result: 'Skill "heavy_manual" learned successfully.',
+      }),
+      {
+        ...toolUseTurn({ name: "start_job", args: {} }),
+        id: "deferred-1",
+      },
+      toolResultTurn({
+        toolCallId: "deferred-1",
+        result: "Background job finished.",
+      }),
+    ];
+
+    await pipe(
+      injectDecisionModel(lowScoreDecisionCaller),
+      injectCallModel(() =>
+        Promise.resolve([ownUtteranceTurn("Job finished!")])
+      ),
+      inMemoryDeps(deferredWakeupHistory),
+    )(() =>
+      runAgent({
+        provider: "anthropic",
+        maxIterations: 3,
+        tools: [],
+        skills: [largeSkill],
+        prompt: "You are an assistant.",
+        timezoneIANA: "UTC",
+      })
+    )();
+    await delay(30);
+
+    const wakeupUnlearns = deferredWakeupHistory.filter(
+      (e) => e.type === "tool_call" && e.id.startsWith("auto-unlearn-"),
+    );
+    assertEquals(
+      wakeupUnlearns.length,
+      0,
+      "Deferred tool wake-up must not emit auto-unlearn mid-workflow",
+    );
+
+    const learnHistory: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "Export data." }),
+    ];
+    const highScoreDecisionCaller = (
+      _state: unknown,
+      // deno-lint-ignore no-explicit-any
+      questions: Record<string, any>,
+    ) =>
+      Promise.resolve(
+        Object.fromEntries(
+          Object.keys(questions).map((key) => [
+            key,
+            key === "requires_flash"
+              ? { type: "choice" as const, choice: "lite" }
+              : { type: "noul" as const, noul: 0.95 },
+          ]),
+        ),
+      );
+
+    await pipe(
+      injectDecisionModel(highScoreDecisionCaller),
+      injectCallModel(() => Promise.resolve([ownUtteranceTurn("Exported.")])),
+      inMemoryDeps(learnHistory),
+    )(() =>
+      runAgent({
+        provider: "anthropic",
+        maxIterations: 3,
+        tools: [],
+        skills: [sampleSkill],
+        prompt: "You are an assistant.",
+        timezoneIANA: "UTC",
+      })
+    )();
+    await delay(30);
+
+    const autoLearn = learnHistory.find(
+      (e): e is Extract<HistoryEvent, { type: "tool_call" }> =>
+        e.type === "tool_call" && e.id.startsWith("auto-learn-"),
+    );
+    assert(autoLearn !== undefined, "Expected auto-learn event");
+    assertEquals(
+      (autoLearn.parameters as Record<string, unknown>).spinnerText,
+      undefined,
+      "auto-learn must not inject hardcoded English spinnerText",
+    );
+
+    const bloatedTurnHistory: HistoryEvent[] = [
+      participantUtteranceTurn({ name: "user", text: "Read manual." }),
+      {
+        ...toolUseTurn({
+          name: "learn_skill",
+          args: { skillName: "heavy_manual" },
+        }),
+        id: "learn-heavy-2",
+      },
+      toolResultTurn({
+        toolCallId: "learn-heavy-2",
+        result: 'Skill "heavy_manual" learned successfully.',
+      }),
+      ownUtteranceTurn("Loaded."),
+      participantUtteranceTurn({ name: "user", text: "Thanks, goodbye!" }),
+    ];
+
+    await pipe(
+      injectDecisionModel(lowScoreDecisionCaller),
+      injectCallModel(() => Promise.resolve([ownUtteranceTurn("Goodbye!")])),
+      inMemoryDeps(bloatedTurnHistory),
+    )(() =>
+      runAgent({
+        provider: "anthropic",
+        maxIterations: 3,
+        tools: [],
+        skills: [largeSkill],
+        prompt: "You are an assistant.",
+        timezoneIANA: "UTC",
+      })
+    )();
+    await delay(30);
+
+    const bloatedUnlearn = bloatedTurnHistory.find(
+      (e): e is Extract<HistoryEvent, { type: "tool_call" }> =>
+        e.type === "tool_call" && e.id.startsWith("auto-unlearn-"),
+    );
+    assert(
+      bloatedUnlearn !== undefined,
+      "Expected auto-unlearn when active skill footprint exceeds threshold on fresh turn",
+    );
+    assertEquals(
+      (bloatedUnlearn.parameters as Record<string, unknown>).spinnerText,
+      undefined,
+      "auto-unlearn must not inject hardcoded English spinnerText",
+    );
+  },
+);

@@ -1406,6 +1406,14 @@ Deno.test("createSkillTools describes spinnerText to match conversation language
     desc.includes("same language as the conversation"),
     "spinnerText description must instruct matching the conversation language",
   );
+  assert(
+    desc.toLowerCase().includes("default to english"),
+    "spinnerText description must specify defaulting to English on URL/media-only inputs",
+  );
+  assert(
+    !/[\u0590-\u05FF]/.test(desc),
+    "spinnerText description must not embed Hebrew example strings that bias URL-only chats",
+  );
 });
 
 Deno.test("createSkillTools run_command parameters allow omitting spinnerText", () => {

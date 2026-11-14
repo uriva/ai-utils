@@ -886,6 +886,34 @@ export const extractCandidateToolEpisodes = (
   });
 };
 
+export const autoUnlearnMinActiveSkillsChars = 32_000;
+
+const skillLoadedCharFootprint = (skill: Skill) =>
+  skill.instructions.length +
+  (skill.references ?? []).reduce((sum, ref) => sum + ref.content.length, 0);
+
+const activeSkillsFootprintChars = (skills: Skill[]) =>
+  skills.reduce((sum, skill) => sum + skillLoadedCharFootprint(skill), 0);
+
+const isDeferredToolWakeupHistory = (history: HistoryEvent[]): boolean => {
+  const lifecycleCallIds = new Set(
+    history
+      .filter(
+        (e): e is Extract<HistoryEvent, { type: "tool_call" }> =>
+          e.type === "tool_call" && isLifecycleToolCallName(e.name),
+      )
+      .map((e) => e.id),
+  );
+  const lastSubstantive = history.findLast(
+    (e) =>
+      e.type !== "own_thought" &&
+      !(e.type === "tool_call" && isLifecycleToolCallName(e.name)) &&
+      !(e.type === "tool_result" && e.toolCallId &&
+        lifecycleCallIds.has(e.toolCallId)),
+  );
+  return lastSubstantive?.type === "tool_result";
+};
+
 export const decideSkillsWithDecisionModel = async (
   prompt: string,
   history: HistoryEvent[],
@@ -900,6 +928,20 @@ export const decideSkillsWithDecisionModel = async (
   }
   const lastUser = lastParticipantUtterance(history);
   if (!lastUser || typeof lastUser.text !== "string" || !lastUser.text.trim()) {
+    return { toLearn: [], toUnlearn: [] };
+  }
+
+  const inactiveSkills = candidateSkills.filter(
+    (s) => !currentlyActiveSkills.has(s.name.toLowerCase()),
+  );
+  const activeSkills = candidateSkills.filter(
+    (s) => currentlyActiveSkills.has(s.name.toLowerCase()),
+  );
+  const evaluateActiveUnlearn = activeSkillsFootprintChars(activeSkills) >=
+      autoUnlearnMinActiveSkillsChars &&
+    !isDeferredToolWakeupHistory(history);
+  const unlearnCandidates = evaluateActiveUnlearn ? activeSkills : [];
+  if (empty(inactiveSkills) && empty(unlearnCandidates)) {
     return { toLearn: [], toUnlearn: [] };
   }
 
@@ -925,13 +967,6 @@ export const decideSkillsWithDecisionModel = async (
     current_user_request: lastUser.text.toWellFormed(),
   };
 
-  const inactiveSkills = candidateSkills.filter(
-    (s) => !currentlyActiveSkills.has(s.name.toLowerCase()),
-  );
-  const activeSkills = candidateSkills.filter(
-    (s) => currentlyActiveSkills.has(s.name.toLowerCase()),
-  );
-
   const questions = Object.fromEntries([
     ...inactiveSkills.map((s) => [
       s.name,
@@ -941,7 +976,7 @@ export const decideSkillsWithDecisionModel = async (
           `Does answering this turn or executing the user request directly require the '${s.name}' skill (${s.description})?`,
       },
     ]),
-    ...activeSkills.map((s) => [
+    ...unlearnCandidates.map((s) => [
       s.name,
       {
         type: "noul" as const,
@@ -973,7 +1008,7 @@ export const decideSkillsWithDecisionModel = async (
       ]
       : [];
 
-    const toUnlearn = activeSkills
+    const toUnlearn = unlearnCandidates
       .filter((s) => (scores[s.name] ?? 1) < 0.20);
 
     return { toLearn, toUnlearn };

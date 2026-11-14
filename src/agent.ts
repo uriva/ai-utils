@@ -1319,7 +1319,6 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
       {
         command: skillCommand,
         params: normalizedArgs,
-        spinnerText: `Running ${skillCommand}`,
       },
     ]
     : [undefined, normalizedArgs];
@@ -2815,11 +2814,16 @@ const currentRequestEvents = (history: HistoryEvent[]): HistoryEvent[] => {
 
 const skillUsedInCurrentRequest = (
   history: HistoryEvent[],
-  skillName: string,
+  skill: Skill,
 ): boolean => {
-  const key = skillName.toLowerCase();
+  const key = skill.name.toLowerCase();
+  const bareToolNames = new Set(
+    skill.tools.map((t) => stripSkillPrefix(skill.name, t.name).toLowerCase()),
+  );
   return currentRequestEvents(history).some(
-    (e) => skillNameFromToolCall(e) === key,
+    (e) =>
+      skillNameFromToolCall(e) === key ||
+      (e.type === "tool_call" && bareToolNames.has(e.name.toLowerCase())),
   );
 };
 
@@ -2893,6 +2897,9 @@ const isReferenceTool = (skill: Skill, toolName: string) =>
 export const topLevelToolCorrection = (called: string): string =>
   `command "${called}" is a top-level tool, not a skill command`;
 
+const spinnerTextDescription =
+  "A short progress update or spinner message in active voice representing what this action is actively doing. CRITICAL: This message is shown directly to the user while the tool runs, so you MUST write it in the same language as the conversation (default to English when the user sent only a URL, code, or attachment with no natural-language text — never switch to another language unless the user wrote in that language). IMPORTANT: Do NOT include any emojis (such as hourglass, gears, etc.) in this message.";
+
 export const createSkillTools = (
   skills: Skill[],
   // deno-lint-ignore no-explicit-any
@@ -2928,9 +2935,7 @@ export const createSkillTools = (
       "Activate a skill: loads its instructions and tools into your system prompt. Reference documents (if any) are separate tools you call directly by their qualified name once the skill is active.",
     parameters: z.object({
       skillName: z.string().describe("The name of the skill to learn about"),
-      spinnerText: z.string().optional().describe(
-        "A short progress update or spinner message in active voice representing what this action is actively doing, written in the same language as the conversation.",
-      ),
+      spinnerText: z.string().optional().describe(spinnerTextDescription),
     }),
     handler: async (
       { skillName, spinnerText: _spinnerText },
@@ -2961,9 +2966,7 @@ export const createSkillTools = (
       `Deactivate a currently active/learned skill to reclaim context token budget. Only call this when explicitly requested or after completing a large standalone background task. Do not call this during ordinary conversation turns or between tool calls, as skill deactivation is already handled automatically by the system. Call it at most once per skill per user request, and only when you are done with that skill: calling one of its tools again re-activates it, so deactivating mid-task just buys a full re-load on your next call.`,
     parameters: z.object({
       skillName: z.string().describe("The name of the skill to deactivate"),
-      spinnerText: z.string().optional().describe(
-        "A short progress update or spinner message in active voice representing what this action is actively doing, written in the same language as the conversation.",
-      ),
+      spinnerText: z.string().optional().describe(spinnerTextDescription),
     }),
     handler: async (
       { skillName, spinnerText: _spinnerText },
@@ -3002,9 +3005,7 @@ export const createSkillTools = (
         "The command in format skillName/toolName",
       ),
       params: z.any().describe("The parameters for the tool"),
-      spinnerText: z.string().optional().describe(
-        "A short progress update or spinner message in active voice representing what this action is actively doing. CRITICAL: This message is shown directly to the user while the tool runs, so you MUST write it in the same language as the conversation (e.g. if the user speaks Hebrew, write it in Hebrew, e.g. 'מחפש ברשת...'). IMPORTANT: Do NOT include any emojis (such as hourglass ⏳, gears ⚙️, etc.) in this message.",
-      ),
+      spinnerText: z.string().optional().describe(spinnerTextDescription),
     }),
     handler: async ({ command: rawCommand, params }, toolCallId) => {
       const command = collapseDuplicatedSkillPrefix(rawCommand, skillMap);
@@ -3159,6 +3160,28 @@ export const skillUnlearnedSkippedMessage = (
     ? `Skill "${skillName}" is not active, so there is nothing to deactivate — ${skillUnlearnSkippedMarkerText}. Do not call ${unlearnSkillToolName} for it again.`
     : `Skipped: skill "${skillName}" was already deactivated earlier in this same request and has been used again since, so every further ${unlearnSkillToolName} just reloads it on your next call. It is ${skillUnlearnSkippedMarkerText}. Finish the work first; deactivate it once at the end if you still need the context back.`;
 
+const emitSingleLearnSkillEvent = async (skill: Skill): Promise<void> => {
+  const callId = `auto-learn-${generateId()}`;
+  await outputEvent({
+    id: callId,
+    timestamp: Date.now(),
+    type: "tool_call",
+    isOwn: true,
+    name: learnSkillToolName,
+    parameters: {
+      skillName: skill.name,
+    },
+  });
+  await outputEvent({
+    id: `${callId}-result`,
+    timestamp: Date.now(),
+    toolCallId: callId,
+    type: "tool_result",
+    isOwn: true,
+    result: skillLearnedSuccessMessage(skill.name),
+  });
+};
+
 const emitLearnSkillEvents = async (
   toLearn: Skill[],
 ): Promise<void> => {
@@ -3167,28 +3190,29 @@ const emitLearnSkillEvents = async (
   const freshToLearn = toLearn.filter(
     (skill) => !currentLearned.has(skill.name.toLowerCase()),
   );
-  for (const skill of freshToLearn) {
-    const callId = `auto-learn-${generateId()}`;
-    await outputEvent({
-      id: callId,
-      timestamp: Date.now(),
-      type: "tool_call",
-      isOwn: true,
-      name: learnSkillToolName,
-      parameters: {
-        skillName: skill.name,
-        spinnerText: `Loading ${skill.name}...`,
-      },
-    });
-    await outputEvent({
-      id: `${callId}-result`,
-      timestamp: Date.now(),
-      toolCallId: callId,
-      type: "tool_result",
-      isOwn: true,
-      result: skillLearnedSuccessMessage(skill.name),
-    });
-  }
+  await each(emitSingleLearnSkillEvent)(freshToLearn);
+};
+
+const emitSingleUnlearnSkillEvent = async (skill: Skill): Promise<void> => {
+  const callId = `auto-unlearn-${generateId()}`;
+  await outputEvent({
+    id: callId,
+    timestamp: Date.now(),
+    type: "tool_call",
+    isOwn: true,
+    name: unlearnSkillToolName,
+    parameters: {
+      skillName: skill.name,
+    },
+  });
+  await outputEvent({
+    id: `${callId}-result`,
+    timestamp: Date.now(),
+    toolCallId: callId,
+    type: "tool_result",
+    isOwn: true,
+    result: skillUnlearnedSuccessMessage(skill.name),
+  });
 };
 
 const emitPendingUnlearnEvents = async (
@@ -3200,31 +3224,10 @@ const emitPendingUnlearnEvents = async (
   const freshToUnlearn = toUnlearn.filter(
     (skill) =>
       currentActive.has(skill.name.toLowerCase()) &&
-      !skillUsedInCurrentRequest(history, skill.name) &&
+      !skillUsedInCurrentRequest(history, skill) &&
       !skillUnlearnSkipReason(history, skill.name),
   );
-  for (const skill of freshToUnlearn) {
-    const callId = `auto-unlearn-${generateId()}`;
-    await outputEvent({
-      id: callId,
-      timestamp: Date.now(),
-      type: "tool_call",
-      isOwn: true,
-      name: unlearnSkillToolName,
-      parameters: {
-        skillName: skill.name,
-        spinnerText: `Deactivating ${skill.name}...`,
-      },
-    });
-    await outputEvent({
-      id: `${callId}-result`,
-      timestamp: Date.now(),
-      toolCallId: callId,
-      type: "tool_result",
-      isOwn: true,
-      result: skillUnlearnedSuccessMessage(skill.name),
-    });
-  }
+  await each(emitSingleUnlearnSkillEvent)(freshToUnlearn);
 };
 
 const emitCleanupEvents = async (
