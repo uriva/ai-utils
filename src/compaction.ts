@@ -395,7 +395,7 @@ const structuredSummarySchema = z.object({
     "Proposals, suggestions, or options that were raised but the user moved on from without confirming or rejecting. Include the specific name of the abandoned item and why it was not pursued. Max 150 words.",
   ),
   context: z.string().describe(
-    "Any other important context needed to continue the conversation coherently. CRITICAL: Do NOT declare the dates/times of this historical segment as the 'current' simulated date, 'today', or 'now', as this summary will be read in the future where those dates are in the past. If you must describe dates, refer to them explicitly as the dates of the segment (e.g., 'The segment took place on May 5, 2026'). Max 150 words.",
+    "Any other important context needed to continue the conversation coherently, including cumulative user progress (places/items already visited, completed, tried, or recommended) and standing preferences or exclusions so the assistant never repeats already-completed suggestions. CRITICAL: Do NOT declare the dates/times of this historical segment as the 'current' simulated date, 'today', or 'now', as this summary will be read in the future where those dates are in the past. If you must describe dates, refer to them explicitly as the dates of the segment (e.g., 'The segment took place on May 5, 2026'). Max 150 words.",
   ),
 });
 
@@ -448,6 +448,9 @@ Important rules for Pending Items vs Abandoned Items:
 - If the user moved on to a different topic or chose an alternative WITHOUT explicitly confirming or rejecting a proposal, treat the original proposal as ABANDONED (put it in Abandoned Items, not Pending Items).
 - Only put something in Pending Items if there is a clear open question, unresolved request, or next step the user still expects.
 - Never keep a specific proposal as pending just because the user did not explicitly say no to it.
+
+Important rules for Cumulative Progress & Avoiding Repeated Recommendations:
+- Explicitly preserve any places, activities, media, or items the user stated they already visited, completed, tried, or ruled out, as well as specific recommendations already given, under Decisions or Context so future turns do not recommend them again.
 
 Critical Date and Time Grounding Rules:
 - NEVER refer to the timestamps, dates, or days of this conversation segment as "the current simulated date", "the current date", "today", or "now" under Decisions, Context, or any other section.
