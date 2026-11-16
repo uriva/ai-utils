@@ -22,16 +22,17 @@ import {
   type MediaAttachment,
   type MessageId,
   noResponseTag,
-  ownThoughtTurn,
-  ownUtteranceTurn,
+  ownThoughtTurnWithMetadata,
+  ownUtteranceTurnWithMetadata,
   systemInstructionTail,
   systemNotificationRegex,
   type Tool,
-  toolUseTurn,
+  toolUseTurnWithMetadata,
 } from "./agent.ts";
 import { internalThoughtRegex } from "./jsonThought.ts";
 import {
   appendInternalSentTimestamp,
+  emptyToolOutputPlaceholder,
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
 import { isRetryableError, normalizeError } from "./utils.ts";
@@ -251,7 +252,9 @@ async (e: KimiHistoryEvent): Promise<ChatCompletionMessageParam[]> => {
     return [{
       role: "tool",
       tool_call_id: e.toolCallId || e.id,
-      content: stampText(e.result),
+      content: stampText(
+        e.result.trim() ? e.result : emptyToolOutputPlaceholder,
+      ),
     }];
   }
 
@@ -594,6 +597,49 @@ const storeKimiMetadata = (eventId: string, metadata: KimiMetadata) =>
     console.error("Failed to store Kimi metadata:", e);
   });
 
+const canHaveModelMetadata = (event: KimiHistoryEvent): boolean => {
+  if ("modelMetadata" in event && event.modelMetadata) return false;
+  if (
+    event.type === "own_utterance" ||
+    event.type === "own_reaction" ||
+    event.type === "own_edit_message"
+  ) {
+    return true;
+  }
+  if (event.type === "own_thought") {
+    return !event.id.startsWith("summary-");
+  }
+  return event.type === "tool_call" &&
+    !event.id.startsWith("auto-learn-") &&
+    !event.id.startsWith("auto-unlearn-") &&
+    !event.id.startsWith("auto-clean-") &&
+    !event.id.startsWith("auto-thinking-");
+};
+
+const isModelMetadataRecord = (val: unknown): val is KimiMetadata =>
+  typeof val === "object" && val !== null && "type" in val;
+
+const enrichKimiEventsWithMetadata = async (
+  events: KimiHistoryEvent[],
+): Promise<KimiHistoryEvent[]> => {
+  const missingIds = [
+    ...new Set(events.filter(canHaveModelMetadata).map((e) => e.id)),
+  ];
+  if (empty(missingIds)) return events;
+  const metadataList = await accessMetadataStore().mget(missingIds);
+  const metadataById = new Map<string, KimiMetadata | null>(
+    missingIds.map((id, i) => {
+      const candidate = metadataList[i];
+      return [id, isModelMetadataRecord(candidate) ? candidate : null];
+    }),
+  );
+  return events.map((event) => {
+    if ("modelMetadata" in event && event.modelMetadata) return event;
+    const metadata = metadataById.get(event.id);
+    return metadata ? { ...event, modelMetadata: metadata } : event;
+  });
+};
+
 const kimiOutputPartToHistoryEvents =
   (responseId: string) => (p: KimiOutputPart): KimiHistoryEvent[] => {
     const metadata: KimiMetadata = {
@@ -605,7 +651,7 @@ const kimiOutputPartToHistoryEvents =
     const events: KimiHistoryEvent[] = [];
 
     if (p.reasoningContent) {
-      const event = ownThoughtTurn(p.reasoningContent) as KimiHistoryEvent;
+      const event = ownThoughtTurnWithMetadata(p.reasoningContent, metadata);
       storeKimiMetadata(event.id, metadata);
       events.push(event);
     }
@@ -617,7 +663,7 @@ const kimiOutputPartToHistoryEvents =
       const match = stripped.match(internalThoughtRegex);
 
       if (match) {
-        const event = ownThoughtTurn(match[1]) as KimiHistoryEvent;
+        const event = ownThoughtTurnWithMetadata(match[1], metadata);
         storeKimiMetadata(event.id, metadata);
         events.push(event);
         return events;
@@ -626,22 +672,26 @@ const kimiOutputPartToHistoryEvents =
       const notificationMatch = stripped.match(systemNotificationRegex);
 
       if (notificationMatch) {
-        const event = ownThoughtTurn(notificationMatch[1]) as KimiHistoryEvent;
+        const event = ownThoughtTurnWithMetadata(
+          notificationMatch[1],
+          metadata,
+        );
         storeKimiMetadata(event.id, metadata);
         events.push(event);
         return events;
       }
 
-      const event = ownUtteranceTurn(stripped) as KimiHistoryEvent;
+      const event = ownUtteranceTurnWithMetadata(stripped, metadata);
       storeKimiMetadata(event.id, metadata);
       events.push(event);
       return events;
     }
 
     if (p.type === "function_call") {
-      const event = toolUseTurn(
+      const event = toolUseTurnWithMetadata(
         { name: p.name, args: p.arguments, id: p.id },
-      ) as KimiHistoryEvent;
+        metadata,
+      );
       storeKimiMetadata(event.id, metadata);
       events.push(event);
       return events;
@@ -662,6 +712,7 @@ export const kimiAgentCaller = ({
   toolOutputScratchPad,
 }: AgentSpec) =>
 async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
+  const enrichedEvents = await enrichKimiEventsWithMetadata(events);
   const enhancedPrompt = [
     `${prompt}\n\n${systemInstructionTail(toolOutputScratchPad)}`,
     `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,
@@ -677,7 +728,7 @@ async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
       conversationContext,
     ),
     disableStreaming,
-  )(events);
+  )(enrichedEvents);
 
   const responseId = generateId();
 

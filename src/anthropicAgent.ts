@@ -19,16 +19,17 @@ import {
   type MediaAttachment,
   type MessageId,
   noResponseTag,
-  ownThoughtTurn,
-  ownUtteranceTurn,
+  ownThoughtTurnWithMetadata,
+  ownUtteranceTurnWithMetadata,
   systemInstructionTail,
   systemNotificationRegex,
   type Tool,
-  toolUseTurn,
+  toolUseTurnWithMetadata,
 } from "./agent.ts";
 import { internalThoughtRegex } from "./jsonThought.ts";
 import {
   appendInternalSentTimestamp,
+  emptyToolOutputPlaceholder,
   stripInternalSentTimestampSuffix,
 } from "./internalMessageMetadata.ts";
 import { isRetryableError, normalizeError } from "./utils.ts";
@@ -265,7 +266,9 @@ async (
       content: [{
         type: "tool_result",
         tool_use_id: sanitizeToolId(e.toolCallId || e.id),
-        content: stampText(e.result),
+        content: stampText(
+          e.result.trim() ? e.result : emptyToolOutputPlaceholder,
+        ),
       } as Anthropic.Messages.ToolResultBlockParam],
     }];
   }
@@ -786,7 +789,7 @@ const anthropicOutputPartToHistoryEvents =
     const events: AnthropicHistoryEvent[] = [];
 
     if (p.thinkingContent) {
-      const event = ownThoughtTurn(p.thinkingContent) as AnthropicHistoryEvent;
+      const event = ownThoughtTurnWithMetadata(p.thinkingContent, metadata);
       storeAnthropicMetadata(event.id, metadata);
       events.push(event);
     }
@@ -798,7 +801,7 @@ const anthropicOutputPartToHistoryEvents =
       const match = stripped.match(internalThoughtRegex);
 
       if (match) {
-        const event = ownThoughtTurn(match[1]) as AnthropicHistoryEvent;
+        const event = ownThoughtTurnWithMetadata(match[1], metadata);
         storeAnthropicMetadata(event.id, metadata);
         events.push(event);
         return events;
@@ -807,24 +810,26 @@ const anthropicOutputPartToHistoryEvents =
       const notificationMatch = stripped.match(systemNotificationRegex);
 
       if (notificationMatch) {
-        const event = ownThoughtTurn(
+        const event = ownThoughtTurnWithMetadata(
           notificationMatch[1],
-        ) as AnthropicHistoryEvent;
+          metadata,
+        );
         storeAnthropicMetadata(event.id, metadata);
         events.push(event);
         return events;
       }
 
-      const event = ownUtteranceTurn(stripped) as AnthropicHistoryEvent;
+      const event = ownUtteranceTurnWithMetadata(stripped, metadata);
       storeAnthropicMetadata(event.id, metadata);
       events.push(event);
       return events;
     }
 
     if (p.type === "function_call") {
-      const event = toolUseTurn(
+      const event = toolUseTurnWithMetadata(
         { name: p.name, args: p.arguments, id: p.id },
-      ) as AnthropicHistoryEvent;
+        metadata,
+      );
       storeAnthropicMetadata(event.id, metadata);
       events.push(event);
       return events;

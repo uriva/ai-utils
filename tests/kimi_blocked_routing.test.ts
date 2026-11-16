@@ -1,17 +1,24 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import type { GenerateContentResponse } from "@google/genai";
 import type { Injector } from "@uri/inject";
+import { pipe } from "gamla";
+import type { OpenAI } from "openai";
 import {
+  emptyToolOutputPlaceholder,
   genJson,
   type HistoryEvent,
   injectAccessHistory,
   injectCacher,
   injectGeminiToken,
   injectKimiToken,
+  injectMetadataStore,
   injectOutputEvent,
+  injectPromptBlockedLogger,
   invalidGenJsonMessage,
   participantUtteranceTurn,
   runAgent,
+  systemNotificationPrefix,
+  tool,
   z,
 } from "../mod.ts";
 import { injectGeminiGenerateContent } from "../src/gemini.ts";
@@ -233,5 +240,256 @@ Deno.test("a Gemini safety-blocked runAgent turn routes to Kimi instead of emitt
   assertEquals(
     utterances[0].type === "own_utterance" && utterances[0].text,
     "Hola, estoy aquí para ayudarte.",
+  );
+});
+
+const kimiChatResponse = (
+  message: OpenAI.Chat.Completions.ChatCompletionMessage & {
+    reasoning_content?: string;
+  },
+  finishReason: "stop" | "tool_calls",
+): OpenAI.Chat.Completions.ChatCompletion => ({
+  id: "kimi-fake",
+  object: "chat.completion",
+  created: 0,
+  model: kimiModelVersion,
+  choices: [{
+    index: 0,
+    message,
+    finish_reason: finishReason,
+    logprobs: null,
+  }],
+});
+
+const kimiToolCallResponse = ({
+  id,
+  name,
+  args,
+  reasoningContent,
+}: {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  reasoningContent: string;
+}): OpenAI.Chat.Completions.ChatCompletion =>
+  kimiChatResponse(
+    {
+      role: "assistant",
+      content: null,
+      refusal: null,
+      reasoning_content: reasoningContent,
+      tool_calls: [{
+        id,
+        type: "function",
+        function: { name, arguments: JSON.stringify(args) },
+      }],
+    },
+    "tool_calls",
+  );
+
+const kimiStopWithReasoningResponse = (
+  content: string,
+  reasoningContent: string,
+): OpenAI.Chat.Completions.ChatCompletion =>
+  kimiChatResponse(
+    {
+      role: "assistant",
+      content,
+      refusal: null,
+      reasoning_content: reasoningContent,
+    },
+    "stop",
+  );
+
+const noopMetadataStore = () => ({
+  get: () => Promise.resolve(null),
+  set: () => Promise.resolve(),
+  mget: (ids: string[]) => Promise.resolve(ids.map(() => null)),
+});
+
+Deno.test("multi-step tool loop after Gemini prompt block stays on Kimi and preserves Kimi tool history without re-blocking Gemini", async () => {
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({
+      name: "user",
+      text: "find catalog item",
+    }),
+  ];
+  const counts = { gemini: 0, kimi: 0, blocked: 0 };
+  const observedSecondTurnMessages:
+    OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+  const lookupTool = tool({
+    name: "lookup_catalog",
+    description: "Look up an item in the catalog.",
+    parameters: z.object({ query: z.string() }),
+    handler: ({ query }) => Promise.resolve(`Catalog match for ${query}: #42`),
+  });
+
+  await pipe(
+    injectGeminiToken("unused-gemini-faked"),
+    injectKimiToken("unused-kimi-faked"),
+    injectMetadataStore(noopMetadataStore),
+    injectPromptBlockedLogger(() => {
+      counts.blocked++;
+    }),
+    injectGeminiSdkExchange(() => {
+      counts.gemini++;
+      return Promise.resolve({
+        parts: [],
+        finishReason: undefined,
+        usageMetadata: undefined,
+        promptBlockReason: "OTHER",
+      });
+    }),
+    injectKimiChatCompletion((req) => {
+      counts.kimi++;
+      if (counts.kimi === 1) {
+        return Promise.resolve(
+          kimiToolCallResponse({
+            id: "lookup_catalog_0_abc123",
+            name: "lookup_catalog",
+            args: { query: "item" },
+            reasoningContent: "Let me check the catalog first.",
+          }),
+        );
+      }
+      observedSecondTurnMessages.push(...req.messages);
+      return Promise.resolve(
+        kimiStopWithReasoningResponse(
+          "Found item #42.",
+          "The catalog returned #42.",
+        ),
+      );
+    }),
+    injectAccessHistory(() => Promise.resolve(history)),
+    injectOutputEvent((e) => {
+      history.push(e);
+      return Promise.resolve();
+    }),
+  )(() =>
+    runAgent({
+      prompt: "You are a catalog assistant.",
+      tools: [lookupTool],
+      timezoneIANA: "UTC",
+      maxIterations: 5,
+    })
+  )();
+
+  assertEquals(counts.gemini, 1);
+  assertEquals(counts.blocked, 1);
+  assertEquals(counts.kimi, 2);
+
+  const toolMessages = observedSecondTurnMessages.filter((m) =>
+    m.role === "tool"
+  );
+  assertEquals(toolMessages.length, 1);
+  assertEquals(
+    typeof toolMessages[0].content === "string" &&
+      toolMessages[0].content.includes("Catalog match for item: #42"),
+    true,
+  );
+
+  const leakedReasoningNotifications = observedSecondTurnMessages.filter((m) =>
+    m.role === "user" &&
+    JSON.stringify(m.content).includes(systemNotificationPrefix) &&
+    JSON.stringify(m.content).includes("Let me check the catalog first.")
+  );
+  assertEquals(leakedReasoningNotifications.length, 0);
+
+  const utterances = history.filter((e) => e.type === "own_utterance");
+  assertEquals(utterances.length, 1);
+  assertEquals(
+    utterances[0].type === "own_utterance" && utterances[0].text,
+    "Found item #42.",
+  );
+});
+
+Deno.test("follow-up runAgent turn preserves prior Kimi tool calls when Gemini blocks again and marks empty tool output explicitly", async () => {
+  const history: HistoryEvent[] = [
+    participantUtteranceTurn({
+      name: "user",
+      text: "find missing item",
+    }),
+  ];
+  const counts = { kimi: 0 };
+  const followUpMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
+    [];
+  const lookupTool = tool({
+    name: "lookup_catalog",
+    description: "Look up an item in the catalog.",
+    parameters: z.object({ query: z.string() }),
+    handler: () => Promise.resolve(""),
+  });
+
+  const runOnce = () =>
+    pipe(
+      injectGeminiToken("unused-gemini-faked"),
+      injectKimiToken("unused-kimi-faked"),
+      injectMetadataStore(noopMetadataStore),
+      injectGeminiSdkExchange(() =>
+        Promise.resolve({
+          parts: [],
+          finishReason: undefined,
+          usageMetadata: undefined,
+          promptBlockReason: "OTHER",
+        })
+      ),
+      injectKimiChatCompletion((req) => {
+        counts.kimi++;
+        if (counts.kimi === 1) {
+          return Promise.resolve(
+            kimiToolCallResponse({
+              id: "lookup_catalog_0_empty1",
+              name: "lookup_catalog",
+              args: { query: "missing" },
+              reasoningContent: "Searching catalog.",
+            }),
+          );
+        }
+        if (counts.kimi === 2) {
+          return Promise.resolve(
+            kimiStopWithReasoningResponse(
+              "Nothing matched that query.",
+              "Result was empty.",
+            ),
+          );
+        }
+        followUpMessages.push(...req.messages);
+        return Promise.resolve(
+          kimiStopWithReasoningResponse(
+            "Still no matches in the catalog.",
+            "Prior search already returned empty.",
+          ),
+        );
+      }),
+      injectAccessHistory(() => Promise.resolve(history)),
+      injectOutputEvent((e) => {
+        history.push(e);
+        return Promise.resolve();
+      }),
+    )(() =>
+      runAgent({
+        prompt: "You are a catalog assistant.",
+        tools: [lookupTool],
+        timezoneIANA: "UTC",
+        maxIterations: 5,
+      })
+    )();
+
+  await runOnce();
+  history.push(
+    participantUtteranceTurn({
+      name: "user",
+      text: "check again",
+    }),
+  );
+  await runOnce();
+
+  assertEquals(counts.kimi, 3);
+  const toolMessages = followUpMessages.filter((m) => m.role === "tool");
+  assertEquals(toolMessages.length, 1);
+  assertEquals(
+    typeof toolMessages[0].content === "string" &&
+      toolMessages[0].content.startsWith(emptyToolOutputPlaceholder),
+    true,
   );
 });

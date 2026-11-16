@@ -41,7 +41,15 @@ const eventsHaveAttachments = (events: HistoryEvent[]): boolean =>
       e.attachments.length > 0,
   );
 
-const providerCaller = (rawSpec: AgentSpecForTurn): CallModel => {
+type FallbackContext = {
+  unpreparedHistory: HistoryEvent[];
+  onSafetyFallback: () => void;
+};
+
+const providerCaller = (
+  rawSpec: AgentSpecForTurn,
+  fallbackContext?: FallbackContext,
+): CallModel => {
   const spec: AgentSpecForTurn = rawSpec.staticPrompt !== undefined
     ? {
       ...rawSpec,
@@ -57,15 +65,22 @@ const providerCaller = (rawSpec: AgentSpecForTurn): CallModel => {
   const geminiCall = widen(geminiAgentCaller(spec));
   return async (events) => {
     const result = await geminiCall(events);
+    const fallbackEvents = fallbackContext?.unpreparedHistory ?? events;
     if (
       result.length === 1 &&
       isSafetyBlockUtterance(result[0]) &&
       hasKimiToken() &&
-      !eventsHaveAttachments(events)
+      !eventsHaveAttachments(fallbackEvents)
     ) {
       return await widen(
         kimiAgentCaller({ ...spec, disableStreaming: true }),
-      )(events).catch(() => result);
+      )(fallbackEvents).then(
+        (kimiEvents) => {
+          fallbackContext?.onSafetyFallback();
+          return kimiEvents;
+        },
+        () => result,
+      );
     }
     return result;
   };
@@ -91,12 +106,15 @@ const prepareHistory =
 // - otherwise the provider-based caller is chosen from spec.provider.
 // Then injectCallModelWrapper wraps whatever was chosen (tests use this to
 // add rmmbr caching around a real provider caller).
-const resolvePreparedCallModel = (spec: AgentSpecForTurn): CallModel => {
+const resolvePreparedCallModel = (
+  spec: AgentSpecForTurn,
+  fallbackContext?: FallbackContext,
+): CallModel => {
   const base: CallModel = (events) => {
     try {
       return accessCallModel(events);
     } catch {
-      return providerCaller(spec)(events);
+      return providerCaller(spec, fallbackContext)(events);
     }
   };
   return accessCallModelWrapper({
@@ -136,24 +154,39 @@ const addBuiltinTools = (spec: AgentSpec): AgentSpec => {
 
 const runAgentInner = (spec: AgentSpec): Promise<void> => {
   const specWithBuiltins = addBuiltinTools(spec);
+  const fallbackState: { provider?: "moonshot" } = {};
 
   const dynamicCallModel = async (history: HistoryEvent[]) => {
-    const specForTurn = getSpecForTurn(specWithBuiltins, history);
+    const rawSpecForTurn = getSpecForTurn(specWithBuiltins, history);
+    const specForTurn: AgentSpec = fallbackState.provider
+      ? {
+        ...rawSpecForTurn,
+        provider: fallbackState.provider,
+        disableStreaming: true,
+      }
+      : rawSpecForTurn;
     const usesGeminiThinking = specForTurn.provider !== "moonshot" &&
       specForTurn.provider !== "anthropic";
     const thinkingLevel = usesGeminiThinking
       ? (specForTurn.thinkingLevel ?? activeThinkingLevel(history))
       : undefined;
-    const preparedHistory = await prepareHistory(specForTurn)(
-      sanitizeHistorySkillsForModel(history),
-    );
+    const sanitizedHistory = sanitizeHistorySkillsForModel(history);
+    const preparedHistory = await prepareHistory(specForTurn)(sanitizedHistory);
     if (thinkingLevel !== undefined) {
       console.log(`[decision-model] thinkingLevel=${thinkingLevel}`);
     }
-    return await resolvePreparedCallModel({
-      ...specForTurn,
-      thinkingLevel,
-    })(preparedHistory);
+    return await resolvePreparedCallModel(
+      {
+        ...specForTurn,
+        thinkingLevel,
+      },
+      {
+        unpreparedHistory: sanitizedHistory,
+        onSafetyFallback: () => {
+          fallbackState.provider = "moonshot";
+        },
+      },
+    )(preparedHistory);
   };
 
   return spec.transport?.kind === "audio"
@@ -431,6 +464,7 @@ export {
   HallucinationDecisionSchema,
   isUserPromptedTurn,
 } from "./src/hallucinationGate.ts";
+export { emptyToolOutputPlaceholder } from "./src/internalMessageMetadata.ts";
 export { searchPastHistoryToolName } from "./src/historySearch.ts";
 export {
   catchAiRefusesToAdhereToTyping,
