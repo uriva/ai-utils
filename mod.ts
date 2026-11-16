@@ -41,14 +41,16 @@ const eventsHaveAttachments = (events: HistoryEvent[]): boolean =>
       e.attachments.length > 0,
   );
 
-type FallbackContext = {
-  unpreparedHistory: HistoryEvent[];
-  onSafetyFallback: () => void;
-};
+const isKimiEvent = (e: HistoryEvent): boolean =>
+  "modelMetadata" in e &&
+  typeof e.modelMetadata === "object" &&
+  e.modelMetadata !== null &&
+  "type" in e.modelMetadata &&
+  e.modelMetadata.type === "kimi";
 
 const providerCaller = (
   rawSpec: AgentSpecForTurn,
-  fallbackContext?: FallbackContext,
+  unpreparedHistory?: HistoryEvent[],
 ): CallModel => {
   const spec: AgentSpecForTurn = rawSpec.staticPrompt !== undefined
     ? {
@@ -65,7 +67,7 @@ const providerCaller = (
   const geminiCall = widen(geminiAgentCaller(spec));
   return async (events) => {
     const result = await geminiCall(events);
-    const fallbackEvents = fallbackContext?.unpreparedHistory ?? events;
+    const fallbackEvents = unpreparedHistory ?? events;
     if (
       result.length === 1 &&
       isSafetyBlockUtterance(result[0]) &&
@@ -74,13 +76,7 @@ const providerCaller = (
     ) {
       return await widen(
         kimiAgentCaller({ ...spec, disableStreaming: true }),
-      )(fallbackEvents).then(
-        (kimiEvents) => {
-          fallbackContext?.onSafetyFallback();
-          return kimiEvents;
-        },
-        () => result,
-      );
+      )(fallbackEvents).catch(() => result);
     }
     return result;
   };
@@ -108,13 +104,13 @@ const prepareHistory =
 // add rmmbr caching around a real provider caller).
 const resolvePreparedCallModel = (
   spec: AgentSpecForTurn,
-  fallbackContext?: FallbackContext,
+  unpreparedHistory?: HistoryEvent[],
 ): CallModel => {
   const base: CallModel = (events) => {
     try {
       return accessCallModel(events);
     } catch {
-      return providerCaller(spec, fallbackContext)(events);
+      return providerCaller(spec, unpreparedHistory)(events);
     }
   };
   return accessCallModelWrapper({
@@ -175,18 +171,17 @@ const runAgentInner = (spec: AgentSpec): Promise<void> => {
     if (thinkingLevel !== undefined) {
       console.log(`[decision-model] thinkingLevel=${thinkingLevel}`);
     }
-    return await resolvePreparedCallModel(
+    const modelResult = await resolvePreparedCallModel(
       {
         ...specForTurn,
         thinkingLevel,
       },
-      {
-        unpreparedHistory: sanitizedHistory,
-        onSafetyFallback: () => {
-          fallbackState.provider = "moonshot";
-        },
-      },
+      sanitizedHistory,
     )(preparedHistory);
+    if (specForTurn.provider !== "moonshot" && modelResult.some(isKimiEvent)) {
+      fallbackState.provider = "moonshot";
+    }
+    return modelResult;
   };
 
   return spec.transport?.kind === "audio"

@@ -9,12 +9,14 @@ import {
   type HistoryEvent,
   injectAccessHistory,
   injectCacher,
+  injectCallModelWrapper,
   injectGeminiToken,
   injectKimiToken,
   injectMetadataStore,
   injectOutputEvent,
   injectPromptBlockedLogger,
   invalidGenJsonMessage,
+  overrideTime,
   participantUtteranceTurn,
   runAgent,
   systemNotificationPrefix,
@@ -307,6 +309,23 @@ const noopMetadataStore = () => ({
   mget: (ids: string[]) => Promise.resolve(ids.map(() => null)),
 });
 
+const isKimiEventForKey = (
+  val: unknown,
+): val is Record<string, unknown> & { responseId: string } =>
+  typeof val === "object" &&
+  val !== null &&
+  "responseId" in val &&
+  typeof val.responseId === "string";
+
+const stripCacheMeta = ({
+  id: _id,
+  timestamp: _ts,
+  ...rest
+}: HistoryEvent) =>
+  "modelMetadata" in rest && isKimiEventForKey(rest.modelMetadata)
+    ? { ...rest, modelMetadata: { ...rest.modelMetadata, responseId: "" } }
+    : rest;
+
 Deno.test("multi-step tool loop after Gemini prompt block stays on Kimi and preserves Kimi tool history without re-blocking Gemini", async () => {
   const history: HistoryEvent[] = [
     participantUtteranceTurn({
@@ -492,4 +511,82 @@ Deno.test("follow-up runAgent turn preserves prior Kimi tool calls when Gemini b
       toolMessages[0].content.startsWith(emptyToolOutputPlaceholder),
     true,
   );
+});
+
+Deno.test("cached callModelWrapper replay of a Gemini-blocked Kimi fallback turn keeps subsequent turns on moonshot", async () => {
+  const callModelCache = new Map<string, HistoryEvent[]>();
+  const counts = { gemini: 0, kimi: 0 };
+  const lookupTool = tool({
+    name: "lookup_catalog",
+    description: "Look up an item in the catalog.",
+    parameters: z.object({ query: z.string() }),
+    handler: ({ query }) => Promise.resolve(`Match for ${query}: #7`),
+  });
+
+  const runOnce = () =>
+    overrideTime(() => 1_000_000)(() => {
+      const history: HistoryEvent[] = [
+        participantUtteranceTurn({ name: "user", text: "find item 7" }),
+      ];
+      return pipe(
+        injectGeminiToken("unused-gemini-faked"),
+        injectKimiToken("unused-kimi-faked"),
+        injectMetadataStore(noopMetadataStore),
+        injectCallModelWrapper(({ provider, inner }) => async (events) => {
+          const key = `${provider ?? "google"}:${
+            JSON.stringify(events.map(stripCacheMeta))
+          }`;
+          const hit = callModelCache.get(key);
+          if (hit) return hit;
+          const fresh = await inner(events);
+          callModelCache.set(key, fresh);
+          return fresh;
+        }),
+        injectGeminiSdkExchange(() => {
+          counts.gemini++;
+          return Promise.resolve({
+            parts: [],
+            finishReason: undefined,
+            usageMetadata: undefined,
+            promptBlockReason: "OTHER",
+          });
+        }),
+        injectKimiChatCompletion(() => {
+          counts.kimi++;
+          if (counts.kimi === 1) {
+            return Promise.resolve(
+              kimiToolCallResponse({
+                id: "lookup_catalog_0_cached",
+                name: "lookup_catalog",
+                args: { query: "7" },
+                reasoningContent: "Checking item 7.",
+              }),
+            );
+          }
+          return Promise.resolve(
+            kimiStopWithReasoningResponse("Item #7 found.", "Got #7."),
+          );
+        }),
+        injectAccessHistory(() => Promise.resolve(history)),
+        injectOutputEvent((e) => {
+          history.push(e);
+          return Promise.resolve();
+        }),
+      )(() =>
+        runAgent({
+          prompt: "You are a catalog assistant.",
+          tools: [lookupTool],
+          timezoneIANA: "UTC",
+          maxIterations: 5,
+        })
+      )();
+    })();
+
+  await runOnce();
+  assertEquals(counts.gemini, 1);
+  assertEquals(counts.kimi, 2);
+
+  await runOnce();
+  assertEquals(counts.gemini, 1);
+  assertEquals(counts.kimi, 2);
 });
