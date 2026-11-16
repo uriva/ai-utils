@@ -61,6 +61,12 @@ import {
   isDecisionModelInjected,
   type PastToolEpisode,
 } from "./decisionModel.ts";
+import {
+  auditUnbackedAction,
+  maxUnbackedActionRetries,
+  shouldAuditUnbackedAction,
+  unbackedActionCorrectionText,
+} from "./unbackedActionGate.ts";
 export { setThinkingLevelToolName };
 export const stopThoughtPrefix =
   "I'm working on this for some time and not making progress.";
@@ -3747,6 +3753,7 @@ export const runAbstractAgent = (
       repetitionFlood: 0,
       truncation: 0,
       doNothing: 0,
+      unbackedAction: 0,
     };
     let pendingToUnlearn: Skill[] = [];
     let hasTriggeredPreModelDecisions = false;
@@ -3885,6 +3892,35 @@ export const runAbstractAgent = (
         ephemeralHistory = [
           ...ephemeralHistory,
           ownThoughtTurn(unansweredUserCorrectionText),
+        ];
+        continue;
+      }
+
+      if (
+        shouldAuditUnbackedAction({
+          modelResponse,
+          emitEvents: emitWithDescriptions,
+          tools: allTools,
+          skills: skillsArr,
+          retryCount: retryCounts.unbackedAction,
+          hadExecutedWorkflowTool: currentRequestExecutedWorkflowTools(history),
+          mockModelInjected: isMockModelInjected(),
+        }) &&
+        await auditUnbackedAction(
+          normalizedHistory,
+          modelResponse,
+          emitWithDescriptions,
+          allTools,
+          skillsArr,
+        )
+      ) {
+        retryCounts.unbackedAction++;
+        console.warn(
+          `[unbacked-action-gate] model promised/intended tool action with 0 tool_calls (attempt ${retryCounts.unbackedAction}/${maxUnbackedActionRetries}); retrying with correctional thought`,
+        );
+        ephemeralHistory = [
+          ...ephemeralHistory,
+          ownThoughtTurn(unbackedActionCorrectionText),
         ];
         continue;
       }

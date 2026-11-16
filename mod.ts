@@ -459,6 +459,16 @@ export {
   HallucinationDecisionSchema,
   isUserPromptedTurn,
 } from "./src/hallucinationGate.ts";
+export {
+  auditUnbackedAction,
+  maxUnbackedActionRetries,
+  referencedToolsInThoughts,
+  shouldAuditUnbackedAction,
+  unbackedActionCorrectionText,
+  unbackedActionDecisionKey,
+  unbackedActionQuestion,
+  unbackedActionThreshold,
+} from "./src/unbackedActionGate.ts";
 export { emptyToolOutputPlaceholder } from "./src/internalMessageMetadata.ts";
 export { searchPastHistoryToolName } from "./src/historySearch.ts";
 export {
