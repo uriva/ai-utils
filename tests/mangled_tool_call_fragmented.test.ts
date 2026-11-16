@@ -93,3 +93,56 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "<call:default_api:...> split across multiple text parts recovers the full call and keeps executing",
+  async () => {
+    const mockHistory: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: `Read ${filePath} and tell me what it says.`,
+      }),
+    ];
+
+    let turn = 0;
+    const fakeCallModel = () => {
+      turn++;
+      return turn === 1
+        ? Promise.resolve([
+          ownUtteranceTurn(`<call:default_api:${toolName}{path: `),
+          ownUtteranceTurn(
+            `${filePath}, spinnerText: ${spinnerText}}></call:default_api:${toolName}>`,
+          ),
+        ])
+        : Promise.resolve([ownUtteranceTurn(finalAnswer)]);
+    };
+
+    await injectCallModel(fakeCallModel)(async () => {
+      await agentDeps(mockHistory)(runAgent)({
+        maxIterations: 10,
+        tools: [readFileTool],
+        prompt: "You are a helpful assistant.",
+        timezoneIANA: "UTC",
+      });
+    })();
+
+    const newEvents = mockHistory.slice(1);
+    assertEquals(
+      newEvents.filter(
+        (e) => e.type === "own_utterance" && e.text !== finalAnswer,
+      ),
+      [],
+    );
+    const calls = newEvents.filter(
+      (e) => e.type === "tool_call" && e.name === toolName,
+    );
+    assertEquals(calls.length, 1);
+    const [call] = calls;
+    assert(
+      call.type === "tool_call" && isRecord(call.parameters) &&
+        call.parameters.path === filePath &&
+        call.parameters.spinnerText === spinnerText,
+      `recovered tool call has truncated arguments: ${JSON.stringify(call)}`,
+    );
+  },
+);

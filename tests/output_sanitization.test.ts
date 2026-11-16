@@ -109,7 +109,7 @@ Deno.test("sanitizeModelOutput reclassifies leaked thought starting with [though
   );
 });
 
-Deno.test("sanitizeModelOutput strips raw tool call tags", () => {
+Deno.test("sanitizeModelOutput strips raw <call:...> tags from visible text and recovers the tool_call", () => {
   const result = sanitizeModelOutput(
     [participantUtteranceTurn({ name: "user", text: "hi" })],
     [
@@ -118,11 +118,52 @@ Deno.test("sanitizeModelOutput strips raw tool call tags", () => {
       ),
     ],
   );
+  assertEquals(result.emit.length, 2);
+  const [utterance, call] = result.emit;
+  assertEquals(utterance.type, "own_utterance");
+  if (utterance.type !== "own_utterance") throw new Error("unreachable");
+  assertEquals(utterance.text, "Here is your response");
+  assertEquals(call.type, "tool_call");
+  if (call.type !== "tool_call") throw new Error("unreachable");
+  assertEquals(call.name, "update_user_field");
+  assertEquals(paramField(call.parameters, "fieldName"), "weight");
+});
+
+Deno.test("sanitizeModelOutput recovers <call:...></call:...> after a progress preamble without leaking closing tag", () => {
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "Find that clip" })],
+    [
+      ownUtteranceTurn(
+        'Let me grab that clip for you right now. <call:default_api:search_library{query: "iconic scene", limit: 5}></call:default_api:search_library>',
+      ),
+    ],
+  );
+  assertEquals(result.emit.length, 2);
+  const [utterance, call] = result.emit;
+  assertEquals(utterance.type, "own_utterance");
+  if (utterance.type !== "own_utterance") throw new Error("unreachable");
+  assertEquals(utterance.text, "Let me grab that clip for you right now.");
+  assertEquals(call.type, "tool_call");
+  if (call.type !== "tool_call") throw new Error("unreachable");
+  assertEquals(call.name, "search_library");
+  assertEquals(paramField(call.parameters, "query"), "iconic scene");
+});
+
+Deno.test("sanitizeModelOutput recovers standalone <call:...> tag into a single tool_call with no empty utterance", () => {
+  const result = sanitizeModelOutput(
+    [participantUtteranceTurn({ name: "user", text: "hi" })],
+    [
+      ownUtteranceTurn(
+        '<call:default_api:search_library{query: "hello"}>',
+      ),
+    ],
+  );
   assertEquals(result.emit.length, 1);
-  const event = result.emit[0];
-  assertEquals(event.type, "own_utterance");
-  if (event.type !== "own_utterance") throw new Error("unreachable");
-  assertEquals(event.text, "Here is your response");
+  const [call] = result.emit;
+  assertEquals(call.type, "tool_call");
+  if (call.type !== "tool_call") throw new Error("unreachable");
+  assertEquals(call.name, "search_library");
+  assertEquals(paramField(call.parameters, "query"), "hello");
 });
 
 Deno.test("sanitizeModelOutput strips system context injections from output", () => {

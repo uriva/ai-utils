@@ -1644,16 +1644,16 @@ const stripThoughtTagBlocks = (text: string): string =>
 // the normal coerceArgs / "Invalid parameters" self-correction loop makes the
 // model retry cleanly.
 export const mangledToolCallPattern: RegExp =
-  /(?:^|\b)(?:start_?call\s*[:.]|print\s*\(\s*default_api|default_api\s*[.:]\s*[a-z_][\w]*\s*[({]|`{3}\s*tool_code|<\s*tool_call\b|tool_code\s*[:{])/i;
+  /(?:<\s*call\s*:|(?:^|\b)(?:start_?call\s*[:.]|print\s*\(\s*default_api|default_api\s*[.:]\s*[a-z_][\w]*\s*[({]|`{3}\s*tool_code|tool_code\s*[:{])|<\s*tool_call\b)/i;
 
 const isMangledToolCall = (text: string): boolean =>
   mangledToolCallPattern.test(text.trim());
 
 // Pulls the invoked tool name out of the mangled preamble. Handles the
 // `default_api.<name>` / `default_api:<name>` form and the bare
-// `startcall:...:<name>{` / `<name>(` forms.
+// `<call:...:<name>{` / `startcall:...:<name>{` / `<name>(` forms.
 const mangledToolNamePattern =
-  /(?:default_api\s*[.:]\s*|start_?call\s*[:.]\s*(?:default_api\s*[:.]\s*)?)?([a-z_][\w]*)\s*[({]/i;
+  /(?:default_api\s*[.:]\s*|(?:<\s*call\s*:|start_?call\s*[:.])\s*(?:default_api\s*[:.]\s*)?)?([a-z_][\w]*)\s*[({]/i;
 
 // Best-effort parse of a JS-object-ish / Python-kwargs-ish argument blob that is
 // NOT valid JSON (unquoted keys and values, slashes, spaces, trailing commas).
@@ -1693,11 +1693,18 @@ const parseLooseArgs = (raw: string): Record<string, unknown> | undefined => {
   return undefined;
 };
 
+const stripWrappingCallTag = (text: string): string =>
+  /^\s*<\s*call\s*:/i.test(text)
+    ? text.replace(/>\s*(?:<\s*\/\s*call\b[^>]*>)?\s*$/i, "")
+    : text;
+
 const cleanMangledToolCallText = (text: string): string =>
-  text.trim().replace(/^`{3}\s*tool_code\s*/i, "").replace(
-    /`{3}\s*$/,
-    "",
-  ).replace(/^print\s*\(\s*/i, "").trim();
+  stripWrappingCallTag(
+    text.trim().replace(/^`{3}\s*tool_code\s*/i, "").replace(
+      /`{3}\s*$/,
+      "",
+    ).replace(/^print\s*\(\s*/i, ""),
+  ).trim();
 
 // Recovers a { name, args } function call from a mangled tool-call utterance.
 // Returns undefined if we cannot even recover a tool name.
@@ -1832,6 +1839,125 @@ const toolResultContainsMangledCall = (
     parseMangledToolCall(event.result)?.name === name
   );
 
+const xmlCallTagPattern =
+  /<\s*call\s*:\s*(?:default_api\s*[:.]\s*)?([a-z_][\w]*)\s*>\s*([\s\S]*?)<\s*\/\s*call\b[^>]*>/gi;
+
+const inlineCallTagPattern =
+  /<\s*call\s*:([\s\S]*?)>(?:\s*<\s*\/\s*call\b[^>]*>)?/gi;
+
+const closingCallTagPattern = /<\s*\/\s*call\b[^>]*>/gi;
+
+const parseInlineCallTagBody = (
+  body: string,
+): { name: string; args: Record<string, unknown> } => {
+  const recovered = parseMangledToolCall(body);
+  if (!recovered) {
+    throw new Error(
+      `Detected a tool call rendered as visible text but could not recover it: <call:${body}>`,
+    );
+  }
+  return recovered;
+};
+
+const extractRawCallTags = (
+  history: HistoryEvent[],
+  event: HistoryEvent,
+  inputText: string,
+): { remainingText: string; calls: HistoryEvent[]; hadCallTag: boolean } => {
+  const xmlMatches = [...inputText.matchAll(xmlCallTagPattern)];
+  const afterXml = inputText.replace(xmlCallTagPattern, "");
+  const inlineMatches = [...afterXml.matchAll(inlineCallTagPattern)];
+  const remainingText = afterXml
+    .replace(inlineCallTagPattern, "")
+    .replace(closingCallTagPattern, "")
+    .trim();
+  const parsedCalls = [
+    ...xmlMatches.map((m) => ({
+      name: m[1],
+      args: parseLooseArgs(m[2]) ?? {},
+    })),
+    ...inlineMatches.map((m) => parseInlineCallTagBody(m[1])),
+  ].filter(({ name }) => !toolResultContainsMangledCall(history, name));
+  const calls = parsedCalls.map((c, index) => ({
+    ...toolUseTurn(c),
+    id: index === 0 && !remainingText ? event.id : generateId(),
+    timestamp: event.timestamp + index,
+  }));
+  return {
+    remainingText,
+    calls,
+    hadCallTag: nonempty(xmlMatches) || nonempty(inlineMatches),
+  };
+};
+
+const systemContextPattern =
+  /The following is critical context and instructions about the user:[\s\S]*?(\]|$)/gi;
+const criticalInstructionsPattern =
+  /CRITICAL INSTRUCTIONS \(NEVER VIOLATE\):[\s\S]*?(\]|$)/gi;
+
+const reclassifyCleanedUtteranceText = (
+  history: HistoryEvent[],
+  event: Extract<HistoryEvent, { type: "own_utterance" | "own_edit_message" }>,
+  originalText: string,
+  cleanedText: string,
+): HistoryEvent[] => {
+  const match = cleanedText.match(internalThoughtPattern);
+  if (match) {
+    return [{ ...event, type: "own_thought" as const, text: match[1] }];
+  }
+
+  const thoughtPrefixPattern = /^\[thought\]:\s*([\s\S]*?)$/i;
+  const rawThoughtMatch = cleanedText.match(thoughtPrefixPattern);
+  if (rawThoughtMatch) {
+    return [
+      { ...event, type: "own_thought" as const, text: rawThoughtMatch[1] },
+    ];
+  }
+
+  if (hasJsonThought(cleanedText)) {
+    const thoughtText = extractJsonThought(cleanedText);
+    const remainingText = stripJsonThought(cleanedText);
+    return [
+      ...(thoughtText
+        ? [{ ...event, type: "own_thought" as const, text: thoughtText }]
+        : []),
+      ...(remainingText ? [{ ...event, text: remainingText }] : []),
+    ];
+  }
+
+  if (hasThoughtTagBlock(cleanedText)) {
+    const thoughtText = extractThoughtTagContent(cleanedText);
+    const remainingText = stripThoughtTagBlocks(cleanedText);
+    return [
+      ...(thoughtText
+        ? [{ ...event, type: "own_thought" as const, text: thoughtText }]
+        : []),
+      ...(remainingText ? [{ ...event, text: remainingText }] : []),
+    ];
+  }
+
+  if (isMangledToolCall(cleanedText)) {
+    const recovered = parseMangledToolCall(cleanedText);
+    if (!recovered) {
+      throw new Error(
+        `Detected a tool call rendered as visible text but could not recover it: ${cleanedText}`,
+      );
+    }
+    if (toolResultContainsMangledCall(history, recovered.name)) {
+      return [];
+    }
+    return [{
+      ...toolUseTurn({ name: recovered.name, args: recovered.args }),
+      id: event.id,
+      timestamp: event.timestamp,
+    }];
+  }
+
+  return cleanedText !== originalText
+    ? [{ ...event, text: cleanedText }]
+    : [event];
+};
+
 const reclassifyLeakedThoughts =
   (history: HistoryEvent[]) => (output: HistoryEvent[]): HistoryEvent[] =>
     output.flatMap((event) => {
@@ -1839,108 +1965,22 @@ const reclassifyLeakedThoughts =
         return [event];
       }
       const text = stripAllInternalSentTimestamps(event.text);
-
-      // Clean any system notifications and external-event markers from the text to
-      // never allow the model to fabricate them (they must only ever be injected by
-      // the platform, never emitted by the model).
-      let cleanedText = text
+      const withoutInjections = text
         .replace(systemNotificationPattern, "")
         .replace(externalEventPattern, "")
-        .trim();
-
-      // Strip raw tool calling tags and system context/instructions injections
-      const callTagPattern = /<call:[\s\S]*?>/gi;
-      const systemContextPattern =
-        /The following is critical context and instructions about the user:[\s\S]*?(\]|$)/gi;
-      const criticalInstructionsPattern =
-        /CRITICAL INSTRUCTIONS \(NEVER VIOLATE\):[\s\S]*?(\]|$)/gi;
-
-      cleanedText = cleanedText
-        .replace(callTagPattern, "")
         .replace(systemContextPattern, "")
         .replace(criticalInstructionsPattern, "")
         .trim();
-
-      const match = cleanedText.match(internalThoughtPattern);
-      if (match) {
-        return [{ ...event, type: "own_thought" as const, text: match[1] }];
-      }
-
-      const thoughtPrefixPattern = /^\[thought\]:\s*([\s\S]*?)$/i;
-      const rawThoughtMatch = cleanedText.match(thoughtPrefixPattern);
-      if (rawThoughtMatch) {
-        return [
-          { ...event, type: "own_thought" as const, text: rawThoughtMatch[1] },
-        ];
-      }
-
-      if (hasJsonThought(cleanedText)) {
-        const thoughtText = extractJsonThought(cleanedText);
-        const remainingText = stripJsonThought(cleanedText);
-        const results: HistoryEvent[] = [];
-        if (thoughtText) {
-          results.push({
-            ...event,
-            type: "own_thought" as const,
-            text: thoughtText,
-          });
-        }
-        if (remainingText) {
-          results.push({ ...event, text: remainingText });
-        }
-        return results;
-      }
-
-      if (hasThoughtTagBlock(cleanedText)) {
-        const thoughtText = extractThoughtTagContent(cleanedText);
-        const remainingText = stripThoughtTagBlocks(cleanedText);
-        const results: HistoryEvent[] = [];
-        if (thoughtText) {
-          results.push({
-            ...event,
-            type: "own_thought" as const,
-            text: thoughtText,
-          });
-        }
-        if (remainingText) {
-          results.push({ ...event, text: remainingText });
-        }
-        return results;
-      }
-
-      // Gemini sometimes emits a tool call as visible text instead of a real
-      // function_call. Recover it into an actual tool_call so the intended action
-      // runs. Never reclassify it as a thought or pass it through: that would make
-      // the model believe the action already happened and relay fabricated results
-      // to the user. If we detect a mangled call but cannot recover a tool name,
-      // throw so the failure is loud and the loop retries rather than silently
-      // leaking or dropping the action.
-      if (isMangledToolCall(cleanedText)) {
-        const recovered = parseMangledToolCall(cleanedText);
-        if (!recovered) {
-          throw new Error(
-            `Detected a tool call rendered as visible text but could not recover it: ${cleanedText}`,
-          );
-        }
-        // If this same call syntax already appeared in a prior tool result, the
-        // model is echoing tool output, not originating an action. Drop the
-        // event entirely so it neither leaks to the user nor re-triggers the
-        // recovery loop.
-        if (toolResultContainsMangledCall(history, recovered.name)) {
-          return [];
-        }
-        return [{
-          ...toolUseTurn({ name: recovered.name, args: recovered.args }),
-          id: event.id,
-          timestamp: event.timestamp,
-        }];
-      }
-
-      if (cleanedText !== text) {
-        return [{ ...event, text: cleanedText }];
-      }
-
-      return [event];
+      const { remainingText, calls, hadCallTag } = extractRawCallTags(
+        history,
+        event,
+        withoutInjections,
+      );
+      if (!remainingText && hadCallTag) return calls;
+      return [
+        ...reclassifyCleanedUtteranceText(history, event, text, remainingText),
+        ...calls,
+      ];
     });
 
 export const noResponseTag = "[no response]";
