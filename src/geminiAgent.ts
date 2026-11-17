@@ -678,7 +678,7 @@ const isRenderableToolAttachment =
     att.kind === "inline" ||
     (att.kind === "file" &&
       (isGeminiFileUri(att.fileUri) ||
-        (isInspectMedia &&
+        ((isInspectMedia || Boolean(att.renderInline)) &&
           isDirectGcsMediaAttachment(
             att.fileUri,
             normalizeMimeType(att.mimeType, att.fileUri),

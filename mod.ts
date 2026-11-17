@@ -234,6 +234,7 @@ export {
   injectTimerMs,
   injectTokenCounter,
   injectToolNotFound,
+  interruptedToolResultText,
   isRecord,
   isSafetyBlockUtterance,
   learnSkillToolName,
@@ -268,6 +269,7 @@ export {
   searchPastHistoryTool,
   setThinkingLevelToolName,
   type Skill,
+  skillAlreadyActiveMessage,
   skillAutoLoadMarker,
   skillLearnedSuccessMessage,
   skillLoadedResultText,
@@ -294,6 +296,13 @@ export {
   waitAllPreModelDecisions,
 } from "./src/agent.ts";
 export { injectAnthropicToken } from "./src/anthropicAgent.ts";
+export {
+  alreadyVisibleMediaMessage,
+  defaultInspectMediaTimeoutMs,
+  injectInspectMediaTimeoutMs,
+  inspectMediaUrlTool,
+  inspectMediaUrlToolName,
+} from "./src/inspectMediaTool.ts";
 export { injectCacher } from "./src/cacher.ts";
 export {
   applyCleanActiveMemoryDirectives,

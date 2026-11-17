@@ -1,8 +1,73 @@
 import { encodeBase64 } from "@std/encoding/base64";
+import { context, type Injection } from "@uri/inject";
 import { z } from "zod/v4";
-import type { Tool, ToolReturn } from "./agent.ts";
+import {
+  getHistory,
+  type HistoryEvent,
+  type MediaAttachment,
+  type Tool,
+  type ToolReturn,
+} from "./agent.ts";
+import { applyCleanActiveMemoryDirectives } from "./compaction.ts";
 
 export const inspectMediaUrlToolName = "inspect_media_url";
+
+export const defaultInspectMediaTimeoutMs = 30_000;
+
+const inspectMediaTimeoutMsInjection: Injection<() => number> = context(
+  () => defaultInspectMediaTimeoutMs,
+);
+
+export const injectInspectMediaTimeoutMs =
+  inspectMediaTimeoutMsInjection.inject;
+export const accessInspectMediaTimeoutMs =
+  inspectMediaTimeoutMsInjection.access;
+
+export const alreadyVisibleMediaMessage = (url: string): string =>
+  `Media from ${url} is already visible in your active conversation context — inspect it directly without calling ${inspectMediaUrlToolName} again.`;
+
+const attachmentMatchesImageUrl = (url: string) => (att: MediaAttachment) =>
+  att.mimeType.startsWith("image/") &&
+  ((att.kind === "inline" && att.caption === url) ||
+    (att.kind === "file" && (att.fileUri === url || att.caption === url)));
+
+const isRenderedToolAttachmentForUrl = (
+  url: string,
+  isInspectCall: boolean,
+) =>
+(att: MediaAttachment): boolean =>
+  (att.kind === "inline" && att.caption === url) ||
+  (att.kind === "file" &&
+    (Boolean(att.renderInline) || isInspectCall) &&
+    (att.fileUri === url || att.caption === url));
+
+export const isMediaUrlAlreadyVisibleInHistory = (
+  history: HistoryEvent[],
+  url: string,
+): boolean => {
+  const activeEvents = applyCleanActiveMemoryDirectives(history);
+  const inspectCallIds = new Set(
+    activeEvents
+      .filter((e) =>
+        e.type === "tool_call" && e.name === inspectMediaUrlToolName
+      )
+      .map((e) => e.id),
+  );
+  return activeEvents.some((e) => {
+    if (e.type === "participant_utterance") {
+      return (e.attachments ?? []).some(attachmentMatchesImageUrl(url));
+    }
+    if (e.type === "tool_result") {
+      const isInspectCall = Boolean(
+        e.toolCallId && inspectCallIds.has(e.toolCallId),
+      );
+      return (e.attachments ?? []).some(
+        isRenderedToolAttachmentForUrl(url, isInspectCall),
+      );
+    }
+    return false;
+  });
+};
 
 const contentType = (response: Response, fallback: string) =>
   response.headers.get("content-type")?.split(";")[0]?.trim() || fallback;
@@ -29,8 +94,22 @@ const isValidMedia = (mimeType: string, bytes: Uint8Array) => {
   return true;
 };
 
+const isTimeoutOrAbortError = (error: unknown): boolean =>
+  error instanceof Error &&
+  (error.name === "AbortError" || error.name === "TimeoutError");
+
 const fetchMedia = async (url: string, mimeType: string | undefined) => {
-  const response = await fetch(url);
+  const timeoutMs = accessInspectMediaTimeoutMs();
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(timeoutMs),
+  }).catch((error: unknown) => {
+    if (isTimeoutOrAbortError(error)) {
+      throw new Error(
+        `Failed to fetch media from ${url}: request timed out after ${timeoutMs}ms`,
+      );
+    }
+    throw error;
+  });
   if (!response.ok) {
     await response.body?.cancel();
     throw new Error(`Failed to fetch media: ${response.status}`);
@@ -64,6 +143,10 @@ export const inspectMediaUrlTool: Tool<
     ),
   }),
   handler: async ({ url, mimeType }) => {
+    const history = await getHistory().catch((): HistoryEvent[] => []);
+    if (isMediaUrlAlreadyVisibleInHistory(history, url)) {
+      return alreadyVisibleMediaMessage(url);
+    }
     const media = await fetchMedia(url, mimeType).catch((error: unknown) =>
       error instanceof Error ? error.message : String(error)
     );

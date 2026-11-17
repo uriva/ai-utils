@@ -905,6 +905,48 @@ const isDeferredToolWakeupHistory = (history: HistoryEvent[]): boolean => {
   return lastSubstantive?.type === "tool_result";
 };
 
+const isPostAnswerExternalTrigger = (e: HistoryEvent): boolean =>
+  e.type === "external_event" ||
+  (e.type === "own_thought" &&
+    !e.modelMetadata &&
+    typeof e.text === "string" &&
+    Boolean(e.text.trim()) &&
+    !e.text.startsWith("[This summary covers"));
+
+const activeDecisionRequestText = (
+  history: HistoryEvent[],
+): string | undefined => {
+  const lastUserIndex = history.findLastIndex(
+    (e) =>
+      e.type === "participant_utterance" ||
+      e.type === "participant_edit_message",
+  );
+  const tailAfterUser = lastUserIndex >= 0
+    ? history.slice(lastUserIndex + 1)
+    : history;
+  const userAlreadyAnswered = lastUserIndex === -1 ||
+    tailAfterUser.some((e) =>
+      e.type === "own_utterance" || e.type === "do_nothing"
+    );
+  if (userAlreadyAnswered) {
+    const lastAnswerIndex = tailAfterUser.findLastIndex((e) =>
+      e.type === "own_utterance" || e.type === "do_nothing"
+    );
+    const postAnswerSlice = lastAnswerIndex >= 0
+      ? tailAfterUser.slice(lastAnswerIndex + 1)
+      : tailAfterUser;
+    const trigger = postAnswerSlice.findLast(isPostAnswerExternalTrigger);
+    if (trigger && "text" in trigger && typeof trigger.text === "string") {
+      const trimmed = trigger.text.trim();
+      if (trimmed) return trimmed;
+    }
+  }
+  const lastUser = lastParticipantUtterance(history);
+  return lastUser && typeof lastUser.text === "string" && lastUser.text.trim()
+    ? lastUser.text
+    : undefined;
+};
+
 export const decideSkillsWithDecisionModel = async (
   prompt: string,
   history: HistoryEvent[],
@@ -917,8 +959,8 @@ export const decideSkillsWithDecisionModel = async (
   if (empty(candidateSkills)) {
     return { toLearn: [], toUnlearn: [] };
   }
-  const lastUser = lastParticipantUtterance(history);
-  if (!lastUser || typeof lastUser.text !== "string" || !lastUser.text.trim()) {
+  const currentRequestText = activeDecisionRequestText(history);
+  if (!currentRequestText) {
     return { toLearn: [], toUnlearn: [] };
   }
 
@@ -954,7 +996,7 @@ export const decideSkillsWithDecisionModel = async (
     verified_conversation_facts_and_history:
       (recentDialogue + (facts ? `\n\nFacts:\n${facts}` : "")).slice(-10000)
         .toWellFormed(),
-    current_user_request: lastUser.text.toWellFormed(),
+    current_user_request: currentRequestText.toWellFormed(),
   };
 
   const questions = Object.fromEntries([

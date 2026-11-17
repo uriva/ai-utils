@@ -79,7 +79,13 @@ export const forcedStopUtterance =
 
 export type MediaAttachment =
   | { kind: "inline"; mimeType: string; dataBase64: string; caption?: string }
-  | { kind: "file"; mimeType: string; fileUri: string; caption?: string };
+  | {
+    kind: "file";
+    mimeType: string;
+    fileUri: string;
+    caption?: string;
+    renderInline?: boolean;
+  };
 
 const mediaAttachmentSchema: z.ZodType<MediaAttachment> = z.union([
   z.object({
@@ -93,6 +99,7 @@ const mediaAttachmentSchema: z.ZodType<MediaAttachment> = z.union([
     mimeType: z.string(),
     fileUri: z.string(),
     caption: z.string().optional(),
+    renderInline: z.boolean().optional(),
   }),
 ]);
 
@@ -784,7 +791,7 @@ const historyInjection: Injection<() => Promise<HistoryEvent[]>> = context(
   },
 );
 
-const getHistory = historyInjection.access;
+export const getHistory = historyInjection.access;
 export const injectAccessHistory = historyInjection.inject;
 export const accessHistory = historyInjection.access;
 
@@ -2281,6 +2288,42 @@ const toolResultsByCallId = (
 const pendingToolResultText =
   "[Tool result pending - still processing in the background]";
 
+export const interruptedToolResultText =
+  "[Tool execution was interrupted before completing because the previous run ended or was superseded. Do not assume this action completed — re-run or verify if still needed.]";
+
+const bareToolIdentifier = (raw: string): string => {
+  const slashIdx = raw.lastIndexOf("/");
+  const colonIdx = raw.lastIndexOf(":");
+  const sepIdx = Math.max(slashIdx, colonIdx);
+  return sepIdx >= 0 ? raw.slice(sepIdx + 1) : raw;
+};
+
+const isBackgroundToolParams = (params: unknown): boolean =>
+  isRecord(params) &&
+  (params.background === true ||
+    (isRecord(params.params) && params.params.background === true));
+
+const isDeferredToolCallEvent = (
+  event: Extract<HistoryEvent, { type: "tool_call" }>,
+  deferredToolNames?: ReadonlySet<string>,
+): boolean => {
+  if (!deferredToolNames) return true;
+  if (isBackgroundToolParams(event.parameters)) return true;
+  const topBare = bareToolIdentifier(event.name);
+  if (deferredToolNames.has(event.name) || deferredToolNames.has(topBare)) {
+    return true;
+  }
+  const innerCmd = isRecord(event.parameters) &&
+      typeof event.parameters.command === "string"
+    ? event.parameters.command
+    : undefined;
+  return Boolean(
+    innerCmd &&
+      (deferredToolNames.has(innerCmd) ||
+        deferredToolNames.has(bareToolIdentifier(innerCmd))),
+  );
+};
+
 const isDirectUserReply = (e: HistoryEvent): boolean =>
   e.type === "own_utterance" ||
   e.type === "own_edit_message" ||
@@ -2379,6 +2422,7 @@ const pendingDeferredAcknowledgement =
 
 export const normalizeHistoryForModel = (
   history: HistoryEvent[],
+  deferredToolNames?: ReadonlySet<string>,
 ): HistoryEvent[] => {
   const lastParticipantUtterance = [...history].reverse().find(
     (e) => e.type === "participant_utterance",
@@ -2469,6 +2513,17 @@ export const normalizeHistoryForModel = (
         // 400 "each tool_use must have a single result"), so keep only the
         // chronologically first delivery; extras stay in persisted history.
         return [...acc, event, matchedResults[0]];
+      }
+      if (!isDeferredToolCallEvent(event, deferredToolNames)) {
+        const interruptedResult: ToolResult = {
+          type: "tool_result",
+          isOwn: true,
+          id: `${event.id}-interrupted-result`,
+          timestamp: event.timestamp,
+          result: interruptedToolResultText,
+          toolCallId: event.id,
+        };
+        return [...acc, event, interruptedResult];
       }
       if (laterUnansweredUserMessage(filteredHistory, index)) {
         // Drop the tool_call + its (would-be) pending functionResponse from the
@@ -2576,6 +2631,7 @@ export type ProjectHistoryOptions = {
   settledTokenThreshold?: number;
   onlyUseCachedSummaries?: boolean;
   scratchPad?: ToolOutputScratchPad;
+  deferredToolNames?: ReadonlySet<string>;
   generateTLDR?: (
     toolCall: HistoryEvent & { type: "tool_call" },
     resultText: string,
@@ -2589,6 +2645,7 @@ export const projectHistoryToModelContext = async ({
   settledTokenThreshold = defaultSettledHistoryTokenThreshold,
   onlyUseCachedSummaries = false,
   scratchPad,
+  deferredToolNames,
   generateTLDR,
 }: ProjectHistoryOptions): Promise<HistoryEvent[]> => {
   const sanitized = sanitizeWindowBoundary(rawHistory);
@@ -2618,7 +2675,7 @@ export const projectHistoryToModelContext = async ({
     );
   }
 
-  return normalizeHistoryForModel(projectedEvents);
+  return normalizeHistoryForModel(projectedEvents, deferredToolNames);
 };
 
 // True when the (already-normalized) history contains the system-notification
@@ -2987,18 +3044,27 @@ export const createSkillTools = (
     }),
     handler: async (
       { skillName, spinnerText: _spinnerText },
+      toolCallId,
     ) => {
       const skill = skillMap[skillName] ?? skillMap[skillName.toLowerCase()];
       if (!skill) {
         return `Skill "${skillName}" ${skillNotFoundMarkerText} ${skillNames}`;
       }
+      const priorHistory = await historyExcludingToolCall(toolCallId);
+      if (
+        priorHistory &&
+        activeSkillNames(priorHistory).has(skill.name.toLowerCase())
+      ) {
+        return skillAlreadyActiveMessage(skill.name);
+      }
 
       const spec = getAgentSpec();
       if (spec) {
-        const specForTurn = getSpecForTurn(spec, await getHistory());
+        const currentHistory = priorHistory ?? await getHistory();
+        const specForTurn = getSpecForTurn(spec, currentHistory);
         const currentTokens = await estimateAgentInputTokens(
           specForTurn,
-          await getHistory(),
+          currentHistory,
         );
         if (currentTokens > 150000) {
           return `SYSTEM BUDGET EXCEEDED: Your current context size is ${currentTokens} tokens, which exceeds the strict budget of 150,000 tokens. To protect against cost overruns, learning of new skills is temporarily blocked. You must immediately call either "unlearn_skill" to deactivate an active/learned skill, or use the "clean_active_memory" tool to compress or delete verbose/obsolete parts of your conversation history. If the skills are too large or should be divided into smaller subskills, please report this to the system admins so they can optimize them.`;
@@ -3189,6 +3255,34 @@ export const createSkillTools = (
 
 export const skillLearnedSuccessMessage = (skillName: string): string =>
   `Skill "${skillName}" learned successfully. Its tools and instructions are now active and available in your system prompt and tools.`;
+
+export const skillAlreadyActiveMessage = (skillName: string): string =>
+  `Skill "${skillName}" is already active in your system prompt and tools — proceed directly without calling ${learnSkillToolName} again.`;
+
+const redundantLearnCorrectionText = (skillNamesList: string[]): string =>
+  `Skill(s) ${
+    skillNamesList.map((n) => `"${n}"`).join(", ")
+  } are already active in your system prompt and tools. Do NOT call ${learnSkillToolName} for them again — proceed directly with the required tool call or final response.`;
+
+const filterRedundantLearnSkillCalls = (
+  alreadyActive: ReadonlySet<string>,
+  events: HistoryEvent[],
+): { filtered: HistoryEvent[]; droppedSkills: string[] } => {
+  const seenInBatch = new Set<string>();
+  const droppedSkills: string[] = [];
+  const filtered = events.filter((event) => {
+    if (!isLearnToolCall(event)) return true;
+    const skillKey = skillNameFromToolCall(event);
+    if (!skillKey) return true;
+    if (alreadyActive.has(skillKey) || seenInBatch.has(skillKey)) {
+      if (!droppedSkills.includes(skillKey)) droppedSkills.push(skillKey);
+      return false;
+    }
+    seenInBatch.add(skillKey);
+    return true;
+  });
+  return { filtered, droppedSkills };
+};
 
 export const skillUnlearnAppliedMarkerText =
   "tools have been removed from your active context";
@@ -3488,6 +3582,9 @@ export type AgentSpec = AgentInputs & {
   // instruction or history (e.g. arbitrary code execution). Matching covers
   // the tool name and, for router tools, the inner `command` string.
   urlGroundingExemptToolNames?: string[];
+  // Bare or qualified names of tools that suspend the turn asynchronously
+  // (returning undefined and delivering their tool_result in a later wakeup).
+  deferredToolNames?: string[];
 };
 
 const hasEmojiFlood = (events: HistoryEvent[]) =>
@@ -3554,6 +3651,9 @@ const projectModelContext = (
     scratchPad,
     settledTokenThreshold: spec.historyCompactionTokenThreshold,
     onlyUseCachedSummaries: Boolean(spec.compactHistory),
+    deferredToolNames: spec.deferredToolNames
+      ? new Set(spec.deferredToolNames)
+      : undefined,
   });
 
 type ProgressGateState = {
@@ -3925,9 +4025,30 @@ export const runAbstractAgent = (
         continue;
       }
 
+      const latestHistoryBeforeEmit = await getHistory();
+      const activeBeforeModelCall = activeSkillNames(history);
+      const { filtered: deduplicatedEmit, droppedSkills } =
+        filterRedundantLearnSkillCalls(
+          activeSkillNames(latestHistoryBeforeEmit),
+          emitWithDescriptions,
+        );
+      if (nonempty(droppedSkills) && empty(deduplicatedEmit)) {
+        const wasAlreadyActiveBeforeCall = droppedSkills.every((s) =>
+          activeBeforeModelCall.has(s)
+        );
+        ephemeralHistory = [
+          ...ephemeralHistory,
+          ...internal,
+          ...(wasAlreadyActiveBeforeCall
+            ? [ownThoughtTurn(redundantLearnCorrectionText(droppedSkills))]
+            : []),
+        ];
+        continue;
+      }
+
       const emitWithUniqueIds = disambiguateNewToolCalls(
-        history,
-        emitWithDescriptions,
+        latestHistoryBeforeEmit,
+        deduplicatedEmit,
       );
 
       // Process what needs to be emitted
