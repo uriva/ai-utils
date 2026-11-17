@@ -67,7 +67,9 @@ import {
   ensureGeminiAttachmentIsLink,
   geminiModelVersion,
   geminiThinkingConfig,
+  isDirectGcsMediaAttachment,
   isGeminiFileUri,
+  normalizeMimeType,
   zodToGeminiParameters,
 } from "./gemini.ts";
 import {
@@ -671,24 +673,39 @@ const isInspectMediaToolResult = (
     toolCall.name === inspectMediaUrlToolName;
 };
 
-const isRenderableToolAttachment = (att: MediaAttachment): boolean =>
-  att.kind === "inline" ||
-  (att.kind === "file" && isGeminiFileUri(att.fileUri));
+const isRenderableToolAttachment =
+  (isInspectMedia: boolean) => (att: MediaAttachment): boolean =>
+    att.kind === "inline" ||
+    (att.kind === "file" &&
+      (isGeminiFileUri(att.fileUri) ||
+        (isInspectMedia &&
+          isDirectGcsMediaAttachment(
+            att.fileUri,
+            normalizeMimeType(att.mimeType, att.fileUri),
+          ))));
 
 type ExternalFileAttachment = Extract<MediaAttachment, { kind: "file" }>;
 
-const isExternalFileAttachment = (
-  att: MediaAttachment,
-): att is ExternalFileAttachment =>
-  att.kind === "file" && !isGeminiFileUri(att.fileUri);
+const isExternalFileAttachment =
+  (isInspectMedia: boolean) =>
+  (att: MediaAttachment): att is ExternalFileAttachment =>
+    att.kind === "file" && !isRenderableToolAttachment(isInspectMedia)(att);
 
-const toolResultMediaParts = (attachments?: MediaAttachment[]): Part[] =>
-  attachmentsToParts((attachments ?? []).filter(isRenderableToolAttachment));
+const toolResultMediaParts = (
+  isInspectMedia: boolean,
+  attachments?: MediaAttachment[],
+): Part[] =>
+  attachmentsToParts(
+    (attachments ?? []).filter(isRenderableToolAttachment(isInspectMedia)),
+  );
 
 const toolResultExternalMediaText = (
+  isInspectMedia: boolean,
   attachments?: MediaAttachment[],
 ): string => {
-  const external = (attachments ?? []).filter(isExternalFileAttachment);
+  const external = (attachments ?? []).filter(
+    isExternalFileAttachment(isInspectMedia),
+  );
   return empty(external)
     ? ""
     : `\nTool returned media URLs. If you need to inspect them visually, call ${inspectMediaUrlToolName}:\n${
@@ -766,13 +783,16 @@ const historyEventToContent = (
         toolCall.name !== "unknown"
       ? toolCall.name
       : undefined;
+    const isInspectMedia = name === inspectMediaUrlToolName;
     const formattedResult = stampText(
-      stripAnsi(e.result + toolResultExternalMediaText(e.attachments)),
+      stripAnsi(
+        e.result + toolResultExternalMediaText(isInspectMedia, e.attachments),
+      ),
     );
     if (!name) {
       return wrapUserContent([
         { text: formattedResult },
-        ...toolResultMediaParts(e.attachments),
+        ...toolResultMediaParts(false, e.attachments),
       ]);
     }
     const parts: Part[] = [
@@ -785,7 +805,7 @@ const historyEventToContent = (
           },
         },
       },
-      ...toolResultMediaParts(e.attachments),
+      ...toolResultMediaParts(isInspectMedia, e.attachments),
     ];
     return wrapUserContent(parts);
   }

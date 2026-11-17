@@ -652,7 +652,7 @@ export const normalizeMimeType = (
 
 const directGcsMimePrefixes = ["image/", "audio/", "video/"];
 
-const isDirectGcsMediaAttachment = (
+export const isDirectGcsMediaAttachment = (
   uri: string,
   mimeType: string,
 ): boolean => {

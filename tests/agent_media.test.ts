@@ -379,6 +379,62 @@ Deno.test("tool_result attachments are rendered as media parts in the gemini req
   assert(responseText.includes("screenshot"));
 });
 
+Deno.test("inspect_media_url tool_result with GCS fileUri renders as fileData without looping", () => {
+  const gcsUri = "https://storage.googleapis.com/example-bucket/inspected.jpg";
+  const uninspectedGcsUri =
+    "https://storage.googleapis.com/example-bucket/other.jpg";
+  const events: HistoryEvent[] = [
+    participantUtteranceTurn({ name: "user", text: "go" }),
+    toolUseTurn({ id: "call-other", name: "other_tool", args: {} }),
+    toolResultTurn({
+      result: "Returned link.",
+      toolCallId: "call-other",
+      attachments: [{
+        kind: "file",
+        mimeType: "image/jpeg",
+        fileUri: uninspectedGcsUri,
+      }],
+    }),
+    toolUseTurn({
+      id: "call-inspect",
+      name: "inspect_media_url",
+      args: { url: gcsUri },
+    }),
+    toolResultTurn({
+      result: `Fetched media from ${gcsUri} (image/jpeg).`,
+      toolCallId: "call-inspect",
+      attachments: [{
+        kind: "file",
+        mimeType: "image/jpeg",
+        fileUri: gcsUri,
+      }],
+    }),
+  ];
+  const req = buildReq(ThinkingLevel.HIGH, "p", [], "UTC", undefined)(
+    // deno-lint-ignore no-explicit-any
+    events as any[],
+  );
+  const contents = req.contents as unknown as Content[];
+  const otherParts = (contents[2].parts ?? []) as Part[];
+  const otherMedia = otherParts.filter((p) => "fileData" in p);
+  const otherText = JSON.stringify(
+    otherParts.find((p) => "functionResponse" in p),
+  );
+  assertEquals(otherMedia.length, 0);
+  assert(otherText.includes("inspect_media_url"));
+
+  const inspectParts = (contents[4].parts ?? []) as Part[];
+  const inspectMedia = inspectParts.filter((p) => "fileData" in p);
+  const inspectText = JSON.stringify(
+    inspectParts.find((p) => "functionResponse" in p),
+  );
+  assertEquals(inspectMedia.length, 1);
+  assert(
+    inspectMedia.some((p) => "fileData" in p && p.fileData?.fileUri === gcsUri),
+  );
+  assert(!inspectText.includes("call inspect_media_url"));
+});
+
 import { normalizeMimeType } from "../src/gemini.ts";
 
 Deno.test("normalizeMimeType maps TypeScript and code files to text/plain", () => {
