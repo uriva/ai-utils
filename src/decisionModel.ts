@@ -27,6 +27,7 @@ import {
   decisionThinkingLevelInstructions,
   type ModelOpts,
   type ModelTier,
+  parseDecisionThinkingLevel,
   setThinkingLevelToolName,
   validateAgainstSchema,
 } from "./utils.ts";
@@ -664,11 +665,9 @@ export const routeThinkingLevel = async (
       },
     });
     const ans = answers.thinking_level ?? answers.requires_flash;
-    if (
-      ans && ans.type === "choice" &&
-      (ans.choice === "low" || ans.choice === "lite")
-    ) {
-      return ThinkingLevel.LOW;
+    if (ans && ans.type === "choice") {
+      return parseDecisionThinkingLevel(ans.choice, ans.confidence) ??
+        ThinkingLevel.HIGH;
     }
     return ThinkingLevel.HIGH;
   }
@@ -714,11 +713,7 @@ export const decideThinkingLevelWithDecisionModel = async (
       });
       const ans = answers.thinking_level ?? answers.requires_flash;
       if (!ans || ans.type !== "choice") return undefined;
-      return ans.choice === "low" || ans.choice === "lite"
-        ? ThinkingLevel.LOW
-        : ans.choice === "high" || ans.choice === "flash"
-        ? ThinkingLevel.HIGH
-        : undefined;
+      return parseDecisionThinkingLevel(ans.choice, ans.confidence);
     } catch (err) {
       console.warn(
         "[decision-model-thinking] thinking level decision check failed, failing open:",

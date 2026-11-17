@@ -2859,6 +2859,9 @@ const thinkingLevelFromToolCall = (
   if (raw === ThinkingLevel.HIGH || raw === "HIGH" || raw === "high") {
     return ThinkingLevel.HIGH;
   }
+  if (raw === ThinkingLevel.MEDIUM || raw === "MEDIUM" || raw === "medium") {
+    return ThinkingLevel.MEDIUM;
+  }
   if (raw === ThinkingLevel.LOW || raw === "LOW" || raw === "low") {
     return ThinkingLevel.LOW;
   }
@@ -3473,11 +3476,23 @@ const runPreModelDecisions = async (
 
   const usesGeminiThinking = spec.provider !== "moonshot" &&
     spec.provider !== "anthropic";
+  const prefetchedThinking = usesGeminiThinking
+    ? spec.thinkingLevel
+    : undefined;
   const shouldAdjustThinking = usesGeminiThinking &&
+    prefetchedThinking === undefined &&
     (isDecisionModelInjected() || isDefaultCallModelWrapper());
+  const shouldPersistPrefetchedThinking = prefetchedThinking !== undefined;
   const shouldAdjustSkills = nonempty(skills);
   const shouldCleanup = spec.enableAutoMemoryCleanup !== false;
-  if (!shouldAdjustThinking && !shouldAdjustSkills && !shouldCleanup) return;
+  if (
+    !shouldAdjustThinking &&
+    !shouldPersistPrefetchedThinking &&
+    !shouldAdjustSkills &&
+    !shouldCleanup
+  ) {
+    return;
+  }
 
   const history = await getHistory();
   const canCleanup = shouldCleanup &&
@@ -3485,7 +3500,14 @@ const runPreModelDecisions = async (
     sum(history.map((e) => Math.ceil(eventToPlainTextLocal(e).length / 4))) >=
       5000;
 
-  if (!shouldAdjustThinking && !shouldAdjustSkills && !canCleanup) return;
+  if (
+    !shouldAdjustThinking &&
+    !shouldPersistPrefetchedThinking &&
+    !shouldAdjustSkills &&
+    !canCleanup
+  ) {
+    return;
+  }
 
   const [thinkingLevelDecision, skillsAdjustment, cleanupDecisions] =
     await Promise.all([
@@ -3495,7 +3517,7 @@ const runPreModelDecisions = async (
           history,
           spec.tools,
         )
-        : Promise.resolve(undefined),
+        : Promise.resolve(prefetchedThinking),
       shouldAdjustSkills
         ? decideSkillsWithDecisionModel(
           spec.prompt,

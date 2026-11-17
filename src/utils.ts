@@ -1,3 +1,4 @@
+import { ThinkingLevel } from "@google/genai";
 import { type EitherOutput, type Func, throwerCatcher } from "gamla";
 import type { z, ZodType } from "zod/v4";
 
@@ -250,17 +251,39 @@ export const cleanActiveMemoryToolName = "clean_active_memory";
 export const setThinkingLevelToolName = "set_thinking_level";
 
 export const decisionThinkingLevelInstructions =
-  "Which reasoning level should handle this task? Choose 'low' for conversational turns, greetings, basic FAQ, general information questions, presenting read-only search/lookup results, standard recommendation replies, user preferences, negative content filters, notification or subscription settings (including unsubscribing or quiet hours); choose 'high' for multi-step action execution (such as downloading, media processing, cutting, or file editing), post-action tool results with strict behavioral constraints, coding, mathematical problem solving, or complex logic.";
+  "Which reasoning level should handle this task? Choose 'low' for conversational turns, greetings, basic FAQ, general information questions, search or recommendation lookups, presenting read-only search/lookup results, standard recommendation replies, user preferences, negative content filters, notification or subscription settings (including unsubscribing or quiet hours); choose 'medium' for multi-constraint recommendation trade-offs (combining budget, area, exclusions, and schedule), nuanced moderation/safety/quota-dispute edge cases, or synthesizing multiple tool outputs; choose 'high' for multi-step action execution (such as downloading, media processing, cutting, shell/VM/browser execution, or file editing), post-action tool results with strict behavioral/stop constraints, coding, mathematical problem solving, or complex logic.";
 
 export const decisionThinkingLevelCriteria = {
   low:
     "Conversational greeting, general FAQ, information question, search or recommendation lookup, presenting read-only query/retrieval tool results, user preferences, negative content filters, unsubscribe/opt-out, quiet hours, or pleasantry without multi-step action execution",
+  medium:
+    "Multi-constraint trade-off filtering, nuanced policy/moderation/quota-dispute edge cases, or synthesizing multiple tool outputs with competing requirements",
   high:
-    "Action execution (downloading, cutting, media processing, file operations), post-action tool results with strict stop/behavioral constraints, coding, math, or complex reasoning puzzles",
+    "Action execution (downloading, cutting, media processing, file/shell/browser operations), post-action tool results with strict stop/behavioral constraints, coding, math, or complex reasoning puzzles",
+};
+
+export const lowThinkingMinConfidence = 0.65;
+
+export const parseDecisionThinkingLevel = (
+  choice: string | undefined,
+  confidence?: number,
+): ThinkingLevel | undefined => {
+  const normalized = choice?.trim().toLowerCase();
+  if (normalized === "low" || normalized === "lite") {
+    return typeof confidence === "number" &&
+        confidence < lowThinkingMinConfidence
+      ? ThinkingLevel.MEDIUM
+      : ThinkingLevel.LOW;
+  }
+  if (normalized === "medium") return ThinkingLevel.MEDIUM;
+  if (normalized === "high" || normalized === "flash") {
+    return ThinkingLevel.HIGH;
+  }
+  return undefined;
 };
 
 export const decisionModelSelectionInstructions =
-  decisionThinkingLevelInstructions;
+  "Which reasoning level should handle this task? Choose 'lite' for conversational turns, greetings, basic FAQ, general information questions, presenting read-only search/lookup results, standard recommendation replies, user preferences, negative content filters, notification or subscription settings (including unsubscribing or quiet hours); choose 'flash' for multi-step action execution (such as downloading, media processing, cutting, or file editing), post-action tool results with strict behavioral constraints, coding, mathematical problem solving, or complex logic.";
 
 export const decisionModelSelectionCriteria = {
   lite: decisionThinkingLevelCriteria.low,

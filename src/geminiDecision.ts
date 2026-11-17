@@ -23,6 +23,7 @@ import {
   isServerError,
   isTransientFetchError,
   type ModelTier,
+  parseDecisionThinkingLevel,
 } from "./utils.ts";
 
 export {
@@ -464,16 +465,16 @@ const rawCallGeminiRoute = async (
   payload: string,
 ): Promise<ThinkingLevel> => {
   const rawAnswers = await postGeminiDecisions(5000)(token, payload);
-  const thinkingAns = rawAnswers.thinking_level;
-  const modelAns = rawAnswers.model_selection;
-  const choice = isRecord(thinkingAns) && typeof thinkingAns.choice === "string"
-    ? thinkingAns.choice
-    : isRecord(modelAns) && typeof modelAns.choice === "string"
-    ? modelAns.choice
+  const ans = isRecord(rawAnswers.thinking_level)
+    ? rawAnswers.thinking_level
+    : isRecord(rawAnswers.model_selection)
+    ? rawAnswers.model_selection
     : undefined;
-  return choice === "low" || choice === "lite"
-    ? ThinkingLevel.LOW
-    : ThinkingLevel.HIGH;
+  const choice = ans && typeof ans.choice === "string" ? ans.choice : undefined;
+  const confidence = ans && typeof ans.confidence === "number"
+    ? ans.confidence
+    : undefined;
+  return parseDecisionThinkingLevel(choice, confidence) ?? ThinkingLevel.HIGH;
 };
 
 const inMemoryRouteCache = new Map<

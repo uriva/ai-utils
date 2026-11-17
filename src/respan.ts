@@ -20,6 +20,7 @@ import {
   decisionThinkingLevelCriteria,
   decisionThinkingLevelInstructions,
   type ModelTier,
+  parseDecisionThinkingLevel,
 } from "./utils.ts";
 
 export {
@@ -754,12 +755,13 @@ const rawCallRespanRoute = async (
     throw new Error(`Respan API error (${response.status}): ${errorText}`);
   }
   const data = await response.json();
-  const choice = data?.answers?.thinking_level?.choice ??
-    data?.answers?.model_selection?.choice;
-  if (typeof choice === "string") {
-    return choice === "low" || choice === "lite"
-      ? ThinkingLevel.LOW
-      : ThinkingLevel.HIGH;
+  const ans = data?.answers?.thinking_level ?? data?.answers?.model_selection;
+  if (typeof ans?.choice === "string") {
+    const confidence = typeof ans?.confidence === "number"
+      ? ans.confidence
+      : undefined;
+    return parseDecisionThinkingLevel(ans.choice, confidence) ??
+      ThinkingLevel.HIGH;
   }
   const result = (data?.results as RespanBehaviorResult[] | undefined)?.find(
     (r) => r.id === "requires_high_thinking" || r.id === "requires_flash",

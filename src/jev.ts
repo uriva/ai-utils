@@ -18,6 +18,7 @@ import {
   decisionThinkingLevelCriteria,
   decisionThinkingLevelInstructions,
   type ModelTier,
+  parseDecisionThinkingLevel,
 } from "./utils.ts";
 
 export {
@@ -75,11 +76,12 @@ const rawCallJev = async (
     throw new Error(`Jev API error (${response.status}): ${errorText}`);
   }
   const data = await response.json();
-  const choice = data?.answers?.thinking_level?.choice ??
-    data?.answers?.model_selection?.choice;
-  return choice === "low" || choice === "lite"
-    ? ThinkingLevel.LOW
-    : ThinkingLevel.HIGH;
+  const ans = data?.answers?.thinking_level ?? data?.answers?.model_selection;
+  const choice = typeof ans?.choice === "string" ? ans.choice : undefined;
+  const confidence = typeof ans?.confidence === "number"
+    ? ans.confidence
+    : undefined;
+  return parseDecisionThinkingLevel(choice, confidence) ?? ThinkingLevel.HIGH;
 };
 
 const inMemoryJevCache = new Map<

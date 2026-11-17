@@ -6,6 +6,7 @@ import {
 } from "@google/genai";
 import { injectCallModelWrapper, runAgent } from "../mod.ts";
 import {
+  activeThinkingLevel,
   getStreamThinkingChunk,
   type HistoryEvent,
   injectCallModel,
@@ -13,8 +14,10 @@ import {
   ownUtteranceTurn,
   participantUtteranceTurn,
   toolUseTurn,
+  waitAllPreModelDecisions,
 } from "../src/agent.ts";
 import {
+  decideThinkingLevelWithDecisionModel,
   type DecisionAnswer,
   injectDecisionModel,
 } from "../src/decisionModel.ts";
@@ -400,5 +403,85 @@ Deno.test(
       ThinkingLevel.HIGH,
       ThinkingLevel.LOW,
     ]);
+  },
+);
+
+Deno.test(
+  "adaptive thinking supports MEDIUM, upgrades low-confidence LOW decisions to MEDIUM, and persists prefetched spec.thinkingLevel without duplicate decision call",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text:
+          "Find a quiet venue under 120 NIS on Saturday night with seating.",
+      }),
+    ];
+
+    let decisionCalls = 0;
+    const lowConfLevel = await injectDecisionModel(() => {
+      decisionCalls++;
+      return Promise.resolve({
+        thinking_level: {
+          type: "choice",
+          choice: "low",
+          confidence: 0.48,
+        },
+      });
+    })(() =>
+      decideThinkingLevelWithDecisionModel(
+        "You are an events guide.",
+        history,
+        [{ name: "query" }],
+      )
+    )();
+    assertEquals(lowConfLevel, ThinkingLevel.MEDIUM);
+    assertEquals(decisionCalls, 1);
+
+    const mediumLevel = await injectDecisionModel(() =>
+      Promise.resolve({
+        thinking_level: {
+          type: "choice",
+          choice: "medium",
+          confidence: 0.85,
+        },
+      })
+    )(() =>
+      decideThinkingLevelWithDecisionModel(
+        "You are an events guide.",
+        history,
+        [{ name: "query" }],
+      )
+    )();
+    assertEquals(mediumLevel, ThinkingLevel.MEDIUM);
+
+    // When caller prefetched spec.thinkingLevel, iteration 1 uses it immediately
+    // and runPreModelDecisions persists it into history without calling decision model again:
+    let agentDecisionCalls = 0;
+    const capturedLevels: (ThinkingLevel | undefined)[] = [];
+    await pipe(
+      injectDecisionModel(() => {
+        agentDecisionCalls++;
+        return Promise.resolve({});
+      }),
+      injectCallModel(() => Promise.resolve([ownUtteranceTurn("Top match!")])),
+      injectCallModelWrapper(({ thinkingLevel, inner }) => {
+        capturedLevels.push(thinkingLevel);
+        return inner;
+      }),
+      agentDeps(history),
+    )(() =>
+      runAgent({
+        maxIterations: 1,
+        prompt: "You are an events guide.",
+        tools: [],
+        timezoneIANA: "UTC",
+        thinkingLevel: ThinkingLevel.MEDIUM,
+      })
+    )();
+    await waitAllPreModelDecisions();
+
+    assertEquals(capturedLevels, [ThinkingLevel.MEDIUM]);
+    assertEquals(agentDecisionCalls, 0);
+    assertEquals(activeThinkingLevel(history), ThinkingLevel.MEDIUM);
   },
 );
