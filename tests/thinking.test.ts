@@ -13,13 +13,17 @@ import {
   ownThoughtTurn,
   ownUtteranceTurn,
   participantUtteranceTurn,
+  toolResultTurn,
   toolUseTurn,
   waitAllPreModelDecisions,
 } from "../src/agent.ts";
 import {
   decideThinkingLevelWithDecisionModel,
   type DecisionAnswer,
+  formatAgentStateForDecisionModel,
   injectDecisionModel,
+  routeTask,
+  routeThinkingLevel,
 } from "../src/decisionModel.ts";
 import {
   geminiGenJsonFromConvo,
@@ -28,7 +32,11 @@ import {
 } from "../src/gemini.ts";
 import { pipe } from "gamla";
 import { z } from "zod/v4";
-import { agentDeps, runForAllProviders } from "../test_helpers.ts";
+import {
+  agentDeps,
+  injectSecrets,
+  runForAllProviders,
+} from "../test_helpers.ts";
 
 runForAllProviders(
   "agent returns own_thought events when thinking is enabled",
@@ -484,4 +492,50 @@ Deno.test(
     assertEquals(agentDecisionCalls, 0);
     assertEquals(activeThinkingLevel(history), ThinkingLevel.MEDIUM);
   },
+);
+
+Deno.test(
+  "routeThinkingLevel keeps post-delivery completion tool_result below HIGH while routeTask stays flash",
+  injectSecrets(async () => {
+    const callEvent: HistoryEvent = {
+      type: "tool_call",
+      id: "call-export-1",
+      timestamp: 1_700_000_000_000,
+      isOwn: true,
+      name: "export_segment",
+      parameters: { start: "00:01:00", end: "00:02:00" },
+    };
+    const resultEvent: HistoryEvent = {
+      ...toolResultTurn({
+        toolCallId: "call-export-1",
+        result:
+          "Export complete and delivered directly to the chat above. DO NOT re-send the file, DO NOT output attachment links, and DO NOT export further continuations unless requested. Send a brief conversational closing summary.",
+      }),
+      id: "call-export-1-res",
+      timestamp: 1_700_000_001_000,
+    };
+    const state = formatAgentStateForDecisionModel(
+      "You are a helpful export assistant. Deliver requested exports without unrequested continuations.",
+      [
+        {
+          ...participantUtteranceTurn({
+            name: "user",
+            text: "Export the segment from 00:01:00 to 00:02:00.",
+          }),
+          id: "u-1",
+          timestamp: 1_699_999_999_000,
+        },
+        callEvent,
+        resultEvent,
+      ],
+      [{ name: "export_segment" }],
+    );
+    const level = await routeThinkingLevel(state);
+    assert(
+      level !== ThinkingLevel.HIGH,
+      `Expected post-delivery closing reply to avoid HIGH thinking, got ${level}`,
+    );
+    const tier = await routeTask(state);
+    assertEquals(tier, "flash");
+  }),
 );

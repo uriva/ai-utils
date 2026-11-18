@@ -84,6 +84,7 @@ export const shouldAuditUnbackedAction = ({
   skills,
   retryCount,
   hadExecutedWorkflowTool,
+  executedToolNames,
   mockModelInjected,
 }: {
   modelResponse: HistoryEvent[];
@@ -92,11 +93,12 @@ export const shouldAuditUnbackedAction = ({
   tools: Tool<any>[];
   skills: Skill[];
   retryCount: number;
-  hadExecutedWorkflowTool: boolean;
+  hadExecutedWorkflowTool?: boolean;
+  executedToolNames?: ReadonlySet<string>;
   mockModelInjected: boolean;
 }): boolean =>
   retryCount < maxUnbackedActionRetries &&
-  !hadExecutedWorkflowTool &&
+  (executedToolNames ? true : !hadExecutedWorkflowTool) &&
   (!empty(tools) || !empty(skills)) &&
   !emitEvents.some((e) => e.type === "tool_call") &&
   emitEvents.some((e) =>
@@ -108,7 +110,11 @@ export const shouldAuditUnbackedAction = ({
   (hasAnyModelMetadata(modelResponse) || isDecisionModelInjected()) &&
   (!mockModelInjected || isDecisionModelInjected()) &&
   isDecisionModelAvailable() &&
-  nonempty(referencedToolsInThoughts(modelResponse, tools, skills));
+  nonempty(
+    referencedToolsInThoughts(modelResponse, tools, skills).filter((name) =>
+      !executedToolNames?.has(name.toLowerCase())
+    ),
+  );
 
 export const auditUnbackedAction = async (
   history: HistoryEvent[],

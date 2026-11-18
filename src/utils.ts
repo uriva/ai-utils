@@ -251,15 +251,15 @@ export const cleanActiveMemoryToolName = "clean_active_memory";
 export const setThinkingLevelToolName = "set_thinking_level";
 
 export const decisionThinkingLevelInstructions =
-  "Which reasoning level should handle this task? Choose 'low' for conversational turns, greetings, basic FAQ, general information questions, search or recommendation lookups, presenting read-only search/lookup results, standard recommendation replies, user preferences, negative content filters, notification or subscription settings (including unsubscribing or quiet hours); choose 'medium' for multi-constraint recommendation trade-offs (combining budget, area, exclusions, and schedule), nuanced moderation/safety/quota-dispute edge cases, or synthesizing multiple tool outputs; choose 'high' for multi-step action execution (such as downloading, media processing, cutting, shell/VM/browser execution, or file editing), post-action tool results with strict behavioral/stop constraints, coding, mathematical problem solving, or complex logic.";
+  "Which reasoning level should handle this task? Choose 'low' for conversational turns, greetings, basic FAQ, general information questions, search or recommendation lookups, presenting read-only search/lookup results, standard recommendation replies, user preferences, negative content filters, notification or subscription settings (including unsubscribing or quiet hours); choose 'medium' for multi-constraint recommendation trade-offs (combining budget, area, exclusions, and schedule), nuanced moderation/safety/quota-dispute edge cases, post-action or post-delivery tool results with strict behavioral/stop constraints where the action already completed and only a closing summary reply is needed, or synthesizing multiple tool outputs; choose 'high' for initiating multi-step action execution (such as starting downloads, media processing, cutting, shell/VM/browser execution, or file editing), coding, mathematical problem solving, or complex logic.";
 
 export const decisionThinkingLevelCriteria = {
   low:
     "Conversational greeting, general FAQ, information question, search or recommendation lookup, presenting read-only query/retrieval tool results, user preferences, negative content filters, unsubscribe/opt-out, quiet hours, or pleasantry without multi-step action execution",
   medium:
-    "Multi-constraint trade-off filtering, nuanced policy/moderation/quota-dispute edge cases, or synthesizing multiple tool outputs with competing requirements",
+    "Multi-constraint trade-off filtering, nuanced policy/moderation/quota-dispute edge cases, completed post-action/post-delivery tool results with strict stop/behavioral constraints requiring only a closing text reply, or synthesizing multiple tool outputs with competing requirements",
   high:
-    "Action execution (downloading, cutting, media processing, file/shell/browser operations), post-action tool results with strict stop/behavioral constraints, coding, math, or complex reasoning puzzles",
+    "Initiating multi-step action execution (starting downloads, cutting, media processing, file/shell/browser operations), coding, math, or complex reasoning puzzles",
 };
 
 export const lowThinkingMinConfidence = 0.65;

@@ -3366,12 +3366,25 @@ const isInternalLifecycleToolName = (name: string): boolean =>
   name === setThinkingLevelToolName ||
   name === cleanActiveMemoryToolName;
 
+const currentRequestExecutedWorkflowToolNames = (
+  history: HistoryEvent[],
+): ReadonlySet<string> => {
+  const names = new Set<string>();
+  currentRequestEvents(history).forEach((e) => {
+    if (e.type !== "tool_call" || isInternalLifecycleToolName(e.name)) return;
+    names.add(e.name.toLowerCase());
+    names.add(bareToolIdentifier(e.name).toLowerCase());
+    if (isRecord(e.parameters) && typeof e.parameters.command === "string") {
+      names.add(e.parameters.command.toLowerCase());
+      names.add(bareToolIdentifier(e.parameters.command).toLowerCase());
+    }
+  });
+  return names;
+};
+
 const currentRequestExecutedWorkflowTools = (
   history: HistoryEvent[],
-): boolean =>
-  currentRequestEvents(history).some(
-    (e) => e.type === "tool_call" && !isInternalLifecycleToolName(e.name),
-  );
+): boolean => currentRequestExecutedWorkflowToolNames(history).size > 0;
 
 const emitPendingUnlearnEvents = async (
   toUnlearn: Skill[],
@@ -4025,7 +4038,7 @@ export const runAbstractAgent = (
           tools: allTools,
           skills: skillsArr,
           retryCount: retryCounts.unbackedAction,
-          hadExecutedWorkflowTool: currentRequestExecutedWorkflowTools(history),
+          executedToolNames: currentRequestExecutedWorkflowToolNames(history),
           mockModelInjected: isMockModelInjected(),
         }) &&
         await auditUnbackedAction(

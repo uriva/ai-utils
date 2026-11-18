@@ -326,3 +326,87 @@ Deno.test(
     );
   }),
 );
+
+Deno.test(
+  "runAgent retries mid-turn unbacked action when an earlier lookup tool ran in the same turn",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Look up item 42 and export its printable summary PDF.",
+      }),
+    ];
+    const executedPrompts: string[] = [];
+    const callCounter = { count: 0 };
+    const lookupTool = tool({
+      name: "lookup_item",
+      description: "Looks up an item record by ID.",
+      parameters: z.object({ id: z.number() }),
+      handler: ({ id }) => Promise.resolve(`Found item ${id}: Quarterly Plan`),
+    });
+
+    const scriptedModel = () => {
+      callCounter.count += 1;
+      if (callCounter.count === 1) {
+        return Promise.resolve([
+          toolUseTurn({ name: "lookup_item", args: { id: 42 } }),
+        ]);
+      }
+      if (callCounter.count === 2) {
+        return Promise.resolve([
+          ownThoughtTurnWithMetadata(
+            `Found the record via lookup_item. Now calling ${delegateToolName} to render the PDF.`,
+            { type: "gemini", responseId: "r-mid-1" },
+          ),
+          ownUtteranceTurnWithMetadata(
+            "Rendering your printable summary PDF now — I will send it right over as soon as it finishes!",
+            { type: "gemini", responseId: "r-mid-1" },
+          ),
+        ]);
+      }
+      return Promise.resolve([
+        ownThoughtTurnWithMetadata(
+          `Calling ${delegateToolName} alongside the acknowledgement.`,
+          { type: "gemini", responseId: "r-mid-2" },
+        ),
+        ownUtteranceTurnWithMetadata(
+          "Rendering your printable summary PDF now — I will send it right over as soon as it finishes!",
+          { type: "gemini", responseId: "r-mid-2" },
+        ),
+        toolUseTurn({
+          name: delegateToolName,
+          args: { prompt: "Export printable summary PDF for item 42." },
+        }),
+      ]);
+    };
+
+    const mockDecisionModel = (
+      _state: unknown,
+      questions: Record<string, unknown>,
+    ) =>
+      questions && unbackedActionDecisionKey in questions
+        ? Promise.resolve({
+          [unbackedActionDecisionKey]: {
+            type: "noul" as const,
+            noul: 0.96,
+          },
+        })
+        : Promise.resolve({});
+
+    await injectDecisionModel(mockDecisionModel)(
+      injectCallModel(scriptedModel)(async () => {
+        await agentDeps(history)(runAgent)({
+          maxIterations: 6,
+          timezoneIANA: "UTC",
+          prompt: "You are a helpful assistant.",
+          tools: [lookupTool, makeDelegateTool(executedPrompts)],
+        });
+      }),
+    )();
+
+    assertEquals(callCounter.count, 3);
+    assertEquals(executedPrompts, [
+      "Export printable summary PDF for item 42.",
+    ]);
+  },
+);
