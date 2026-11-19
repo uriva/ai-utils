@@ -80,7 +80,7 @@ const eventsCacheKey = (events: HistoryEvent[]) =>
   events.map(({ id: _id, timestamp: _ts, ...rest }) => rest);
 
 const cachingCallModelWrapper: CallModelWrapper = (
-  { provider, systemPrompt, inner },
+  { provider, systemPrompt, disableTools, inner },
 ) => {
   const cached = rmmbrCacheWithKey(
     `callModel-${provider ?? "google"}-v6`,
@@ -91,6 +91,7 @@ const cachingCallModelWrapper: CallModelWrapper = (
     (events: HistoryEvent[]) => ({
       systemPrompt,
       events: eventsCacheKey(events),
+      ...(disableTools ? { toolMode: "disabled" } : {}),
     }),
     (events: HistoryEvent[]) => {
       const maxTs = events.reduce((max, e) => Math.max(max, e.timestamp), 0);

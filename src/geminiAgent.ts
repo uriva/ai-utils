@@ -954,8 +954,8 @@ const mergeConsecutiveRoles = (contents: Content[]): Content[] => {
 // (hallucinated) function call by mimicking function_call parts already in
 // history — it must answer with text. With declarations present, leave the
 // config empty (AUTO) so the model decides.
-const toolingConfig = (tools: Tool<ZodType>[]) =>
-  empty(tools)
+const toolingConfig = (tools: Tool<ZodType>[], disableTools?: boolean) =>
+  empty(tools) || disableTools
     ? {
       toolConfig: {
         functionCallingConfig: { mode: FunctionCallingConfigMode.NONE },
@@ -1012,6 +1012,7 @@ export const buildReq = (
   maxOutputTokens: number | undefined,
   conversationContext?: string,
   includeCacheAnchor = false,
+  disableTools?: boolean,
 ) =>
 (events: GeminiHistoryEvent[]): GenerateContentParameters => ({
   model: geminiModelVersion("flash"),
@@ -1021,7 +1022,7 @@ export const buildReq = (
       category,
       threshold: HarmBlockThreshold.OFF,
     })),
-    ...toolingConfig(tools),
+    ...toolingConfig(tools, disableTools),
     thinkingConfig: geminiThinkingConfig(thinkingLevel),
     ...(maxOutputTokens ? { maxOutputTokens } : {}),
   },
@@ -1942,6 +1943,7 @@ const geminiAgentCallerInner = ({
   timezoneIANA,
   maxOutputTokens,
   disableStreaming,
+  disableTools,
   toolOutputScratchPad,
 }: AgentSpec & { thinkingLevel?: ThinkingLevel }) =>
 (
@@ -1952,9 +1954,10 @@ const geminiAgentCallerInner = ({
   // the no-response tag it was taught here even though a higher-authority system
   // notification (injected by normalizeHistoryForModel) tells it to answer. The
   // notification alone is not enough — the competing license must be removed too.
-  const silenceLicense = historyHasPendingDeferredUserWaitingNudge(events)
-    ? ""
-    : noResponseInstruction;
+  const silenceLicense =
+    disableTools || historyHasPendingDeferredUserWaitingNudge(events)
+      ? ""
+      : noResponseInstruction;
   return pipe(
     filterInvalidToolCalls,
     filterOrphanedToolResults,
@@ -1977,6 +1980,7 @@ const geminiAgentCallerInner = ({
         Boolean(silenceLicense) &&
           (Boolean(conversationContext) ||
             nonempty(allSkills ?? skills ?? [])),
+        disableTools,
       ),
       disableStreaming,
     ),

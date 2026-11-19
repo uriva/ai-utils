@@ -99,6 +99,7 @@ type KimiRequestParams = {
   model: string;
   messages: ChatCompletionMessageParam[];
   tools?: ChatCompletionTool[];
+  tool_choice?: "none";
   max_tokens?: number;
   temperature?: number;
   stream: boolean;
@@ -338,6 +339,7 @@ const buildReq = (
   timezoneIANA: string,
   maxOutputTokens: number | undefined,
   conversationContext?: string,
+  disableTools?: boolean,
 ): BuildReqFn =>
 async (events: KimiHistoryEvent[]): Promise<KimiRequestParams> => {
   const eventById = (id: MessageId) => events.find((e) => e.id === id);
@@ -419,6 +421,9 @@ async (events: KimiHistoryEvent[]): Promise<KimiRequestParams> => {
     messages,
     stream: false,
     ...(allTools.length > 0 ? { tools: allTools.map(actionToTool) } : {}),
+    ...(disableTools && allTools.length > 0
+      ? { tool_choice: "none" as const }
+      : {}),
     ...(maxOutputTokens ? { max_tokens: maxOutputTokens } : {}),
   };
 
@@ -709,13 +714,16 @@ export const kimiAgentCaller = ({
   timezoneIANA,
   maxOutputTokens,
   disableStreaming,
+  disableTools,
   toolOutputScratchPad,
 }: AgentSpec) =>
 async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
   const enrichedEvents = await enrichKimiEventsWithMetadata(events);
   const enhancedPrompt = [
     `${prompt}\n\n${systemInstructionTail(toolOutputScratchPad)}`,
-    `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,
+    ...(disableTools ? [] : [
+      `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,
+    ]),
   ].join("\n\n");
 
   const kimiOutput = await callKimiWithFixHistory(
@@ -726,6 +734,7 @@ async (events: KimiHistoryEvent[]): Promise<KimiHistoryEvent[]> => {
       timezoneIANA,
       maxOutputTokens,
       conversationContext,
+      disableTools,
     ),
     disableStreaming,
   )(enrichedEvents);

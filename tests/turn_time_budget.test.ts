@@ -1,6 +1,11 @@
 import { assert, assertEquals } from "@std/assert";
 import { z } from "zod/v4";
-import { runAgent, tool, turnTimeBudgetWrapUpThought } from "../mod.ts";
+import {
+  injectCallModelWrapper,
+  runAgent,
+  tool,
+  turnTimeBudgetWrapUpThought,
+} from "../mod.ts";
 import {
   forcedStopUtterance,
   type HistoryEvent,
@@ -12,7 +17,7 @@ import {
 } from "../src/agent.ts";
 import { injectGeminiToken } from "../src/gemini.ts";
 import { genJsonOverride } from "../src/genJson.ts";
-import { agentDeps } from "../test_helpers.ts";
+import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -212,6 +217,121 @@ Deno.test(
         e.type === "own_utterance" && e.text === forcedStopUtterance
       ),
       "unanswered user turn must receive forcedStopUtterance on forced stop",
+    );
+  },
+);
+
+Deno.test(
+  "maxTurnDurationMs disables tools on the wrap-up call once time budget expires",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Investigate the latency spike and summarize findings.",
+      }),
+    ];
+
+    const slowQueryTool = tool({
+      name: "run_query",
+      description: "Run an analytics query",
+      parameters: z.object({ q: z.string() }),
+      handler: async ({ q }) => {
+        await delay(30);
+        return `rows for ${q}`;
+      },
+    });
+
+    const seenDisableTools: boolean[] = [];
+    const state = { calls: 0 };
+    await injectCallModelWrapper(({ disableTools, inner }) => (events) => {
+      seenDisableTools.push(Boolean(disableTools));
+      return inner(events);
+    })(
+      injectCallModel((events) => {
+        state.calls++;
+        const sawTimeBudgetStop = events.some((e) =>
+          e.type === "own_thought" && e.text === turnTimeBudgetWrapUpThought
+        );
+        if (sawTimeBudgetStop) {
+          return Promise.resolve([
+            ownUtteranceTurn("Final summary based on completed queries."),
+          ]);
+        }
+        return Promise.resolve([
+          toolUseTurn({
+            name: "run_query",
+            args: { q: `select ${state.calls}` },
+          }),
+        ]);
+      })(async () => {
+        await agentDeps(history)(runAgent)({
+          maxIterations: 30,
+          maxTurnDurationMs: 45,
+          tools: [slowQueryTool],
+          prompt: "You are an investigator.",
+          timezoneIANA: "UTC",
+        });
+      }),
+    )();
+
+    assertEquals(
+      seenDisableTools,
+      [false, false, true],
+      "wrap-up model call must set disableTools=true while earlier calls allow tools",
+    );
+  },
+);
+
+runForAllProviders(
+  "maxTurnDurationMs structurally disables tools on wrap-up so real models conclude with findings instead of calling another tool",
+  async (runAgentWithProvider) => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Fetch all error log pages and summarize the errors found.",
+      }),
+    ];
+
+    const fetchedPages: number[] = [];
+    const fetchPageTool = tool({
+      name: "fetch_page",
+      description: "Fetch a page of error logs",
+      parameters: z.object({ page: z.number() }),
+      handler: async ({ page }) => {
+        fetchedPages.push(page);
+        await delay(35);
+        return JSON.stringify({
+          page,
+          errors: [`Timeout on worker-${page} (count: 7)`],
+          hasMore: true,
+        });
+      },
+    });
+
+    await agentDeps(history)(runAgentWithProvider)({
+      maxIterations: 20,
+      maxTurnDurationMs: 25,
+      tools: [fetchPageTool],
+      prompt:
+        "You are an incident investigator. Whenever fetch_page returns hasMore: true and you still have tools available, you MUST call fetch_page for the next page (even if an internal thought suggests stopping or wrapping up). Only summarize partial findings if tools are disabled or unavailable.",
+      timezoneIANA: "UTC",
+    });
+
+    assertEquals(
+      fetchedPages,
+      [1],
+      `Expected model to stop calling tools on wrap-up, but fetched pages: ${
+        JSON.stringify(fetchedPages)
+      }`,
+    );
+    const replies = history.filter((e) => e.type === "own_utterance");
+    assert(replies.length >= 1, "expected a user-facing summary reply");
+    assertEquals(
+      replies.some((e) =>
+        e.type === "own_utterance" && e.text === forcedStopUtterance
+      ),
+      false,
+      "must not fall back to generic forcedStopUtterance when wrap-up disables tools",
     );
   },
 );

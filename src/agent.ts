@@ -865,6 +865,7 @@ export type CallModelWrapper = (args: {
   provider: Provider;
   systemPrompt: string;
   thinkingLevel?: import("@google/genai").ThinkingLevel;
+  disableTools?: boolean;
   inner: CallModel;
 }) => CallModel;
 
@@ -3589,6 +3590,7 @@ export type AgentInputs = {
   activeSkillsPrompt?: string;
   conversationContext?: string;
   thinkingLevel?: ThinkingLevel;
+  disableTools?: boolean;
 };
 
 export type AgentSpec = AgentInputs & {
@@ -4542,6 +4544,23 @@ const formatActiveSkillsPrompt = (skills: Skill[]): string =>
       ).join("\n\n")
     }`;
 
+const isTurnBoundaryForWrapUp = (e: HistoryEvent) =>
+  e.type === "participant_utterance" ||
+  e.type === "external_event" ||
+  e.type === "own_utterance";
+
+const isTimeBudgetWrapUpActive = (history: HistoryEvent[]): boolean => {
+  const lastBoundaryIdx = history.reduce(
+    (last, e, idx) => (isTurnBoundaryForWrapUp(e) ? idx : last),
+    -1,
+  );
+  return history
+    .slice(lastBoundaryIdx + 1)
+    .some((e) =>
+      e.type === "own_thought" && e.text === turnTimeBudgetWrapUpThought
+    );
+};
+
 const computeSpecForTurn = <T extends AgentInputs>(
   spec: T,
   history: HistoryEvent[],
@@ -4569,6 +4588,7 @@ const computeSpecForTurn = <T extends AgentInputs>(
   const activeSkillsPrompt = formatActiveSkillsPrompt(sortedActiveSkills);
 
   const staticPrompt = spec.prompt + skillsCatalogPrompt;
+  const disableTools = spec.disableTools || isTimeBudgetWrapUpActive(history);
 
   return {
     ...spec,
@@ -4580,5 +4600,6 @@ const computeSpecForTurn = <T extends AgentInputs>(
       : {}),
     prompt: staticPrompt + activeSkillsPrompt,
     thinkingLevel: spec.thinkingLevel ?? activeThinkingLevel(history),
+    ...(disableTools ? { disableTools: true } : {}),
   };
 };

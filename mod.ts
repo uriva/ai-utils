@@ -119,6 +119,7 @@ const resolvePreparedCallModel = (
       ? `${spec.prompt}\n\n${spec.conversationContext}`
       : spec.prompt,
     thinkingLevel: spec.thinkingLevel,
+    disableTools: spec.disableTools,
     inner: base,
   });
 };

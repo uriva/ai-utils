@@ -112,6 +112,7 @@ type AnthropicRequestParams = {
   system: string;
   messages: Anthropic.Messages.MessageParam[];
   tools?: Anthropic.Messages.Tool[];
+  tool_choice?: { type: "none" };
   max_tokens: number;
   thinking?: { type: "adaptive" };
   output_config?: { effort: "low" | "medium" | "high" | "xhigh" | "max" };
@@ -505,6 +506,7 @@ const buildReq = (
   timezoneIANA: string,
   maxOutputTokens: number | undefined,
   conversationContext?: string,
+  disableTools?: boolean,
 ): BuildReqFn =>
 async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
   const eventById = (id: MessageId) => events.find((e) => e.id === id);
@@ -569,6 +571,9 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicRequestParams> => {
       }
       : {}),
     ...(allTools.length > 0 ? { tools: allTools.map(actionToTool) } : {}),
+    ...(disableTools && allTools.length > 0
+      ? { tool_choice: { type: "none" as const } }
+      : {}),
   };
 };
 
@@ -849,12 +854,15 @@ export const anthropicAgentCaller = ({
   timezoneIANA,
   maxOutputTokens,
   disableStreaming,
+  disableTools,
   toolOutputScratchPad,
 }: AgentSpec) =>
 async (events: AnthropicHistoryEvent[]): Promise<AnthropicHistoryEvent[]> => {
   const enhancedPrompt = [
     `${prompt}\n\n${systemInstructionTail(toolOutputScratchPad)}`,
-    `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,
+    ...(disableTools ? [] : [
+      `If you have nothing to say, reply with exactly ${noResponseTag} and nothing else.`,
+    ]),
   ].join("\n\n");
 
   const anthropicOutput = await callAnthropicWithFixHistory(
@@ -865,6 +873,7 @@ async (events: AnthropicHistoryEvent[]): Promise<AnthropicHistoryEvent[]> => {
       timezoneIANA,
       maxOutputTokens,
       conversationContext,
+      disableTools,
     ),
     disableStreaming,
   )(events);
