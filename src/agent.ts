@@ -3538,6 +3538,7 @@ const runPreModelDecisions = async (
           history,
           skills,
           activeSkillNames(history),
+          spec.tools,
         )
         : Promise.resolve({ toLearn: [], toUnlearn: [] }),
       canCleanup

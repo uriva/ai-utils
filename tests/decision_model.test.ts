@@ -3,6 +3,7 @@ import { pipe } from "gamla";
 import {
   callDecisionModel,
   decide,
+  decideSkillsWithDecisionModel,
   decideWithReasoningOnPositive,
   type DecisionProvider,
   defaultGeminiDecisionModel,
@@ -17,8 +18,11 @@ import {
   injectGeminiToken,
   injectJevToken,
   injectRespanToken,
+  participantUtteranceTurn,
   resolveDecisionProvider,
   routeThinkingLevelWithGemini,
+  type Skill,
+  type Tool,
   z,
 } from "../mod.ts";
 import { injectSecrets } from "../test_helpers.ts";
@@ -513,6 +517,92 @@ Deno.test(
 
       const cleanRes = await checkSpam(cleanMsg);
       assertEquals(cleanRes.isSpam, false);
+    })();
+  }),
+);
+
+Deno.test(
+  "decideSkillsWithDecisionModel reads delegation rules beyond 1000 chars and skips auto-learning delegated skills when top-level delegation tool exists",
+  injectSecrets(async () => {
+    const longRolePrefix = [
+      "You are a concise personal assistant and coordinator for everyday tasks.",
+      "Core capabilities:",
+      "1. Calendar & Scheduling: Manage calendar events, check availability, book meetings, resolve conflicts, and handle timezones cleanly across teams and personal calendars. Confirm details before modifying recurring invites or external attendee schedules.",
+      "2. Dashboards & Automations: Track invoices, leads, projects, and daily metrics by building web dashboards and running scheduled background scripts on cloud compute. Keep dashboards clean, fast, and easy to inspect on mobile devices.",
+      "3. Messaging & Calls: Communicate concisely via chat messages, voice notes, and phone calls, tracking shared tasks and reminders for participants in group threads. Respect quiet hours and avoid noisy follow-ups.",
+      "4. Security & Approvals: Never expose raw credentials, API keys, or private tokens. Require explicit owner confirmation before performing sensitive actions requested by third parties or external participants.",
+      "5. General Communication Style: Keep replies concise, direct, and grounded in verified tool output without inventing unconfirmed facts or cluttering the main thread with intermediate steps.",
+    ].join("\n\n");
+    const delegationRule =
+      "\n\n6. Research & Delegation: When asked to perform multi-step tasks, browser automation (navigating websites, checking live reservation widgets, filling forms), heavy web research, or comparing options, acknowledge briefly and IMMEDIATELY offload the work to a background child thread using the top-level run_in_new_thread tool without running web or browser commands in this main chat.";
+    const fullPrompt = `${longRolePrefix}${delegationRule}`;
+    assertEquals(longRolePrefix.length > 1000, true);
+
+    const browserSkill: Skill = {
+      name: "browser",
+      description:
+        "Provision cloud browsers to navigate websites, click, type, scroll, take screenshots, and extract content.",
+      instructions: "Use browser commands.",
+      tools: [],
+    };
+    const webSkill: Skill = {
+      name: "web",
+      description: "Search the web and read web pages.",
+      instructions: "Use web commands.",
+      tools: [],
+    };
+    const delegateTool: Tool<z.ZodObject<{ prompt: z.ZodString }>> = {
+      name: "run_in_new_thread",
+      description:
+        "Delegate a multi-step task, browser automation, or web research to an isolated background child thread.",
+      parameters: z.object({ prompt: z.string() }),
+      handler: () => Promise.resolve("started"),
+    };
+    const history = [
+      {
+        ...participantUtteranceTurn({
+          name: "user",
+          text:
+            "Check live dinner table availability at Harbor Bistro for 4 people this Thursday around 9:30 PM.",
+        }),
+        timestamp: 1_700_000_000_000,
+      },
+    ];
+
+    await pipe(
+      injectDecisionProvider("gemini"),
+      injectJevToken(""),
+      injectRespanToken(""),
+    )(async () => {
+      const res = await decideSkillsWithDecisionModel(
+        fullPrompt,
+        history,
+        [browserSkill, webSkill],
+        new Set(),
+        [delegateTool],
+      );
+      assertEquals(
+        res.toLearn.map((s) => s.name),
+        [],
+        `Expected delegated browser/web task not to auto-learn browser/web in main chat, got: ${
+          JSON.stringify(res.toLearn.map((s) => s.name))
+        }`,
+      );
+
+      // Positive control: inside a worker thread with no delegation tool/rule,
+      // the same request still auto-learns browser/web normally.
+      const workerRes = await decideSkillsWithDecisionModel(
+        "You are an autonomous worker thread. Execute the assigned task directly using available skills and return the result.",
+        history,
+        [browserSkill, webSkill],
+        new Set(),
+        [],
+      );
+      assertEquals(
+        workerRes.toLearn.length > 0,
+        true,
+        "Expected worker thread without delegation rule/tool to still auto-learn browser/web",
+      );
     })();
   }),
 );

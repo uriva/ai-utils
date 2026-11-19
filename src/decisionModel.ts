@@ -1,8 +1,13 @@
 import { context, type Injection, type Injector } from "@uri/inject";
-import { empty } from "gamla";
+import { empty, nonempty } from "gamla";
 import type { z, ZodType } from "zod/v4";
 import { ThinkingLevel } from "@google/genai";
-import type { HistoryEvent, ParticipantUtterance, Skill } from "./agent.ts";
+import type {
+  HistoryEvent,
+  ParticipantUtterance,
+  Skill,
+  Tool,
+} from "./agent.ts";
 import { hasInterveningConversationTurn } from "./compaction.ts";
 import {
   accessGeminiDecisionToken,
@@ -942,11 +947,31 @@ const activeDecisionRequestText = (
     : undefined;
 };
 
+const maxSkillDecisionPromptChars = 4000;
+const maxTopLevelToolDescriptionChars = 140;
+
+const formatTopLevelToolsForSkillDecision = (
+  // deno-lint-ignore no-explicit-any
+  tools: Tool<any>[],
+): string =>
+  tools
+    .map((t) => {
+      const desc = (t.description ?? "").replace(/\s+/g, " ").trim();
+      const shortDesc = desc.length > maxTopLevelToolDescriptionChars
+        ? `${desc.slice(0, maxTopLevelToolDescriptionChars - 1)}…`
+        : desc;
+      return shortDesc ? `- ${t.name}: ${shortDesc}` : `- ${t.name}`;
+    })
+    .join("\n")
+    .toWellFormed();
+
 export const decideSkillsWithDecisionModel = async (
   prompt: string,
   history: HistoryEvent[],
   candidateSkills: Skill[],
   currentlyActiveSkills: Set<string>,
+  // deno-lint-ignore no-explicit-any
+  topLevelTools?: Tool<any>[],
 ): Promise<{ toLearn: Skill[]; toUnlearn: Skill[] }> => {
   if (!isDecisionModelAvailable()) {
     return { toLearn: [], toUnlearn: [] };
@@ -985,9 +1010,15 @@ export const decideSkillsWithDecisionModel = async (
     .join("\n");
 
   const facts = verifiedToolFacts(history);
+  const formattedTopLevelTools = topLevelTools && nonempty(topLevelTools)
+    ? formatTopLevelToolsForSkillDecision(topLevelTools)
+    : undefined;
 
   const state = {
-    agent_role: prompt.slice(0, 1000).toWellFormed(),
+    agent_role: prompt.slice(0, maxSkillDecisionPromptChars).toWellFormed(),
+    ...(formattedTopLevelTools
+      ? { available_top_level_tools: formattedTopLevelTools }
+      : {}),
     verified_conversation_facts_and_history:
       (recentDialogue + (facts ? `\n\nFacts:\n${facts}` : "")).slice(-10000)
         .toWellFormed(),
@@ -1000,7 +1031,7 @@ export const decideSkillsWithDecisionModel = async (
       {
         type: "noul" as const,
         instructions:
-          `Does answering this turn or executing the user request directly require the '${s.name}' skill (${s.description})?`,
+          `Does THIS conversation directly require loading the '${s.name}' skill (${s.description}) on this turn? Answer NO if available_top_level_tools already covers this turn or if agent_role instructs delegating this work to a background child thread instead of running it here.`,
       },
     ]),
     ...unlearnCandidates.map((s) => [
