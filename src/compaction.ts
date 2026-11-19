@@ -278,6 +278,8 @@ export const compactionRetentionRatio = 0.1;
 
 export const defaultSegmentGapMs = 30 * 60 * 1000;
 export const defaultSettledHistoryTokenThreshold = 6_000;
+export const defaultSummaryRollupTokenThreshold = 4_000;
+export const maxRetainedSummaryCount = 5;
 
 const isSkillLifecycleCall = (e: HistoryEvent): boolean =>
   e.type === "tool_call" &&
@@ -296,9 +298,44 @@ const isSkillLifecycleEventIn =
           ),
       ));
 
-const isSummaryThought = (e: HistoryEvent): boolean =>
+export const isSummaryThought = (e: HistoryEvent): boolean =>
   e.type === "own_thought" &&
   (e.id.startsWith("summary-") || isCompactedSummaryText(e.text));
+
+const summaryIdEndTimestamp = (id: string): number | undefined => {
+  const match = /^summary-\d+-(\d+)$/.exec(id);
+  return match ? Number(match[1]) : undefined;
+};
+
+export const selectSummariesForRollup = async (
+  summaries: HistoryEvent[],
+  tokenThreshold: number = defaultSummaryRollupTokenThreshold,
+  maxCount: number = maxRetainedSummaryCount,
+): Promise<HistoryEvent[]> => {
+  if (summaries.length < 2) return [];
+  const totalTokens = await accessTokenCounter(summaries);
+  if (summaries.length <= maxCount && totalTokens <= tokenThreshold) return [];
+  if (summaries.length >= 3) {
+    const newestTokens = await accessTokenCounter([
+      summaries[summaries.length - 1],
+    ]);
+    if (newestTokens < Math.floor(tokenThreshold * 0.75)) {
+      return summaries.slice(0, -1);
+    }
+  }
+  return summaries;
+};
+
+export const shouldRollUpSummaries = async (
+  history: HistoryEvent[],
+  tokenThreshold: number = defaultSummaryRollupTokenThreshold,
+  maxCount: number = maxRetainedSummaryCount,
+): Promise<boolean> => {
+  const summaries = history.filter(isSummaryThought);
+  if (summaries.length < 2) return false;
+  if (summaries.length > maxCount) return true;
+  return (await accessTokenCounter(summaries)) > tokenThreshold;
+};
 
 const segmentNeedsCompaction = (events: HistoryEvent[]): boolean => {
   const nonSkill = events.filter((e) => !isSkillLifecycleEventIn(events)(e));
@@ -311,8 +348,17 @@ export const shouldCompactHistory = async (
   totalTokens: number,
   segmentGapMs: number = defaultSegmentGapMs,
   settledThreshold: number = defaultSettledHistoryTokenThreshold,
+  summaryRollupTokenThreshold?: number,
 ): Promise<boolean> => {
-  if (totalTokens > threshold) return true;
+  if (summaryRollupTokenThreshold !== undefined) {
+    if (await shouldRollUpSummaries(history, summaryRollupTokenThreshold)) {
+      return true;
+    }
+    const uncompacted = history.filter((e) => !isSummaryThought(e));
+    if ((await accessTokenCounter(uncompacted)) > threshold) return true;
+  } else if (totalTokens > threshold) {
+    return true;
+  }
   const segments = segmentHistoryEvents(history, segmentGapMs);
   if (segments.length <= 1) return false;
   const uncompactedPastSegments = segments
@@ -538,6 +584,23 @@ async (
     timestamp: segment.start,
     isOwn: true,
   };
+};
+
+export const rollUpSummaryEvents = (timezone: string) =>
+(
+  summaryEvents: HistoryEvent[],
+): Promise<HistoryEvent & { type: "own_thought"; text: string }> => {
+  const sorted = [...summaryEvents].sort((a, b) => a.timestamp - b.timestamp);
+  const start = sorted[0].timestamp;
+  const end = sorted.reduce(
+    (max, e) => Math.max(max, summaryIdEndTimestamp(e.id) ?? e.timestamp),
+    start,
+  );
+  return summarizeSegmentToHistoryEvent(timezone)({
+    start,
+    end,
+    events: sorted,
+  });
 };
 
 const getCachedSegmentSummaryEvent = (

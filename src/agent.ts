@@ -21,6 +21,8 @@ import {
   defaultSettledHistoryTokenThreshold,
   hasInterveningConversationTurn,
   isCompactedSummaryText,
+  isSummaryThought,
+  maxRetainedSummaryCount,
   projectSettledSessions,
   segmentHistoryEvents,
   shouldCompactHistory,
@@ -3604,6 +3606,7 @@ export type AgentSpec = AgentInputs & {
   provider?: "google" | "moonshot" | "anthropic";
   compactHistory?: (history: HistoryEvent[]) => Promise<void>;
   historyCompactionTokenThreshold?: number;
+  summaryRollupTokenThreshold?: number;
   enableCleanActiveMemory?: boolean;
   enableAutoMemoryCleanup?: boolean;
   enableHistorySearch?: boolean;
@@ -3896,6 +3899,9 @@ export const runAbstractAgent = (
     let pendingToUnlearn: Skill[] = [];
     let hasTriggeredPreModelDecisions = false;
     let turnEnded = false;
+    const midRunCompactionState: MidRunCompactionState = {
+      lastCompactedTokens: 0,
+    };
     const triggerBackgroundDecisions = () => {
       if (hasTriggeredPreModelDecisions) return;
       hasTriggeredPreModelDecisions = true;
@@ -3945,6 +3951,7 @@ export const runAbstractAgent = (
         if (hasUnansweredUserMessage(normalizedHistory)) {
           await outputEvent(ownUtteranceTurn(forcedStopUtterance));
         }
+        scheduleHistoryCompaction(spec, await getHistory());
         return;
       }
       progressState.stopAdviceCount = progress.stopAdviceCount;
@@ -3968,7 +3975,13 @@ export const runAbstractAgent = (
       );
       Promise.resolve()
         .then(() => Promise.resolve())
-        .then(() => scheduleHistoryCompaction(spec, history));
+        .then(() =>
+          maybeScheduleEmergencyMidRunCompaction(
+            spec,
+            history,
+            midRunCompactionState,
+          )
+        );
       const rawModelResponse = await modelResponsePromise;
       if (await shouldAbort()) return;
 
@@ -4099,7 +4112,10 @@ export const runAbstractAgent = (
           skillsArr,
           scratchPad,
         )(emitWithUniqueIds);
-        if (hadDeferred) return;
+        if (hadDeferred) {
+          scheduleHistoryCompaction(spec, await getHistory());
+          return;
+        }
 
         // We actually yielded things to the outside world, reset ephemeral history
         ephemeralHistory = [];
@@ -4122,6 +4138,7 @@ export const runAbstractAgent = (
           const toEmit = pendingToUnlearn;
           pendingToUnlearn = [];
           await emitPendingUnlearnEvents(toEmit);
+          scheduleHistoryCompaction(spec, await getHistory());
           return;
         }
       } else {
@@ -4131,9 +4148,51 @@ export const runAbstractAgent = (
     }
   })();
 
+const midRunEmergencyCompactionMultiplier = 4;
+const minMidRunEmergencyCompactionTokens = 100_000;
+
+type MidRunCompactionState = {
+  lastCompactedTokens: number;
+};
+
+const midRunEmergencyThreshold = (threshold: number): number =>
+  Math.max(
+    threshold * midRunEmergencyCompactionMultiplier,
+    minMidRunEmergencyCompactionTokens,
+  );
+
+// Mid-loop history rewrites invalidate provider prefix caches on the next tool
+// iteration and thrash when a bot's static prompt is large. Only compact
+// mid-loop if history itself crosses a high emergency ceiling and has grown
+// meaningfully since any previous emergency compaction.
+const maybeScheduleEmergencyMidRunCompaction = (
+  spec: AgentSpec,
+  history: HistoryEvent[],
+  state: MidRunCompactionState,
+): void => {
+  const compactHistory = spec.compactHistory;
+  const threshold = spec.historyCompactionTokenThreshold;
+  if (!compactHistory || !threshold) return;
+  const emergencyThreshold = midRunEmergencyThreshold(threshold);
+  if (estimateHistoryTokensUpperBound(history) < emergencyThreshold) return;
+  accessTokenCounter(history).then((historyTokens) => {
+    const nextTrigger = Math.max(
+      emergencyThreshold,
+      state.lastCompactedTokens > 0
+        ? state.lastCompactedTokens + threshold
+        : emergencyThreshold,
+    );
+    if (historyTokens < nextTrigger) return;
+    state.lastCompactedTokens = historyTokens;
+    return compactHistory(history);
+  });
+};
+
 // Compaction failures must surface as unhandled rejections, not console.error
 // logs: a silently-failing compaction lets history grow unbounded and
 // multiplies token spend on every subsequent model call.
+// Thresholds are evaluated against history tokens only — compacting history
+// cannot shrink static prompts, tools, or skills.
 export const scheduleHistoryCompaction = (
   spec: AgentSpec,
   history: HistoryEvent[],
@@ -4141,17 +4200,32 @@ export const scheduleHistoryCompaction = (
   const compactHistory = spec.compactHistory;
   const threshold = spec.historyCompactionTokenThreshold;
   if (!compactHistory || !threshold) return;
-  const specForTurn = getSpecForTurn(spec, history);
+  const rollupThreshold = spec.summaryRollupTokenThreshold;
+  const historyUpperBound = estimateHistoryTokensUpperBound(history);
+  const settledOrRollupFloor = rollupThreshold !== undefined
+    ? Math.min(defaultSettledHistoryTokenThreshold, rollupThreshold)
+    : defaultSettledHistoryTokenThreshold;
+  const hasExcessSummaries = rollupThreshold !== undefined &&
+    history.filter(isSummaryThought).length > maxRetainedSummaryCount;
   if (
-    estimateAgentInputTokensUpperBound(specForTurn, history) < threshold &&
-    estimateHistoryTokensUpperBound(history) <=
-      defaultSettledHistoryTokenThreshold
+    !hasExcessSummaries &&
+    historyUpperBound < threshold &&
+    historyUpperBound <= settledOrRollupFloor
   ) {
     return;
   }
-  estimateAgentInputTokens(specForTurn, history).then(async (totalTokens) => {
-    if (await shouldCompactHistory(threshold, history, totalTokens)) {
-      compactHistory(history);
+  accessTokenCounter(history).then(async (historyTokens) => {
+    if (
+      await shouldCompactHistory(
+        threshold,
+        history,
+        historyTokens,
+        defaultSegmentGapMs,
+        defaultSettledHistoryTokenThreshold,
+        rollupThreshold,
+      )
+    ) {
+      await compactHistory(history);
     }
   });
 };
