@@ -391,3 +391,37 @@ runForAllProviders(
   3,
   true, // Gemini-only: relies on search_past_history tool call resolution
 );
+
+Deno.test("search_past_history guides model to own_thought when types filter misses PROACTIVE TASK notifications", async () => {
+  const ts = Date.parse("2026-11-17T09:51:08.908Z");
+  const history: HistoryEvent[] = [
+    {
+      id: "pt-1",
+      type: "own_thought",
+      isOwn: true,
+      text:
+        "PROACTIVE TASK: You have a task to complete: Urgent alert for client.",
+      timestamp: ts,
+    },
+  ];
+  const tool = searchPastHistoryToolRaw(() => Promise.resolve(history));
+  const missWithParticipantType = await tool.handler({
+    start_time: "2026-11-17T00:00:00Z",
+    types: ["participant_utterance"],
+    order: "desc",
+    limit: 5,
+  });
+  assert(
+    missWithParticipantType.includes("own_thought: 1"),
+    `Expected hint about matching own_thought events, got: ${missWithParticipantType}`,
+  );
+  const hitWithoutTypes = await tool.handler({
+    start_time: "2026-11-17T00:00:00Z",
+    order: "desc",
+    limit: 5,
+  });
+  assert(
+    hitWithoutTypes.includes("Urgent alert for client."),
+    `Expected full proactive task text when omitting types, got: ${hitWithoutTypes}`,
+  );
+});

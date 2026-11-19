@@ -21,7 +21,7 @@ export const searchPastHistoryParameters = z.object({
     "tool_result",
     "own_thought",
   ])).optional().describe(
-    "Optional list of event types to include. If omitted, all types are included.",
+    "Optional list of event types to include. If omitted, all types are included. Note: platform notifications, injected context, and PROACTIVE TASK prompts (including folded '[Earlier platform notification ...]' entries) are stored as 'own_thought', NOT 'participant_utterance'.",
   ),
   order: z.enum(["asc", "desc"]).optional().default("asc").describe(
     "Sort order by timestamp: 'asc' (chronological, oldest first, default) or 'desc' (newest first).",
@@ -145,7 +145,8 @@ export const searchPastHistoryToolRaw = (
   name: searchPastHistoryToolName,
   description:
     "Search and inspect conversation history events from earlier in this conversation or past sessions. " +
-    "Use this to find exact uncompacted tool outputs, codes, quotes, or details from earlier turns that were summarized, truncated, or scrolled out of context, or to search past messages by keyword or regex.",
+    "Use this to find exact uncompacted tool outputs, codes, quotes, or details from earlier turns that were summarized, truncated, or folded into '[Earlier platform notification ...]' digests, or to search past messages by keyword or regex. " +
+    "Platform notifications and PROACTIVE TASK prompts are stored as 'own_thought' events — omit 'types' or include 'own_thought' when looking them up.",
   parameters: searchPastHistoryParameters,
   handler: async ({
     query,
@@ -188,18 +189,36 @@ export const searchPastHistoryToolRaw = (
       ? new Set<string>(types)
       : undefined;
 
-    const matches = history.filter((e) => {
+    const matchesBaseCriteria = (e: HistoryEvent) => {
       if (startMs !== undefined && e.timestamp < startMs) return false;
       if (endMs !== undefined && e.timestamp > endMs) return false;
-      if (typesSet && !typesSet.has(e.type)) return false;
       if (compiledRe) {
         const text = eventToSearchableText(e);
         if (!compiledRe.test(text)) return false;
       }
       return true;
-    });
+    };
+
+    const matches = history.filter((e) =>
+      matchesBaseCriteria(e) && (!typesSet || typesSet.has(e.type))
+    );
 
     if (empty(matches)) {
+      if (typesSet) {
+        const otherTypeMatches = history.filter(matchesBaseCriteria);
+        if (nonempty(otherTypeMatches)) {
+          const counts = otherTypeMatches.reduce<Record<string, number>>(
+            (acc, e) => ({ ...acc, [e.type]: (acc[e.type] ?? 0) + 1 }),
+            {},
+          );
+          const breakdown = Object.entries(counts)
+            .map(([t, n]) => `${t}: ${n}`)
+            .join(", ");
+          return `No past conversation events matched types=[${
+            [...typesSet].join(", ")
+          }], but ${otherTypeMatches.length} event(s) matched other types in the same filter (${breakdown}). Note: platform notifications and PROACTIVE TASK prompts are stored as "own_thought" — retry ${searchPastHistoryToolName} omitting "types" or including those types.`;
+        }
+      }
       return "No past conversation events matched your search criteria.";
     }
 
