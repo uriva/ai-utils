@@ -77,6 +77,8 @@ export const stopThoughtDefault =
   `${stopThoughtPrefix} I should instead stop and ask the user for feedback.`;
 export const turnTimeBudgetWrapUpThought =
   `${stopThoughtPrefix} I have reached the execution time budget for this turn, so I should stop further exploratory tool calls immediately and conclude now with my best current findings or result.`;
+export const turnIterationBudgetWrapUpThought =
+  `${stopThoughtPrefix} I have reached the maximum iteration budget for this turn, so I should stop further exploratory tool calls immediately and conclude now with my best current findings or result.`;
 export const forcedStopUtterance =
   "I'm sorry, I have been working on this for some time but am unable to make progress. I will stop here and ask for your feedback on how to proceed.";
 
@@ -3720,6 +3722,7 @@ export type AgentSpec = AgentInputs & {
   onStreamChunk?: (chunk: string) => Promise<void> | void;
   onStreamThinkingChunk?: (chunk: string) => Promise<void> | void;
   maxIterations: number;
+  hardMaxIterations?: number;
   maxTurnDurationMs?: number;
   disableStreaming?: boolean;
   provider?: "google" | "moonshot" | "anthropic";
@@ -3819,6 +3822,7 @@ const projectModelContext = (
 type ProgressGateState = {
   stopAdviceCount: number;
   timeBudgetWarned: boolean;
+  iterationBudgetWarned: boolean;
   turnStartedAt: number;
 };
 
@@ -3831,6 +3835,7 @@ const checkTurnTimeBudget = (
     kind: "run";
     stopAdviceCount: number;
     timeBudgetWarned: boolean;
+    iterationBudgetWarned: boolean;
     injectedThought: HistoryEvent;
   }
   | { kind: "force-stop" }
@@ -3856,7 +3861,43 @@ const checkTurnTimeBudget = (
     kind: "run",
     stopAdviceCount: state.stopAdviceCount,
     timeBudgetWarned: true,
+    iterationBudgetWarned: state.iterationBudgetWarned,
     injectedThought: ownThoughtTurn(turnTimeBudgetWrapUpThought),
+  };
+};
+
+const checkTurnIterationBudget = (
+  hardMaxIterations: number | undefined,
+  c: number,
+  state: ProgressGateState,
+):
+  | {
+    kind: "run";
+    stopAdviceCount: number;
+    timeBudgetWarned: boolean;
+    iterationBudgetWarned: boolean;
+    injectedThought: HistoryEvent;
+  }
+  | { kind: "force-stop" }
+  | null => {
+  if (!hardMaxIterations || hardMaxIterations <= 0 || c < hardMaxIterations) {
+    return null;
+  }
+  if (state.iterationBudgetWarned) {
+    console.log(
+      `[agent-iter-budget] turn exceeded hardMaxIterations (${hardMaxIterations}) after wrap-up warning; forcing stop. c=${c}`,
+    );
+    return { kind: "force-stop" };
+  }
+  console.log(
+    `[agent-iter-budget] turn reached hardMaxIterations (${hardMaxIterations}); injecting wrap-up thought. c=${c}`,
+  );
+  return {
+    kind: "run",
+    stopAdviceCount: state.stopAdviceCount,
+    timeBudgetWarned: state.timeBudgetWarned,
+    iterationBudgetWarned: true,
+    injectedThought: ownThoughtTurn(turnIterationBudgetWrapUpThought),
   };
 };
 
@@ -3875,30 +3916,49 @@ const maybeRunProgressCheck = async (
     kind: "run";
     stopAdviceCount: number;
     timeBudgetWarned: boolean;
+    iterationBudgetWarned: boolean;
     injectedThought?: HistoryEvent;
   }
   | { kind: "force-stop" }
 > => {
+  const iterationBudgetResult = checkTurnIterationBudget(
+    spec.hardMaxIterations,
+    c,
+    state,
+  );
+  if (iterationBudgetResult) return iterationBudgetResult;
   const timeBudgetResult = checkTurnTimeBudget(
     spec.maxTurnDurationMs,
     c,
     state,
   );
   if (timeBudgetResult) return timeBudgetResult;
-  const { stopAdviceCount, timeBudgetWarned } = state;
+  const { stopAdviceCount, timeBudgetWarned, iterationBudgetWarned } = state;
   const canAudit = nonempty(normalizedHistory) &&
     (c > 1 || hasUnansweredUserMessage(normalizedHistory));
   const due = canAudit &&
     ((c > 0 && spec.maxIterations > 0 && c % spec.maxIterations === 0) ||
       stopAdviceCount > 0);
-  if (!due) return { kind: "run", stopAdviceCount, timeBudgetWarned };
+  if (!due) {
+    return {
+      kind: "run",
+      stopAdviceCount,
+      timeBudgetWarned,
+      iterationBudgetWarned,
+    };
+  }
   console.log(
     `[agent-progress-check] c=${c} stopAdviceCount=${stopAdviceCount} - running progress check with the bigger model`,
   );
   const checkResult = await checkProgress(spec, normalizedHistory);
   if (checkResult.shouldContinue) {
     console.log(`[agent-progress-check] judged to be good to continue. c=${c}`);
-    return { kind: "run", stopAdviceCount: 0, timeBudgetWarned };
+    return {
+      kind: "run",
+      stopAdviceCount: 0,
+      timeBudgetWarned,
+      iterationBudgetWarned,
+    };
   }
   const escalated = stopAdviceCount + 1 >= 2;
   if (escalated) {
@@ -3917,6 +3977,7 @@ const maybeRunProgressCheck = async (
     kind: "run",
     stopAdviceCount: stopAdviceCount + 1,
     timeBudgetWarned,
+    iterationBudgetWarned,
     injectedThought: ownThoughtTurn(stopThought),
   };
 };
@@ -4004,6 +4065,7 @@ export const runAbstractAgent = (
     const progressState: ProgressGateState = {
       stopAdviceCount: 0,
       timeBudgetWarned: false,
+      iterationBudgetWarned: false,
       turnStartedAt: Date.now(),
     };
     const retryCounts = {
@@ -4076,6 +4138,7 @@ export const runAbstractAgent = (
       }
       progressState.stopAdviceCount = progress.stopAdviceCount;
       progressState.timeBudgetWarned = progress.timeBudgetWarned;
+      progressState.iterationBudgetWarned = progress.iterationBudgetWarned;
       if (progress.injectedThought) {
         await outputEvent(progress.injectedThought);
         ephemeralHistory = [...ephemeralHistory, progress.injectedThought];
@@ -4757,7 +4820,7 @@ const isTurnBoundaryForWrapUp = (e: HistoryEvent) =>
   e.type === "external_event" ||
   e.type === "own_utterance";
 
-const isTimeBudgetWrapUpActive = (history: HistoryEvent[]): boolean => {
+const isBudgetWrapUpActive = (history: HistoryEvent[]): boolean => {
   const lastBoundaryIdx = history.reduce(
     (last, e, idx) => (isTurnBoundaryForWrapUp(e) ? idx : last),
     -1,
@@ -4765,7 +4828,9 @@ const isTimeBudgetWrapUpActive = (history: HistoryEvent[]): boolean => {
   return history
     .slice(lastBoundaryIdx + 1)
     .some((e) =>
-      e.type === "own_thought" && e.text === turnTimeBudgetWrapUpThought
+      e.type === "own_thought" &&
+      (e.text === turnTimeBudgetWrapUpThought ||
+        e.text === turnIterationBudgetWrapUpThought)
     );
 };
 
@@ -4796,7 +4861,7 @@ const computeSpecForTurn = <T extends AgentInputs>(
   const activeSkillsPrompt = formatActiveSkillsPrompt(sortedActiveSkills);
 
   const staticPrompt = spec.prompt + skillsCatalogPrompt;
-  const disableTools = spec.disableTools || isTimeBudgetWrapUpActive(history);
+  const disableTools = spec.disableTools || isBudgetWrapUpActive(history);
 
   return {
     ...spec,

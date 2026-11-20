@@ -178,14 +178,58 @@ const isNonLifecycleToolPair = (pair: HistoryEvent[]): boolean => {
   );
 };
 
+export const compactedToolCallArgsMarker = "[Compacted argument";
+const toolCallArgsScratchPrefix = "args-";
+const maxInlineCompactedArgChars = 400;
+
+const compactArgValue = (
+  value: unknown,
+  scratchId: string,
+): unknown => {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "number"
+  ) {
+    return value;
+  }
+  if (typeof value === "string") {
+    return value.length <= maxInlineCompactedArgChars
+      ? value
+      : `${compactedToolCallArgsMarker} (${value.length} chars) — read full args via ${readScratchFileToolName}("${scratchId}")]`;
+  }
+  const serialized = JSON.stringify(value) ?? "";
+  return serialized.length <= maxInlineCompactedArgChars
+    ? value
+    : `${compactedToolCallArgsMarker} (${serialized.length} chars) — read full args via ${readScratchFileToolName}("${scratchId}")]`;
+};
+
+const compactParameterRecord = (
+  record: Record<string, unknown>,
+  scratchId: string,
+  recurseParamsKey: boolean,
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(record).map(([key, value]) => [
+      key,
+      recurseParamsKey && key === "params" && isObject(value)
+        ? compactParameterRecord(value, scratchId, false)
+        : compactArgValue(value, scratchId),
+    ]),
+  );
+
 export const compactToolResultsInMemory = async (
   events: HistoryEvent[],
   { setScratch, generateTLDR }: CompactionOptions,
 ): Promise<HistoryEvent[]> => {
   const pairs = groupToolCallPairs(events).filter(isNonLifecycleToolPair);
-  const candidates: {
+  const resultCandidates: {
     toolCall: HistoryEvent & { type: "tool_call" };
     toolResult: HistoryEvent & { type: "tool_result" };
+  }[] = [];
+  const callArgsCandidates: {
+    toolCall: HistoryEvent & { type: "tool_call" };
+    serializedArgs: string;
   }[] = [];
 
   for (let i = 0; i < pairs.length; i++) {
@@ -208,9 +252,13 @@ export const compactToolResultsInMemory = async (
       toolResult.result &&
       !isUnreadFreshToolResult(events, toolResult)
     ) {
+      const completedTurnsAfter = countCompletedTurnsAfterResult(
+        events,
+        toolResult,
+      );
       const turnDistance = isSpillNotice(toolResult.result)
         ? toolStepDistance
-        : countCompletedTurnsAfterResult(events, toolResult);
+        : completedTurnsAfter;
       const threshold = getSpillThreshold(
         toolResult.timestamp,
         turnDistance,
@@ -225,55 +273,99 @@ export const compactToolResultsInMemory = async (
         toolResult.result.length > threshold &&
         !isCompactedToolResult(toolResult.result)
       ) {
-        candidates.push({ toolCall, toolResult });
+        resultCandidates.push({ toolCall, toolResult });
+      }
+
+      if (
+        command !== learnSkillToolName &&
+        command !== unlearnSkillToolName &&
+        isObject(toolCall.parameters)
+      ) {
+        const serializedArgs = JSON.stringify(toolCall.parameters);
+        const argsThreshold = getSpillThreshold(
+          toolCall.timestamp,
+          Math.max(toolStepDistance, completedTurnsAfter),
+        );
+        if (
+          serializedArgs.length > argsThreshold &&
+          !serializedArgs.includes(compactedToolCallArgsMarker)
+        ) {
+          callArgsCandidates.push({ toolCall, serializedArgs });
+        }
       }
     }
   }
 
-  if (candidates.length === 0) return events;
+  if (resultCandidates.length === 0 && callArgsCandidates.length === 0) {
+    return events;
+  }
 
   // Process all candidates in parallel using Promise.all
-  const replacementsList = await Promise.all(
-    candidates.map(async ({ toolCall, toolResult }) => {
-      const originalResult = toolResult.result;
-      const isAlreadySpilled = isSpillNotice(originalResult);
-      const scratchId = isAlreadySpilled && toolResult.toolCallId
-        ? toolResult.toolCallId
-        : toolResult.id;
+  const [resultReplacements, argReplacements] = await Promise.all([
+    Promise.all(
+      resultCandidates.map(async ({ toolCall, toolResult }) => {
+        const originalResult = toolResult.result;
+        const isAlreadySpilled = isSpillNotice(originalResult);
+        const scratchId = isAlreadySpilled && toolResult.toolCallId
+          ? toolResult.toolCallId
+          : toolResult.id;
 
-      // If not already spilled to scratchpad on turn 0, save original full text to scratchpad
-      if (!isAlreadySpilled && !hasSpilledToSetter(setScratch, toolResult.id)) {
-        await setScratch(toolResult.id, originalResult);
-        markSpilledToSetter(setScratch, toolResult.id);
-      }
-
-      let tldr = defaultDeterministicTLDR(toolCall, originalResult);
-      if (generateTLDR) {
-        try {
-          tldr = await generateTLDR(toolCall, originalResult);
-        } catch (_e) {
-          // Fallback to deterministic TLDR if custom generateTLDR fails
+        // If not already spilled to scratchpad on turn 0, save original full text to scratchpad
+        if (
+          !isAlreadySpilled && !hasSpilledToSetter(setScratch, toolResult.id)
+        ) {
+          await setScratch(toolResult.id, originalResult);
+          markSpilledToSetter(setScratch, toolResult.id);
         }
-      }
 
-      const lineCount = originalResult.split("\n").length;
+        let tldr = defaultDeterministicTLDR(toolCall, originalResult);
+        if (generateTLDR) {
+          try {
+            tldr = await generateTLDR(toolCall, originalResult);
+          } catch (_e) {
+            // Fallback to deterministic TLDR if custom generateTLDR fails
+          }
+        }
 
-      // Informative memory replacement text
-      const replacementText = [
-        `[Because time has passed, this tool result has been compacted to save space. This is what you remember from this execution:`,
-        `Memory TLDR: ${tldr}`,
-        `To refresh your memory on the full, raw output of this tool call, you can always read the scratchpad file by invoking \`read_scratch_file\` with the ID: "${scratchId}" (${lineCount} lines, ${originalResult.length} characters)]`,
-      ].join("\n\n");
+        const lineCount = originalResult.split("\n").length;
 
-      return {
-        id: toolResult.id,
-        event: { ...toolResult, result: replacementText },
-      };
-    }),
-  );
+        // Informative memory replacement text
+        const replacementText = [
+          `[Because time has passed, this tool result has been compacted to save space. This is what you remember from this execution:`,
+          `Memory TLDR: ${tldr}`,
+          `To refresh your memory on the full, raw output of this tool call, you can always read the scratchpad file by invoking \`read_scratch_file\` with the ID: "${scratchId}" (${lineCount} lines, ${originalResult.length} characters)]`,
+        ].join("\n\n");
+
+        return {
+          id: toolResult.id,
+          event: { ...toolResult, result: replacementText },
+        };
+      }),
+    ),
+    Promise.all(
+      callArgsCandidates.map(async ({ toolCall, serializedArgs }) => {
+        const scratchId = `${toolCallArgsScratchPrefix}${toolCall.id}`;
+        if (!hasSpilledToSetter(setScratch, scratchId)) {
+          await setScratch(scratchId, serializedArgs);
+          markSpilledToSetter(setScratch, scratchId);
+        }
+        const compactedParams = isObject(toolCall.parameters)
+          ? compactParameterRecord(
+            toolCall.parameters,
+            scratchId,
+            toolCall.name === runCommandToolName,
+          )
+          : toolCall.parameters;
+        return {
+          id: toolCall.id,
+          event: { ...toolCall, parameters: compactedParams },
+        };
+      }),
+    ),
+  ]);
 
   const replacements = new Map<string, HistoryEvent>();
-  for (const r of replacementsList) {
+  for (const r of [...resultReplacements, ...argReplacements]) {
     replacements.set(r.id, r.event);
   }
 

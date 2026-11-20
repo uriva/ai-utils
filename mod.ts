@@ -296,6 +296,7 @@ export {
   toolUseTurnWithMetadata,
   topLevelToolCorrection,
   truncateToolOutput,
+  turnIterationBudgetWrapUpThought,
   turnTimeBudgetWrapUpThought,
   unlearnSkillToolName,
   waitAllPreModelDecisions,
