@@ -886,7 +886,9 @@ export const extractCandidateToolEpisodes = (
   });
 };
 
-const isDeferredToolWakeupHistory = (history: HistoryEvent[]): boolean => {
+export const isDeferredToolWakeupHistory = (
+  history: HistoryEvent[],
+): boolean => {
   const lifecycleCallIds = new Set(
     history
       .filter(

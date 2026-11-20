@@ -61,6 +61,7 @@ import {
   decideSkillsWithDecisionModel,
   decideThinkingLevelWithDecisionModel,
   isDecisionModelInjected,
+  isDeferredToolWakeupHistory,
   type PastToolEpisode,
 } from "./decisionModel.ts";
 import {
@@ -589,15 +590,72 @@ export const formatSkillsPrompt: (skills: Skill[]) => string =
       `    - ${qualifiedToolName(skillName, t.name)}: ${t.description}`,
   );
 
+export const maxInactiveToolDescriptionChars = 140;
+
+const findTopLevelSentenceEnd = (text: string, limit: number): number =>
+  text
+    .slice(0, limit)
+    .split("")
+    .reduce<{ depth: number; found: number }>(
+      (acc, ch, i) => {
+        if (acc.found !== -1) return acc;
+        if (ch === "(") return { ...acc, depth: acc.depth + 1 };
+        if (ch === ")") return { ...acc, depth: Math.max(0, acc.depth - 1) };
+        const isEnd = acc.depth === 0 &&
+          (ch === "." || ch === "!" || ch === "?") &&
+          (i + 1 === text.length || text[i + 1] === " ");
+        return isEnd ? { ...acc, found: i + 1 } : acc;
+      },
+      { depth: 0, found: -1 },
+    ).found;
+
+const compactCatalogDescription = (description: string): string => {
+  const normalized = description.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxInactiveToolDescriptionChars) return normalized;
+  const sentenceEnd = findTopLevelSentenceEnd(
+    normalized,
+    maxInactiveToolDescriptionChars,
+  );
+  if (sentenceEnd >= 20) return normalized.slice(0, sentenceEnd);
+  const clipped = normalized.slice(0, maxInactiveToolDescriptionChars - 1);
+  const lastSpace = clipped.lastIndexOf(" ");
+  const boundary =
+    lastSpace >= Math.floor(maxInactiveToolDescriptionChars * 0.6)
+      ? clipped.slice(0, lastSpace)
+      : clipped;
+  return `${boundary.replace(/[,;:\s]+$/, "")}…`;
+};
+
+const deduplicateSkillTools = (tools: Skill["tools"]): Skill["tools"] => {
+  const seen = new Set<string>();
+  return tools.filter((t) => {
+    const key = t.name.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+export const deduplicateSkills = (skills: Skill[]): Skill[] => {
+  const seen = new Set<string>();
+  return skills.reduce<Skill[]>((acc, skill) => {
+    const key = skill.name.toLowerCase();
+    if (seen.has(key)) return acc;
+    seen.add(key);
+    acc.push({ ...skill, tools: deduplicateSkillTools(skill.tools) });
+    return acc;
+  }, []);
+};
+
 // Inactive skills carry compact parameter signatures (names, types,
-// optionality — no descriptions) so a direct first-touch run_command call is
-// schema-valid and executes immediately, instead of paying an auto-load gate
-// round trip on a blindly guessed call.
+// optionality — no descriptions) and concise 1-line tool summaries so a direct
+// first-touch run_command call is schema-valid without dumping full tool essays
+// into every prompt; full descriptions load when the skill is activated.
 const formatInactiveSkillsPrompt = formatSkillsPromptWith(
   (skillName, t) =>
     `    - ${qualifiedToolName(skillName, t.name)}(params: ${
       zodToCompactTypingString(t.parameters)
-    }): ${t.description}`,
+    }): ${compactCatalogDescription(t.description)}`,
 );
 
 type SharedFields = { id: MessageId; timestamp: number; isOwn: boolean };
@@ -3389,6 +3447,67 @@ const currentRequestExecutedWorkflowTools = (
   history: HistoryEvent[],
 ): boolean => currentRequestExecutedWorkflowToolNames(history).size > 0;
 
+export const idleSkillTurnWindow = 4;
+export const idleSkillGapMs = defaultSegmentGapMs;
+
+const isSkillActivityEvent =
+  (skillKey: string, bareToolNames: ReadonlySet<string>) =>
+  (e: HistoryEvent): boolean => {
+    if (e.type !== "tool_call" || isUnlearnToolCall(e)) return false;
+    return skillNameFromToolCall(e) === skillKey ||
+      bareToolNames.has(e.name.toLowerCase());
+  };
+
+const findIdleActiveSkills = (
+  history: HistoryEvent[],
+  skills: Skill[],
+): Skill[] => {
+  const currentActive = activeSkillNames(history);
+  if (currentActive.size === 0) return [];
+  const lastUserIndex = history.findLastIndex(
+    (e) => e.type === "participant_utterance",
+  );
+  if (lastUserIndex === -1) return [];
+  const lastUserTimestamp = history[lastUserIndex].timestamp;
+
+  return skills.filter((skill) => {
+    const skillKey = skill.name.toLowerCase();
+    if (!currentActive.has(skillKey)) return false;
+    if (skillUsedInCurrentRequest(history, skill)) return false;
+    if (skillUnlearnSkipReason(history, skill.name)) return false;
+
+    const bareToolNames = new Set(
+      skill.tools.map((t) =>
+        stripSkillPrefix(skill.name, t.name).toLowerCase()
+      ),
+    );
+    const lastActivityIndex = history.findLastIndex(
+      isSkillActivityEvent(skillKey, bareToolNames),
+    );
+    if (lastActivityIndex === -1 || lastActivityIndex >= lastUserIndex) {
+      return false;
+    }
+
+    const userTurnsSinceLastUse = history
+      .slice(lastActivityIndex + 1)
+      .filter((e) => e.type === "participant_utterance")
+      .length;
+    if (userTurnsSinceLastUse >= idleSkillTurnWindow) return true;
+
+    return lastUserTimestamp - history[lastActivityIndex].timestamp >=
+      idleSkillGapMs;
+  });
+};
+
+const emitIdleSkillUnlearnEvents = async (
+  skills: Skill[],
+): Promise<void> => {
+  if (empty(skills)) return;
+  const history = await getHistory();
+  const idleSkills = findIdleActiveSkills(history, skills);
+  await each(emitSingleUnlearnSkillEvent)(idleSkills);
+};
+
 const emitPendingUnlearnEvents = async (
   toUnlearn: Skill[],
 ): Promise<void> => {
@@ -3875,13 +3994,11 @@ export const runAbstractAgent = (
         )
         : []),
     ];
+    const skillsArr = deduplicateSkills(skills ?? []);
     const allTools = [
       ...baseTools,
-      ...(skills && skills.length > 0
-        ? createSkillTools(skills, baseTools)
-        : []),
+      ...(nonempty(skillsArr) ? createSkillTools(skillsArr, baseTools) : []),
     ];
-    const skillsArr = skills ?? [];
     let c = 0;
     let ephemeralHistory: HistoryEvent[] = [];
     const progressState: ProgressGateState = {
@@ -3899,6 +4016,9 @@ export const runAbstractAgent = (
     let pendingToUnlearn: Skill[] = [];
     let hasTriggeredPreModelDecisions = false;
     let turnEnded = false;
+    const startedFromDeferredWakeup = isDeferredToolWakeupHistory(
+      await getHistory(),
+    );
     const midRunCompactionState: MidRunCompactionState = {
       lastCompactedTokens: 0,
     };
@@ -4138,6 +4258,9 @@ export const runAbstractAgent = (
           const toEmit = pendingToUnlearn;
           pendingToUnlearn = [];
           await emitPendingUnlearnEvents(toEmit);
+          if (!startedFromDeferredWakeup) {
+            await emitIdleSkillUnlearnEvents(skillsArr);
+          }
           scheduleHistoryCompaction(spec, await getHistory());
           return;
         }
@@ -4598,11 +4721,21 @@ const formatActiveSkillRefs = (skill: Skill): string =>
     }`
     : "";
 
-const formatActiveSkillParamNotes = (skill: Skill): string => {
+const isDescriptionCompacted = (description: string): boolean => {
+  const normalized = description.replace(/\s+/g, " ").trim();
+  return compactCatalogDescription(description) !== normalized;
+};
+
+const formatActiveSkillToolNotes = (skill: Skill): string => {
   const lines = skill.tools.flatMap((t) => {
+    const fullDesc = isDescriptionCompacted(t.description)
+      ? t.description.trim()
+      : "";
     const notes = zodParamDescriptions(t.parameters);
-    return nonempty(notes)
-      ? [`- ${stripSkillPrefix(skill.name, t.name)}: ${notes.join("; ")}`]
+    const paramPart = nonempty(notes) ? notes.join("; ") : "";
+    const combined = [fullDesc, paramPart].filter(Boolean).join(" — ");
+    return combined
+      ? [`- ${stripSkillPrefix(skill.name, t.name)}: ${combined}`]
       : [];
   });
   return nonempty(lines) ? `\n${lines.join("\n")}` : "";
@@ -4614,7 +4747,7 @@ const formatActiveSkillsPrompt = (skills: Skill[]): string =>
     : `\n\n${
       skills.map((skill) =>
         `### Active Skill: ${skill.name}\n${skill.instructions}${
-          formatActiveSkillParamNotes(skill)
+          formatActiveSkillToolNotes(skill)
         }${formatActiveSkillRefs(skill)}`
       ).join("\n\n")
     }`;
@@ -4642,7 +4775,7 @@ const computeSpecForTurn = <T extends AgentInputs>(
 ): T => {
   const activeNames = activeSkillNames(history);
 
-  const allPossibleSkills = spec.skills ?? [];
+  const allPossibleSkills = deduplicateSkills(spec.skills ?? []);
   const activeSkills = allPossibleSkills.filter((s) =>
     activeNames.has(s.name.toLowerCase())
   );
