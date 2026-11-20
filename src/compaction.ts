@@ -21,6 +21,7 @@ import { genJson } from "./genJson.ts";
 import { formatInternalSentTimestamp } from "./internalMessageMetadata.ts";
 import {
   cleanActiveMemoryToolName,
+  defaultSegmentGapMs,
   isContentBlockedError,
   setThinkingLevelToolName,
 } from "./utils.ts";
@@ -276,7 +277,7 @@ const trimSegmentToTokenBudget = async (
 // headroom so compaction is infrequent and the per-call input stays small.
 export const compactionRetentionRatio = 0.1;
 
-export const defaultSegmentGapMs = 30 * 60 * 1000;
+export { defaultSegmentGapMs };
 export const defaultSettledHistoryTokenThreshold = 6_000;
 export const defaultSummaryRollupTokenThreshold = 4_000;
 export const maxRetainedSummaryCount = 5;

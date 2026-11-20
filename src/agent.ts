@@ -17,7 +17,6 @@ import { z, type ZodType } from "zod/v4";
 import {
   applyCleanActiveMemoryDirectives,
   cleanActiveMemoryToolRaw,
-  defaultSegmentGapMs,
   defaultSettledHistoryTokenThreshold,
   hasInterveningConversationTurn,
   isCompactedSummaryText,
@@ -31,6 +30,7 @@ import { searchPastHistoryToolRaw } from "./historySearch.ts";
 import { compactToolResultsInMemory } from "./continuousCompaction.ts";
 import {
   cleanActiveMemoryToolName,
+  defaultSegmentGapMs,
   isEmojiFlood,
   isRepetitionFlood,
   setThinkingLevelToolName,
