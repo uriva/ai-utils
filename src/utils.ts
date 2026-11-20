@@ -251,6 +251,11 @@ export const cleanActiveMemoryToolName = "clean_active_memory";
 export const setThinkingLevelToolName = "set_thinking_level";
 export const defaultSegmentGapMs = 30 * 60 * 1000;
 
+export const summaryIdEndTimestamp = (id: string): number | undefined => {
+  const match = /^summary-\d+-(\d+)$/.exec(id);
+  return match ? Number(match[1]) : undefined;
+};
+
 export const decisionThinkingLevelInstructions =
   "Which reasoning level should handle this task? Choose 'low' for conversational turns, greetings, basic FAQ, general information questions, search or recommendation lookups, presenting read-only search/lookup results, standard recommendation replies, user preferences, negative content filters, notification or subscription settings (including unsubscribing or quiet hours); choose 'medium' for multi-constraint recommendation trade-offs (combining budget, area, exclusions, and schedule), nuanced moderation/safety/quota-dispute edge cases, post-action or post-delivery tool results with strict behavioral/stop constraints where the action already completed and only a closing summary reply is needed, or synthesizing multiple tool outputs; choose 'high' for initiating multi-step action execution (such as starting downloads, media processing, cutting, shell/VM/browser execution, or file editing), coding, mathematical problem solving, or complex logic.";
 

@@ -24,6 +24,7 @@ import {
   defaultSegmentGapMs,
   isContentBlockedError,
   setThinkingLevelToolName,
+  summaryIdEndTimestamp,
 } from "./utils.ts";
 
 export type HistorySegment = {
@@ -176,7 +177,13 @@ const segmentHistoryEventsUncached = (
   for (let i = 1; i < groups.length; i++) {
     const group = groups[i];
     const gapOk = head(group).timestamp - last(currentEvents).timestamp >= gap;
-    if (gapOk && unansweredIds.size === 0 && currentEvents.length >= 2) {
+    const prevIsSummary = currentEvents.every(isSummaryThought);
+    const nextIsSummary = group.every(isSummaryThought);
+    if (
+      prevIsSummary ||
+      nextIsSummary ||
+      (gapOk && unansweredIds.size === 0 && currentEvents.length >= 2)
+    ) {
       segments.push({
         events: currentEvents,
         start: head(currentEvents).timestamp,
@@ -302,11 +309,6 @@ const isSkillLifecycleEventIn =
 export const isSummaryThought = (e: HistoryEvent): boolean =>
   e.type === "own_thought" &&
   (e.id.startsWith("summary-") || isCompactedSummaryText(e.text));
-
-const summaryIdEndTimestamp = (id: string): number | undefined => {
-  const match = /^summary-\d+-(\d+)$/.exec(id);
-  return match ? Number(match[1]) : undefined;
-};
 
 export const selectSummariesForRollup = async (
   summaries: HistoryEvent[],

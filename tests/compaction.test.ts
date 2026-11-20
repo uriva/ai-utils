@@ -961,3 +961,43 @@ Deno.test(
     );
   },
 );
+
+Deno.test(
+  "segmentHistoryEvents isolates compacted summaries so an odd summary is never glued onto the next raw session",
+  () => {
+    const day1 = Date.parse("2026-11-11T16:00:00Z");
+    const day8 = Date.parse("2026-11-18T12:00:00Z");
+    const morningStart = Date.parse("2026-11-19T05:43:00Z");
+    const laterStart = Date.parse("2026-11-19T06:50:00Z");
+    const events: HistoryEvent[] = [
+      {
+        id: `summary-${day1}-${day8}`,
+        type: "own_thought",
+        isOwn: true,
+        text:
+          "[This summary covers the period from Nov 11 to Nov 18]\n\nPast conversation history was compacted into a structured summary.",
+        timestamp: day1,
+      },
+      makeParticipantUtterance(
+        "Can you check Show Alpha and Show Beta?",
+        morningStart,
+      ),
+      makeOwnUtterance(
+        "Checked both Show Alpha and Show Beta.",
+        morningStart + 60_000,
+      ),
+      makeParticipantUtterance("Update my list of friends.", laterStart),
+      makeOwnUtterance("Updated your friends list.", laterStart + 30_000),
+    ];
+
+    const segments = segmentHistoryEvents(events, segmentGapMs);
+    assertEquals(segments.length, 3);
+    assertEquals(segments[0].events.length, 1);
+    assertEquals(segments[0].start, day1);
+    assertEquals(segments[1].events.length, 2);
+    assertEquals(segments[1].start, morningStart);
+    assertEquals(segments[1].end, morningStart + 60_000);
+    assertEquals(segments[2].events.length, 2);
+    assertEquals(segments[2].start, laterStart);
+  },
+);

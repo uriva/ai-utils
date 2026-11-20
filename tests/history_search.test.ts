@@ -11,7 +11,10 @@ import {
   toolUseTurn,
 } from "../mod.ts";
 import { searchPastHistoryToolRaw } from "../src/historySearch.ts";
-import { cleanActiveMemoryToolName } from "../src/utils.ts";
+import {
+  cleanActiveMemoryToolName,
+  setThinkingLevelToolName,
+} from "../src/utils.ts";
 import { agentDeps, runForAllProviders } from "../test_helpers.ts";
 
 const createSampleHistory = (): HistoryEvent[] => {
@@ -424,4 +427,76 @@ Deno.test("search_past_history guides model to own_thought when types filter mis
     hitWithoutTypes.includes("Urgent alert for client."),
     `Expected full proactive task text when omitting types, got: ${hitWithoutTypes}`,
   );
+});
+
+Deno.test("search_past_history omits internal bookkeeping tools and ranks/filters summaries by end timestamp", async () => {
+  const day1 = Date.parse("2026-11-11T16:00:00Z");
+  const morningEnd = Date.parse("2026-11-19T05:46:00Z");
+  const evening = Date.parse("2026-11-19T19:52:00Z");
+  const history: HistoryEvent[] = [
+    {
+      id: `summary-${day1}-${morningEnd}`,
+      type: "own_thought",
+      isOwn: true,
+      text:
+        "[This summary covers Nov 11 to Nov 19]\n\nDiscussed Show Alpha and Show Beta.",
+      timestamp: day1,
+    },
+    {
+      ...toolUseTurn({
+        name: setThinkingLevelToolName,
+        args: { level: "low" },
+      }),
+      id: "call-think-1",
+      timestamp: evening - 2000,
+    },
+    {
+      ...toolResultTurn({ toolCallId: "call-think-1", result: "ok" }),
+      timestamp: evening - 1900,
+    },
+    {
+      ...toolUseTurn({
+        name: cleanActiveMemoryToolName,
+        args: {
+          start_time: "2026-11-19T05:00:00Z",
+          end_time: "2026-11-19T06:00:00Z",
+          summary: "cleaned",
+        },
+      }),
+      id: "call-clean-1",
+      timestamp: evening - 1500,
+    },
+    {
+      ...toolResultTurn({ toolCallId: "call-clean-1", result: "cleaned" }),
+      timestamp: evening - 1400,
+    },
+    {
+      ...toolUseTurn({
+        name: searchPastHistoryToolName,
+        args: { order: "desc", limit: 20 },
+      }),
+      id: "call-search-self",
+      timestamp: evening,
+    },
+  ];
+
+  const tool = searchPastHistoryToolRaw(() => Promise.resolve(history));
+  const result = await tool.handler({
+    start_time: "2026-11-19T00:00:00Z",
+    order: "desc",
+    limit: 20,
+    offset: 0,
+  });
+
+  assert(
+    result.includes("Found 1 matching events"),
+    `Expected only the non-bookkeeping summary event, got: ${result}`,
+  );
+  assert(
+    result.includes("Show Alpha and Show Beta"),
+    `Expected summary overlapping start_time to be returned, got: ${result}`,
+  );
+  assert(!result.includes(setThinkingLevelToolName));
+  assert(!result.includes(cleanActiveMemoryToolName));
+  assert(!result.includes(searchPastHistoryToolName));
 });

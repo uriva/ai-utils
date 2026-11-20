@@ -1,8 +1,47 @@
 import { empty, nonempty } from "gamla";
 import { z } from "zod/v4";
 import { compileGrepPattern, type HistoryEvent } from "./agent.ts";
+import {
+  cleanActiveMemoryToolName,
+  setThinkingLevelToolName,
+  summaryIdEndTimestamp,
+} from "./utils.ts";
 
 export const searchPastHistoryToolName = "search_past_history";
+
+const internalBookkeepingToolNames = new Set<string>([
+  setThinkingLevelToolName,
+  cleanActiveMemoryToolName,
+  searchPastHistoryToolName,
+]);
+
+const eventEndTimestamp = (e: HistoryEvent): number =>
+  e.type === "own_thought"
+    ? summaryIdEndTimestamp(e.id) ?? e.timestamp
+    : e.timestamp;
+
+const filterBookkeepingEvents = (history: HistoryEvent[]): HistoryEvent[] => {
+  const bookkeepingCallIds = new Set(
+    history
+      .filter((e) =>
+        e.type === "tool_call" && internalBookkeepingToolNames.has(e.name)
+      )
+      .map((e) => e.id),
+  );
+  return history.filter((e) => {
+    if (e.type === "tool_call" && internalBookkeepingToolNames.has(e.name)) {
+      return false;
+    }
+    if (
+      e.type === "tool_result" &&
+      e.toolCallId !== undefined &&
+      bookkeepingCallIds.has(e.toolCallId)
+    ) {
+      return false;
+    }
+    return true;
+  });
+};
 
 export const searchPastHistoryParameters = z.object({
   query: z.string().optional().describe(
@@ -180,9 +219,13 @@ export const searchPastHistoryToolRaw = (
       compiledRe = compiled.re;
     }
 
-    const history = await getHistory();
-    if (empty(history)) {
+    const rawHistory = await getHistory();
+    if (empty(rawHistory)) {
       return "No past conversation events found.";
+    }
+    const history = filterBookkeepingEvents(rawHistory);
+    if (empty(history)) {
+      return "No past conversation events matched your search criteria.";
     }
 
     const typesSet = types && nonempty(types)
@@ -190,7 +233,7 @@ export const searchPastHistoryToolRaw = (
       : undefined;
 
     const matchesBaseCriteria = (e: HistoryEvent) => {
-      if (startMs !== undefined && e.timestamp < startMs) return false;
+      if (startMs !== undefined && eventEndTimestamp(e) < startMs) return false;
       if (endMs !== undefined && e.timestamp > endMs) return false;
       if (compiledRe) {
         const text = eventToSearchableText(e);
@@ -223,7 +266,7 @@ export const searchPastHistoryToolRaw = (
     }
 
     const sortedMatches = order === "desc"
-      ? [...matches].sort((a, b) => b.timestamp - a.timestamp)
+      ? [...matches].sort((a, b) => eventEndTimestamp(b) - eventEndTimestamp(a))
       : [...matches].sort((a, b) => a.timestamp - b.timestamp);
 
     const effectiveLimit = Math.min(limit, maxAllowedLimit);
