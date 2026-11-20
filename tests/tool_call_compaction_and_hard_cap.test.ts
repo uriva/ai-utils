@@ -140,6 +140,93 @@ Deno.test(
 );
 
 Deno.test(
+  "runAgent rejects new tool calls that imitate a compacted-argument placeholder before invoking the handler",
+  async () => {
+    const history: HistoryEvent[] = [
+      participantUtteranceTurn({
+        name: "user",
+        text: "Delegate the build task to a worker.",
+      }),
+    ];
+
+    const invokedPrompts: string[] = [];
+    const delegateTool = tool({
+      name: "run_in_new_thread",
+      description: "Delegate a task to a child thread",
+      parameters: z.object({ prompt: z.string() }),
+      handler: ({ prompt }) => {
+        invokedPrompts.push(prompt);
+        return Promise.resolve(
+          `Spawned child thread with ${prompt.length} chars`,
+        );
+      },
+    });
+
+    const seenToolResults: string[] = [];
+    const state = { step: 0 };
+
+    await pipe(
+      injectCallModel((receivedHistory) => {
+        for (const e of receivedHistory) {
+          if (e.type === "tool_result") {
+            seenToolResults.push(e.result);
+          }
+        }
+        state.step++;
+        if (state.step === 1) {
+          return Promise.resolve([
+            toolUseTurn({
+              id: "call-bad-placeholder",
+              name: "run_in_new_thread",
+              args: {
+                prompt:
+                  '[Compacted argument (3848 chars) — read full args via read_scratch_file("args-call_17607119070720092229")]',
+              },
+            }),
+          ]);
+        }
+        if (state.step === 2) {
+          return Promise.resolve([
+            toolUseTurn({
+              id: "call-good-prompt",
+              name: "run_in_new_thread",
+              args: {
+                prompt: "Build and verify both PDFs cleanly.",
+              },
+            }),
+          ]);
+        }
+        return Promise.resolve([
+          ownUtteranceTurn("Delegated with full prompt."),
+        ]);
+      }),
+      agentDeps(history),
+    )(() =>
+      runAgent({
+        provider: "moonshot",
+        maxIterations: 6,
+        tools: [delegateTool],
+        skills: [],
+        prompt: "You are a helpful coordinator.",
+        timezoneIANA: "UTC",
+      })
+    )();
+
+    assertEquals(
+      invokedPrompts,
+      ["Build and verify both PDFs cleanly."],
+      "Tool handler must never be invoked with a compacted-argument placeholder",
+    );
+    assert(
+      seenToolResults.some((r) => r.includes("placeholder")),
+      `Expected explicit validation error guiding the model to pass real content, got: ${
+        JSON.stringify(seenToolResults)
+      }`,
+    );
+  },
+);
+
+Deno.test(
   "hardMaxIterations injects wrap-up thought with tools disabled even when progress auditor keeps approving",
   async () => {
     const history: HistoryEvent[] = [

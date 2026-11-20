@@ -27,7 +27,10 @@ import {
   shouldCompactHistory,
 } from "./compaction.ts";
 import { searchPastHistoryToolRaw } from "./historySearch.ts";
-import { compactToolResultsInMemory } from "./continuousCompaction.ts";
+import {
+  compactToolResultsInMemory,
+  containsCompactedToolCallArgsPlaceholder,
+} from "./continuousCompaction.ts";
 import {
   cleanActiveMemoryToolName,
   defaultSegmentGapMs,
@@ -1295,6 +1298,13 @@ async <T extends ZodType>(fc: FunctionCall): Promise<
   const { name, args, id } = fc;
   const toolCallId = id;
   if (!name) throw new Error("Function call name is missing");
+  if (containsCompactedToolCallArgsPlaceholder(args)) {
+    return {
+      toolCallId,
+      result:
+        'Error: Tool arguments contain a history-compaction placeholder ("[Compacted argument ...]"). Compaction placeholders are display-only markers for past tool calls in history and are NOT expanded by the runtime. Re-emit the tool call with the actual full argument content (or call read_scratch_file first if you need to inspect a previous argument).',
+    };
+  }
   let normalizedName = name;
   let normalizedArgs = args;
   if (

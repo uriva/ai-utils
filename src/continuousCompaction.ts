@@ -182,6 +182,33 @@ export const compactedToolCallArgsMarker = "[Compacted argument";
 const toolCallArgsScratchPrefix = "args-";
 const maxInlineCompactedArgChars = 400;
 
+export const isCompactedToolCallArgsPlaceholderString = (
+  value: string,
+): boolean =>
+  value.includes(compactedToolCallArgsMarker) &&
+  value.includes(`${readScratchFileToolName}("${toolCallArgsScratchPrefix}`);
+
+export const containsCompactedToolCallArgsPlaceholder = (
+  value: unknown,
+): boolean => {
+  if (typeof value === "string") {
+    return isCompactedToolCallArgsPlaceholderString(value);
+  }
+  if (Array.isArray(value)) {
+    return value.some(containsCompactedToolCallArgsPlaceholder);
+  }
+  if (isObject(value)) {
+    return Object.values(value).some(containsCompactedToolCallArgsPlaceholder);
+  }
+  return false;
+};
+
+const formatCompactedArgPlaceholder = (
+  charLength: number,
+  scratchId: string,
+): string =>
+  `${compactedToolCallArgsMarker} (${charLength} chars — omitted from history; do NOT pass this placeholder into new tool calls; inspect original via ${readScratchFileToolName}("${scratchId}"))]`;
+
 const compactArgValue = (
   value: unknown,
   scratchId: string,
@@ -196,12 +223,12 @@ const compactArgValue = (
   if (typeof value === "string") {
     return value.length <= maxInlineCompactedArgChars
       ? value
-      : `${compactedToolCallArgsMarker} (${value.length} chars) — read full args via ${readScratchFileToolName}("${scratchId}")]`;
+      : formatCompactedArgPlaceholder(value.length, scratchId);
   }
   const serialized = JSON.stringify(value) ?? "";
   return serialized.length <= maxInlineCompactedArgChars
     ? value
-    : `${compactedToolCallArgsMarker} (${serialized.length} chars) — read full args via ${readScratchFileToolName}("${scratchId}")]`;
+    : formatCompactedArgPlaceholder(serialized.length, scratchId);
 };
 
 const compactParameterRecord = (

@@ -174,8 +174,15 @@ const isTokenLimitExceeded = (error: Error) =>
     (error.message.includes("token count") &&
       error.message.includes("exceeds the maximum number of tokens")));
 
-const isImageProcessingOrInternalError = (error: Error) =>
+const isCorruptedMediaError = (error: Error) =>
   error.message.includes("Unable to process input image") ||
+  error.message.includes("Unable to process input:") ||
+  error.message.includes(
+    "file or media data is empty, corrupted, or malformed",
+  );
+
+const isImageProcessingOrInternalError = (error: Error) =>
+  isCorruptedMediaError(error) ||
   error.message.includes("Internal error encountered") ||
   isInvalidArgumentError(error);
 
@@ -1487,7 +1494,43 @@ const stripAllFileAttachmentsWithPlaceholder =
     return { updatedHistory, replacements };
   };
 
-const stripAllCorruptedFileAttachments = stripAllFileAttachmentsWithPlaceholder(
+const stripMediaAttachmentsWithPlaceholder = (
+  getPlaceholder: (attachments: MediaAttachment[]) => string,
+  preserveEventId?: string,
+) =>
+(
+  events: GeminiHistoryEvent[],
+): {
+  updatedHistory: GeminiHistoryEvent[];
+  replacements: Record<string, GeminiHistoryEvent>;
+} => {
+  const replacements: Record<string, GeminiHistoryEvent> = {};
+  const updatedHistory = map(
+    (event: GeminiHistoryEvent): GeminiHistoryEvent => {
+      if (
+        event.id === preserveEventId ||
+        !("attachments" in event) ||
+        !event.attachments ||
+        empty(event.attachments)
+      ) {
+        return event;
+      }
+      const placeholder = getPlaceholder(event.attachments);
+      const updated = {
+        ...event,
+        ...event.type === "tool_result"
+          ? { result: event.result + placeholder }
+          : { text: ((event as { text?: string }).text ?? "") + placeholder },
+        attachments: undefined,
+      } as GeminiHistoryEvent;
+      replacements[event.id] = updated;
+      return updated;
+    },
+  )(events);
+  return { updatedHistory, replacements };
+};
+
+const stripAllCorruptedFileAttachments = stripMediaAttachmentsWithPlaceholder(
   getCorruptedMediaText,
 );
 
@@ -1499,14 +1542,47 @@ const stripAllOversizedFileAttachments = stripAllFileAttachmentsWithPlaceholder(
   getOversizedMediaText,
 );
 
+const newestMediaEventId = (
+  events: GeminiHistoryEvent[],
+): string | undefined => {
+  const mediaEvents = events.filter(
+    (e) => "attachments" in e && nonempty(e.attachments ?? []),
+  );
+  return mediaEvents.length >= 2
+    ? mediaEvents[mediaEvents.length - 1].id
+    : undefined;
+};
+
 const stripAllCorruptedFileAttachmentsAndRetry = async (
   originalError: Error,
   events: GeminiHistoryEvent[],
   eventsToRequest: (events: GeminiHistoryEvent[]) => GenerateContentParameters,
   disableStreaming?: boolean,
 ): Promise<GeminiOutput> => {
+  const keepNewestId = newestMediaEventId(events);
+  if (keepNewestId) {
+    const olderStripped = stripMediaAttachmentsWithPlaceholder(
+      getCorruptedMediaText,
+      keepNewestId,
+    )(events);
+    if (nonempty(Object.keys(olderStripped.replacements))) {
+      console.warn(
+        "Stripping older media attachments while preserving newest media event due to image processing error:",
+        originalError.message,
+      );
+      try {
+        return await callGemini(
+          eventsToRequest(olderStripped.updatedHistory),
+          disableStreaming,
+        );
+      } catch (retryError) {
+        const err = normalizeError(retryError);
+        if (!isImageProcessingOrInternalError(err)) throw err;
+      }
+    }
+  }
   console.warn(
-    "Stripping all file attachments due to image processing or internal error:",
+    "Stripping all media attachments due to image processing or internal error:",
     originalError.message,
   );
   const nuclear = stripAllCorruptedFileAttachments(events);
